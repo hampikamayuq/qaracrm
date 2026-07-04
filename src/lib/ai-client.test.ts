@@ -119,6 +119,31 @@ describe('ai-client', () => {
     global.fetch = originalFetch;
   });
 
+  it('serializes assistant tool_calls in OpenAI wire format', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ choices: [{ message: { content: 'ok' }, finish_reason: 'stop' }] }),
+    });
+    global.fetch = fetchMock as unknown as typeof fetch;
+
+    const client = createAiClient();
+    await client.chat({
+      model: 'minimax/minimax-m3',
+      system: 'sys',
+      messages: [
+        { role: 'user', content: 'q' },
+        { role: 'assistant', content: null, tool_calls: [{ id: 'tc1', name: 'readLead', arguments: '{}' }] },
+        { role: 'tool', tool_call_id: 'tc1', content: '{}' },
+      ],
+    });
+
+    const [, init] = fetchMock.mock.calls[0];
+    const body = JSON.parse(init.body);
+    const assistant = body.messages.find((m: { role: string }) => m.role === 'assistant');
+    expect(assistant.tool_calls[0]).toEqual({ id: 'tc1', type: 'function', function: { name: 'readLead', arguments: '{}' } });
+    global.fetch = originalFetch;
+  });
+
   it('passes response_format when provided', async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,

@@ -63,11 +63,25 @@ export const createAiClient = (overrides?: {
     throw new Error('OPENROUTER_API_KEY is required');
   }
 
+  // Formato wire da OpenAI para tool_calls difere do nosso ToolCall interno
+  const toWire = (m: ChatMessage): Record<string, unknown> =>
+    m.tool_calls
+      ? {
+          role: m.role,
+          content: m.content,
+          tool_calls: m.tool_calls.map((tc) => ({
+            id: tc.id,
+            type: 'function',
+            function: { name: tc.name, arguments: tc.arguments },
+          })),
+        }
+      : (m as unknown as Record<string, unknown>);
+
   return {
     async chat(params: ChatParams): Promise<ChatResult> {
       const body: Record<string, unknown> = {
         model: params.model,
-        messages: [{ role: 'system', content: params.system }, ...params.messages],
+        messages: [{ role: 'system', content: params.system }, ...params.messages.map(toWire)],
       };
       if (params.tools) body.tools = params.tools;
       if (params.responseFormat) body.response_format = params.responseFormat;
