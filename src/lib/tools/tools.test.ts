@@ -1,0 +1,146 @@
+import { describe, it, expect, vi } from 'vitest';
+import type { DataApi } from 'src/lib/data';
+import { readLead } from './readLead';
+import { readConversationHistory } from './readConversationHistory';
+import { listProfessionals } from './listProfessionals';
+import { searchKnowledge } from './searchKnowledge';
+import { updateLead } from './updateLead';
+import { updateConversation } from './updateConversation';
+import { assignTag } from './assignTag';
+import { createActivity } from './createActivity';
+import { sendWhatsApp } from './sendWhatsApp';
+import { handoffToHuman } from './handoffToHuman';
+import { tawanyTools, ALL_TOOLS } from './index';
+
+const UUID = '00000000-0000-4000-8000-000000000000';
+const UUID2 = '00000000-0000-4000-8000-000000000001';
+
+const api = (over: Partial<DataApi> = {}): DataApi => ({
+  get: vi.fn().mockResolvedValue(null),
+  list: vi.fn().mockResolvedValue([]),
+  create: vi.fn().mockResolvedValue({ id: 'created' }),
+  update: vi.fn().mockResolvedValue({ id: 'updated' }),
+  ...over,
+});
+
+describe('read tools', () => {
+  it('readLead returns null for missing lead', async () => {
+    const r = await readLead.execute({ leadId: UUID }, api());
+    expect(JSON.parse(r)).toBeNull();
+  });
+
+  it('readLead returns lead when found', async () => {
+    const ctx = api({ get: vi.fn().mockResolvedValue({ id: 'abc', score: 75 }) });
+    const r = await readLead.execute({ leadId: UUID }, ctx);
+    expect(JSON.parse(r)).toEqual({ id: 'abc', score: 75 });
+  });
+
+  it('readConversationHistory returns ascending order from chatMessage', async () => {
+    const list = vi.fn().mockResolvedValue([{ id: 'm3' }, { id: 'm2' }, { id: 'm1' }]);
+    const r = await readConversationHistory.execute({ conversationId: UUID, limit: 3 }, api({ list }));
+    expect(list).toHaveBeenCalledWith('chatMessage', expect.objectContaining({ limit: 3 }));
+    expect(JSON.parse(r)[0].id).toBe('m1');
+  });
+
+  it('listProfessionals filters by UPPER_SNAKE specialty', async () => {
+    const list = vi.fn().mockResolvedValue([]);
+    await listProfessionals.execute({ specialty: 'CIRURGIA' }, api({ list }));
+    expect(list).toHaveBeenCalledWith('professional', expect.objectContaining({
+      filter: { active: { eq: true }, specialty: { eq: 'CIRURGIA' } },
+    }));
+  });
+
+  it('searchKnowledge returns top-3 with fallback', async () => {
+    const hit = JSON.parse(await searchKnowledge.execute({ query: 'estacionamento copacabana' }));
+    expect(hit[0].id).toBe('endereco-copacabana');
+    const fallback = JSON.parse(await searchKnowledge.execute({ query: 'xyzabc' }));
+    expect(fallback.length).toBe(3);
+  });
+});
+
+describe('write tools', () => {
+  it('updateLead allows whitelisted fields', async () => {
+    const update = vi.fn().mockResolvedValue({ id: 'l1' });
+    await updateLead.execute({ leadId: UUID, updates: { score: 75 } }, api({ update }));
+    expect(update).toHaveBeenCalledWith('lead', UUID, { score: 75 });
+  });
+
+  it('updateLead turns notes into a timeline note', async () => {
+    const create = vi.fn().mockResolvedValue({ id: 'n1' });
+    await updateLead.execute({ leadId: UUID, updates: { notes: 'quer agendar' } }, api({ create }));
+    expect(create).toHaveBeenCalledWith('note', { title: 'quer agendar' });
+    expect(create).toHaveBeenCalledWith('noteTarget', { noteId: 'n1', targetLeadId: UUID });
+  });
+
+  it('updateConversation updates status', async () => {
+    const update = vi.fn().mockResolvedValue({ id: 'c1' });
+    await updateConversation.execute({ conversationId: UUID, status: 'RESOLVED' }, api({ update }));
+    expect(update).toHaveBeenCalledWith('conversation', UUID, { status: 'RESOLVED' });
+  });
+
+  it('assignTag appends to the MULTI_SELECT tags array', async () => {
+    const get = vi.fn().mockResolvedValue({ id: UUID, tags: ['NOVO'] });
+    const update = vi.fn().mockResolvedValue({ id: UUID });
+    await assignTag.execute({ targetType: 'lead', targetId: UUID, tag: 'LEAD_QUENTE' }, api({ get, update }));
+    expect(update).toHaveBeenCalledWith('lead', UUID, { tags: ['NOVO', 'LEAD_QUENTE'] });
+  });
+
+  it('assignTag is idempotent for existing tag', async () => {
+    const get = vi.fn().mockResolvedValue({ id: UUID, tags: ['VIP'] });
+    const update = vi.fn();
+    const r = await assignTag.execute({ targetType: 'lead', targetId: UUID, tag: 'VIP' }, api({ get, update }));
+    expect(JSON.parse(r).unchanged).toBe(true);
+    expect(update).not.toHaveBeenCalled();
+  });
+
+  it('createActivity creates note + noteTarget with correct FK', async () => {
+    const create = vi.fn().mockResolvedValue({ id: 'n1' });
+    await createActivity.execute({ targetType: 'conversation', targetId: UUID, body: 'Tawany respondeu' }, api({ create }));
+    expect(create).toHaveBeenCalledWith('noteTarget', { noteId: 'n1', targetConversationId: UUID });
+  });
+
+  it('sendWhatsApp records an outbound chatMessage (stub)', async () => {
+    const create = vi.fn().mockResolvedValue({ id: 'm1' });
+    const update = vi.fn().mockResolvedValue({ id: 'c1' });
+    const r = await sendWhatsApp.execute({ conversationId: UUID, text: 'Olá' }, api({ create, update }));
+    expect(create).toHaveBeenCalledWith('chatMessage', expect.objectContaining({ direction: 'OUT', body: 'Olá' }));
+    expect(JSON.parse(r).stub).toBe(true);
+  });
+
+  it('handoffToHuman sets needsHuman + status', async () => {
+    const update = vi.fn().mockResolvedValue({ id: 'c1' });
+    await handoffToHuman.execute({ conversationId: UUID, reason: 'urgencia' }, api({ update }));
+    expect(update).toHaveBeenCalledWith('conversation', UUID, {
+      needsHuman: true,
+      handoffReason: 'urgencia',
+      status: 'NEEDS_HUMAN',
+    });
+  });
+});
+
+describe('tawanyTools index', () => {
+  it('exports 12 tools with OpenAI-compatible schema', () => {
+    expect(ALL_TOOLS).toHaveLength(12);
+    for (const entry of tawanyTools.schema) {
+      expect(entry.type).toBe('function');
+      expect(entry.function.parameters).toHaveProperty('properties');
+    }
+  });
+
+  it('execute dispatches by name and validates args', async () => {
+    const get = vi.fn().mockResolvedValue({ id: 'l1' });
+    const r = await tawanyTools.execute('readLead', JSON.stringify({ leadId: UUID }), api({ get }));
+    expect(JSON.parse(r).id).toBe('l1');
+  });
+
+  it('execute throws on unknown tool and invalid JSON', async () => {
+    await expect(tawanyTools.execute('nope', '{}', api())).rejects.toThrow(/Unknown tool/);
+    await expect(tawanyTools.execute('readLead', 'not json', api())).rejects.toThrow(/Invalid JSON/);
+  });
+
+  it('enum schema carries UPPER_SNAKE values', () => {
+    const spec = tawanyTools.schema.find((s) => s.function.name === 'updateLead');
+    const params = spec?.function.parameters as { properties: { updates: { properties: { intent: { enum: string[] } } } } };
+    expect(params.properties.updates.properties.intent.enum).toContain('CIRURGIA');
+  });
+});
