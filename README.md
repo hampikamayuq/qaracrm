@@ -35,3 +35,12 @@ Validated against the local `twenty-app-dev` Docker image:
 - **App config file**: `src/application-config.ts` (hyphen). Entities auto-discovered from `src/`.
 - **LF logs**: `yarn twenty dev:function:logs --functionName <name>` streams only NEW entries — attach before firing.
 - **Sync**: `yarn twenty dev --once` (one-shot) / `--dry-run` to preview.
+
+### Object-layer notes (2026-07-04)
+
+- SELECT/MULTI_SELECT option `value` MUST be UPPER_SNAKE_CASE (`'NOVO'`, `'LEAD_QUENTE'`); `label` stays human. `defaultValue` quotes the UPPER value: `"'NOVO'"`.
+- `message` nameSingular collides with the built-in email `message` object → ours is `chatMessage`/`chatMessages`.
+- `address` is a reserved field name → `unitAddress`.
+- Custom objects automatically receive `searchVector`, `timelineActivities`, `attachments`, `noteTargets`, `taskTargets` — do NOT declare them. Built-in Task/Note attach to custom objects out of the box (we dropped the custom `task` object for this reason).
+- Tags are MULTI_SELECT fields on lead/patient/conversation (8 fixed colored options) — replaced the custom tag object + 3 N:M join objects.
+- Relations = a pair of `defineField` files (M2O with `joinColumnName` + O2M inverse), cross-referencing UIDs; built-in targets via `STANDARD_OBJECT_UNIVERSAL_IDENTIFIERS` from `twenty-sdk/define`.
