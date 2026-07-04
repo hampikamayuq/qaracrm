@@ -23,3 +23,15 @@ Run `yarn twenty help` to list all available commands.
 - [Twenty Apps documentation](https://docs.twenty.com/developers/extend/apps/getting-started/quick-start)
 - [twenty-sdk CLI reference](https://www.npmjs.com/package/twenty-sdk)
 - [Discord](https://discord.gg/cx5n4Jzs57)
+
+## SDK notes (spike 2026-07-04)
+
+Validated against the local `twenty-app-dev` Docker image:
+
+- **DB-event trigger payload**: `event.properties.after` carries the FULL created record (typed via `DatabaseEventPayload<ObjectRecordCreateEvent<T>>`). There is no trigger-level filter — gate inside the handler.
+- **CoreApiClient single-record query**: `client.query({ spike: { __args: { filter: { id: { eq } } }, id: true, name: true } })` → `result.spike` is the record object itself (NOT an array).
+- **REST create**: `POST /rest/<namePlural>` with Bearer key → `data.create<Singular>`.
+- **Objects**: require `nameSingular/namePlural/labelSingular/labelPlural`, per-field `universalIdentifier`, and `labelIdentifierFieldMetadataUniversalIdentifier`. SELECT options need `{ id, value, label, position, color }` and quoted defaultValue (`"'DRAFT'"`).
+- **App config file**: `src/application-config.ts` (hyphen). Entities auto-discovered from `src/`.
+- **LF logs**: `yarn twenty dev:function:logs --functionName <name>` streams only NEW entries — attach before firing.
+- **Sync**: `yarn twenty dev --once` (one-shot) / `--dry-run` to preview.
