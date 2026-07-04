@@ -11,6 +11,7 @@ export default defineApplicationRole({
   description: `${APP_DISPLAY_NAME} default function role`,
   canReadAllObjectRecords: true,
   canUpdateAllObjectRecords: true,
-  canSoftDeleteAllObjectRecords: true,
+  // canSoftDeleteAllObjectRecords intentionally false: Tawany never soft-deletes.
+  // Adding it here would be over-privilege (Ponytail review MEDIUM-2).
   canDestroyAllObjectRecords: false,
 });

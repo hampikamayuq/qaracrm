@@ -21,7 +21,7 @@ export const sendWhatsApp = {
       agentHandled: true,
     });
     await ctx.update('conversation', args.conversationId, { lastMessageAt: new Date().toISOString() });
-    console.log(`[sendWhatsApp STUB] conv=${args.conversationId} text=${args.text.slice(0, 80)}`);
+    // No console.log of message body — outbound text is patient PHI.
     return JSON.stringify({ ok: true, stub: true, messageId: message.id });
   },
 };
