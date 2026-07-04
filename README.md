@@ -1,22 +1,53 @@
-This is a [Twenty](https://twenty.com) application bootstrapped with [`create-twenty-app`](https://www.npmjs.com/package/create-twenty-app).
+# Qara Clinic
+
+Twenty CRM application for a Brazilian aesthetic clinic. Adds a Tawany AI
+concierge (WhatsApp/Instagram), a lead kanban, and a WhatsApp inbox on top
+of Twenty's standard CRM.
+
+Built with the [Twenty SDK](https://www.npmjs.com/package/create-twenty-app)
+(`twenty-sdk/define`).
+
+## What's in the box
+
+| Module | Path | What it does |
+| --- | --- | --- |
+| Objects | `src/objects/` | `lead`, `patient`, `conversation`, `chatMessage`, `professional`, `service`, `clinicUnit` |
+| Tawany agent | `src/agents/tawany.agent.ts` | Patient-facing AI concierge (OpenRouter) |
+| Tawany handler | `src/logic-functions/tawany-handler.ts` | DB-event LF: classifies inbound messages, replies via agent, escalates to human |
+| Summarize | `src/logic-functions/summarize-conversation.ts` | On-demand conversation summarization |
+| Skills | `src/skills/` | `tawany-persona`, `qara-classifier`, `qara-knowledge` |
+| Front-components | `src/front-components/` | `whatsapp-inbox`, `lead-kanban`, `tawany-panel` |
+| Layouts | `src/page-layouts/` + `src/navigation-menu-items/` | Inbox + Kanban pages reachable from the sidebar |
+| Commands | `src/command-menu-items/` | Cmd+K entries to open Inbox / Kanban |
+| Default role | `src/default-role.ts` | Function role used by Tawany LFs (read/update records, no hard delete) |
+| Server variables | `src/application-config.ts` | `OPENROUTER_API_KEY` (secret, required), `OPENROUTER_BASE_URL`, `DEFAULT_MODEL_PATIENT`, `DEFAULT_MODEL_INTERNAL` |
 
 ## Getting Started
 
-This app was scaffolded with a local Twenty server running at [http://localhost:2020](http://localhost:2020).
+Local Twenty dev server runs at [http://localhost:2020](http://localhost:2020).
+Login with `tim@apple.dev` / `tim@apple.dev`.
 
-Login with the default development credentials: `tim@apple.dev` / `tim@apple.dev`.
+```bash
+yarn twenty docker:start        # start the local Twenty stack (one-time)
+yarn twenty docker:status       # check status
+yarn twenty dev                 # build + sync + watch
+yarn twenty dev --once          # one-shot sync (CI / smoke)
+```
 
-Run `yarn twenty help` to list all available commands.
+Open the workspace, install the app, and the Tawany items appear in the
+left sidebar.
 
 ## Useful Commands
 
-- `yarn twenty dev` - Start the development server and sync your app
-- `yarn twenty docker:status` - Check the local Twenty server status
-- `yarn twenty docker:start` - Start the local Twenty server
-- `yarn lint` - Lint the project with oxlint
-- `yarn typecheck` - Type-check the project
-- `yarn test:unit` - Run unit tests
-- `yarn test` - Run integration tests
+- `yarn twenty dev` — build + sync + watch
+- `yarn twenty dev --once` — one-shot sync
+- `yarn twenty dev:build` — build manifest only
+- `yarn twenty dev:add <entity>` — scaffold a new object / field / LF / view / etc.
+- `yarn typecheck` — TS check via tsgo
+- `yarn lint` — oxlint
+- `yarn test:unit` — Vitest (58 tests)
+- `yarn test` — integration tests
+- `bash scripts/smoke.sh` — typecheck + tests + lint + build (use before opening a PR)
 
 ## Learn More
 
@@ -35,6 +66,7 @@ Validated against the local `twenty-app-dev` Docker image:
 - **App config file**: `src/application-config.ts` (hyphen). Entities auto-discovered from `src/`.
 - **LF logs**: `yarn twenty dev:function:logs --functionName <name>` streams only NEW entries — attach before firing.
 - **Sync**: `yarn twenty dev --once` (one-shot) / `--dry-run` to preview.
+- **Default role**: `defineApplicationRole()` in `src/default-role.ts`. The `defaultRoleUniversalIdentifier` field on `defineApplication()` is deprecated — omit it and let the sync auto-link the role file by UUID.
 
 ### Object-layer notes (2026-07-04)
 
