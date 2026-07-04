@@ -44,3 +44,5 @@ Validated against the local `twenty-app-dev` Docker image:
 - Custom objects automatically receive `searchVector`, `timelineActivities`, `attachments`, `noteTargets`, `taskTargets` — do NOT declare them. Built-in Task/Note attach to custom objects out of the box (we dropped the custom `task` object for this reason).
 - Tags are MULTI_SELECT fields on lead/patient/conversation (8 fixed colored options) — replaced the custom tag object + 3 N:M join objects.
 - Relations = a pair of `defineField` files (M2O with `joinColumnName` + O2M inverse), cross-referencing UIDs; built-in targets via `STANDARD_OBJECT_UNIVERSAL_IDENTIFIERS` from `twenty-sdk/define`.
+- **Container DNS**: if LF execution fails with `EAI_AGAIN registry.yarnpkg.com`, the twenty-app-dev container lost DNS (systemd-resolved + Docker). Ephemeral fix: `docker exec -u root <container> sh -c 'printf "nameserver 8.8.8.8\n" > /etc/resolv.conf'`. Durable fix: add `{"dns": ["8.8.8.8"]}` to /etc/docker/daemon.json (needs root).
+- FULL_NAME create input is composite: `{ name: { firstName, lastName } }`.
