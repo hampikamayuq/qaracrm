@@ -34,12 +34,16 @@ const MessageThread = ({ conversationId }: { conversationId: string }) => {
 
   useEffect(() => {
     void (async () => {
-      const m = await createDataApi().list('chatMessage', {
-        filter: { conversationId: { eq: conversationId } },
-        orderBy: { sentAt: 'ASC' },
-        select: { id: true, direction: true, body: true, sentAt: true },
-      });
-      setMessages(m as MessageRow[]);
+      try {
+        const m = await createDataApi().list('chatMessage', {
+          filter: { conversationId: { eq: conversationId } },
+          orderBy: { sentAt: 'ASC' },
+          select: { id: true, direction: true, body: true, sentAt: true },
+        });
+        setMessages(m as MessageRow[]);
+      } catch (err) {
+        console.error('MessageThread: failed to load messages', err);
+      }
     })();
   }, [conversationId]);
 
@@ -99,6 +103,7 @@ export const WhatsappInbox = () => {
   const [selected, setSelected] = useState<string | null>(null);
 
   const load = async (): Promise<void> => {
+    try {
     const c = (await createDataApi().list('conversation', {
       filter: { status: { in: ['OPEN', 'NEEDS_HUMAN'] } },
       orderBy: { lastMessageAt: 'DESC' },
@@ -113,6 +118,9 @@ export const WhatsappInbox = () => {
     });
     setConversations(sorted);
     if (sorted.length > 0) setSelected((prev) => prev ?? sorted[0].id);
+    } catch (err) {
+      console.error('WhatsappInbox: failed to load conversations', err);
+    }
   };
 
   useEffect(() => {

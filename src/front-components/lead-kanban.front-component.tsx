@@ -54,11 +54,15 @@ export const LeadKanban = () => {
   const [leads, setLeads] = useState<LeadRow[]>([]);
 
   const load = async (): Promise<void> => {
-    const l = (await createDataApi().list('lead', {
-      orderBy: { score: 'DESC' },
-      select: { id: true, name: { firstName: true, lastName: true }, stage: true, score: true, whatsapp: { primaryPhoneNumber: true } },
-    })) as LeadRow[];
-    setLeads(l);
+    try {
+      const l = (await createDataApi().list('lead', {
+        orderBy: { score: 'DESC' },
+        select: { id: true, name: { firstName: true, lastName: true }, stage: true, score: true, whatsapp: { primaryPhoneNumber: true } },
+      })) as LeadRow[];
+      setLeads(l);
+    } catch (err) {
+      console.error('LeadKanban: failed to load leads', err);
+    }
   };
 
   useEffect(() => { void load(); }, []);

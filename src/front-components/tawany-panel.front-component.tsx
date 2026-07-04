@@ -13,11 +13,15 @@ export const TawanyPanel = () => {
 
   useEffect(() => {
     void (async () => {
-      const c = (await createDataApi().list('conversation', {
-        select: { id: true, needsHuman: true, status: true },
-      })) as Array<{ needsHuman: boolean; status: string }>;
-      setNeedsHuman(c.filter((x) => x.needsHuman).length);
-      setOpen(c.filter((x) => x.status === 'OPEN').length);
+      try {
+        const c = (await createDataApi().list('conversation', {
+          select: { id: true, needsHuman: true, status: true },
+        })) as Array<{ needsHuman: boolean; status: string }>;
+        setNeedsHuman(c.filter((x) => x.needsHuman).length);
+        setOpen(c.filter((x) => x.status === 'OPEN').length);
+      } catch (err) {
+        console.error('TawanyPanel: failed to load counts', err);
+      }
     })();
   }, []);
 
