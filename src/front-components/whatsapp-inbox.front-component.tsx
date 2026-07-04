@@ -7,6 +7,7 @@ type ConversationRow = {
   id: string;
   externalId: string;
   status: string;
+  channel: 'WHATSAPP' | 'INSTAGRAM';
   needsHuman: boolean;
   lastMessageAt: string;
 };
@@ -84,7 +85,11 @@ const ConversationList = ({ conversations, selected, onSelect, onResolve }: Conv
               cursor: 'pointer',
             }}
           >
-            <strong>{c.needsHuman ? '🔴 ' : ''}{c.externalId}</strong>
+            <strong>
+              {c.needsHuman ? '🔴 ' : ''}
+              {c.channel === 'INSTAGRAM' ? '📷 ' : '💬 '}
+              {c.externalId}
+            </strong>
             <div style={{ fontSize: '12px', color: '#777' }}>{c.status}</div>
           </button>
           {c.id === selected && (
@@ -107,7 +112,7 @@ export const WhatsappInbox = () => {
     const c = (await createDataApi().list('conversation', {
       filter: { status: { in: ['OPEN', 'NEEDS_HUMAN'] } },
       orderBy: { lastMessageAt: 'DESC' },
-      select: { id: true, externalId: true, status: true, needsHuman: true, lastMessageAt: true },
+      select: { id: true, externalId: true, status: true, channel: true, needsHuman: true, lastMessageAt: true },
     })) as ConversationRow[];
     // Sort client-side: needsHuman first, then lastMessageAt DESC
     const sorted = [...c].sort((a, b) => {
