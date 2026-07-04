@@ -7,7 +7,6 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-readonly SCRIPT_NAME="$(basename "$0")"
 readonly TIMESTAMP="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
 
 # ANSI colors (auto-disabled if not a TTY).
