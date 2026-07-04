@@ -31,9 +31,15 @@ export const ALL_TOOLS: TawanyTool[] = [
   updateConversation,
   assignTag,
   createActivity,
-  sendWhatsApp,
   handoffToHuman,
 ];
+
+// ponytail: sendWhatsApp stays out of the model schema on purpose — the
+// handler calls it after a final, guard-passed reply, so letting the model
+// invoke it AND return a free-text reply in the same iteration is a double-send.
+// Logic-functions and other handlers import INTERNAL_TOOLS by name and call
+// the tool function directly.
+const INTERNAL_TOOLS: TawanyTool[] = [sendWhatsApp];
 
 const zodFieldToJsonSchema = (schema: z.ZodTypeAny): Record<string, unknown> => {
   if (schema instanceof z.ZodOptional) return zodFieldToJsonSchema(schema.unwrap() as z.ZodTypeAny);
@@ -71,7 +77,7 @@ export const tawanyTools = {
     },
   })),
   async execute(name: string, argsJson: string, ctx: DataApi): Promise<string> {
-    const tool = ALL_TOOLS.find((t) => t.name === name);
+    const tool = [...ALL_TOOLS, ...INTERNAL_TOOLS].find((t) => t.name === name);
     if (!tool) throw new Error(`Unknown tool: ${name}`);
     let parsed: unknown;
     try {

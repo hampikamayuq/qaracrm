@@ -13,7 +13,6 @@ import { handoffToHuman } from './handoffToHuman';
 import { tawanyTools, ALL_TOOLS } from './index';
 
 const UUID = '00000000-0000-4000-8000-000000000000';
-const UUID2 = '00000000-0000-4000-8000-000000000001';
 
 const api = (over: Partial<DataApi> = {}): DataApi => ({
   get: vi.fn().mockResolvedValue(null),
@@ -119,8 +118,11 @@ describe('write tools', () => {
 });
 
 describe('tawanyTools index', () => {
-  it('exports 12 tools with OpenAI-compatible schema', () => {
-    expect(ALL_TOOLS).toHaveLength(12);
+  it('exports 11 LLM-callable tools with OpenAI-compatible schema', () => {
+    // sendWhatsApp is now INTERNAL only (handler-side, not model-callable) to
+    // prevent the model from sending a free-text reply AND calling sendWhatsApp
+    // in the same iteration (double-send).
+    expect(ALL_TOOLS).toHaveLength(11);
     for (const entry of tawanyTools.schema) {
       expect(entry.type).toBe('function');
       expect(entry.function.parameters).toHaveProperty('properties');

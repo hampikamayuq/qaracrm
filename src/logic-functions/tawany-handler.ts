@@ -99,12 +99,32 @@ export default defineLogicFunction({
 
     const data = createDataApi();
     try {
+      // Gate: skip if conversation is no longer OPEN. Prevents Tawany from
+      // re-engaging after a handoff / resolution / archive.
+      const conv = await data.get('conversation', message.conversationId, {
+        id: true,
+        status: true,
+        needsHuman: true,
+      });
+      if (!conv || conv.needsHuman === true || (typeof conv.status === 'string' && conv.status !== 'OPEN')) {
+        console.log(JSON.stringify({
+          event: 'tawany_run',
+          messageId: message.id,
+          status: 'skipped',
+          reason: 'conversation_closed',
+          convStatus: conv?.status,
+          convNeedsHuman: conv?.needsHuman,
+        }));
+        return;
+      }
+
       let ai;
       try {
         ai = createAiClient();
       } catch (e) {
         // sem OPENROUTER_API_KEY configurada: comportamento de produção é handoff, não crash
-        await handoff(message.conversationId, `config: ${(e as Error).message}`.slice(0, 200), data);
+        const h = await handoff(message.conversationId, `config: ${(e as Error).message}`.slice(0, 200), data);
+        if (!h.ok) console.error('[tawany-handler] config handoff failed:', h.error);
         console.log(JSON.stringify({ event: 'tawany_run', messageId: message.id, status: 'handoff', reason: 'config' }));
         return;
       }
