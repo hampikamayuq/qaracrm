@@ -34,6 +34,7 @@ describe('CoreApiClient', () => {
         id: true,
       },
     });
+    if (!created.createNote) throw new Error('createNote returned undefined');
     expect(created.createNote.id).toBeDefined();
 
     await client.mutation({

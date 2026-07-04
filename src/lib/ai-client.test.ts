@@ -1,0 +1,144 @@
+import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { createAiClient } from './ai-client';
+
+describe('ai-client', () => {
+  const originalFetch = global.fetch;
+
+  beforeEach(() => {
+    process.env.OPENROUTER_API_KEY = 'test-key';
+    process.env.OPENROUTER_BASE_URL = 'https://openrouter.ai/api/v1';
+  });
+
+  it('returns parsed content from OpenRouter', async () => {
+    const mockResponse = {
+      choices: [
+        {
+          message: { role: 'assistant', content: 'hello' },
+          finish_reason: 'stop',
+        },
+      ],
+      usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
+    };
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => mockResponse,
+    }) as unknown as typeof fetch;
+
+    const client = createAiClient();
+    const result = await client.chat({
+      model: 'minimax/minimax-m3',
+      system: 'You are Tawany.',
+      messages: [{ role: 'user', content: 'oi' }],
+    });
+
+    expect(result.content).toBe('hello');
+    expect(result.finishReason).toBe('stop');
+    expect(result.usage.totalTokens).toBe(15);
+    global.fetch = originalFetch;
+  });
+
+  it('throws on non-OK response', async () => {
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 401,
+      text: async () => 'unauthorized',
+    }) as unknown as typeof fetch;
+
+    const client = createAiClient();
+    await expect(
+      client.chat({
+        model: 'minimax/minimax-m3',
+        system: 'sys',
+        messages: [{ role: 'user', content: 'oi' }],
+      }),
+    ).rejects.toThrow(/401/);
+    global.fetch = originalFetch;
+  });
+
+  it('passes auth and body correctly', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        choices: [{ message: { content: 'ok' }, finish_reason: 'stop' }],
+      }),
+    });
+    global.fetch = fetchMock as unknown as typeof fetch;
+
+    const client = createAiClient();
+    await client.chat({
+      model: 'deepseek/deepseek-chat',
+      system: 'sys',
+      messages: [{ role: 'user', content: 'q' }],
+      tools: [{ type: 'function', function: { name: 'foo', parameters: {} } }],
+    });
+
+    const [, init] = fetchMock.mock.calls[0];
+    const body = JSON.parse(init.body);
+    expect(init.headers['Authorization']).toBe('Bearer test-key');
+    expect(body.model).toBe('deepseek/deepseek-chat');
+    expect(body.tools).toHaveLength(1);
+    global.fetch = originalFetch;
+  });
+
+  it('extracts tool_calls from response', async () => {
+    const mockResponse = {
+      choices: [
+        {
+          message: {
+            role: 'assistant',
+            content: null,
+            tool_calls: [
+              {
+                id: 'call_123',
+                type: 'function',
+                function: { name: 'readLead', arguments: '{"leadId":"abc"}' },
+              },
+            ],
+          },
+          finish_reason: 'tool_calls',
+        },
+      ],
+    };
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => mockResponse,
+    }) as unknown as typeof fetch;
+
+    const client = createAiClient();
+    const result = await client.chat({
+      model: 'minimax/minimax-m3',
+      system: 'sys',
+      messages: [{ role: 'user', content: 'buscar lead' }],
+      tools: [{ type: 'function', function: { name: 'readLead', parameters: {} } }],
+    });
+
+    expect(result.finishReason).toBe('tool_calls');
+    expect(result.toolCalls).toHaveLength(1);
+    expect(result.toolCalls[0].name).toBe('readLead');
+    expect(JSON.parse(result.toolCalls[0].arguments)).toEqual({ leadId: 'abc' });
+    global.fetch = originalFetch;
+  });
+
+  it('passes response_format when provided', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        choices: [{ message: { content: '{}' }, finish_reason: 'stop' }],
+      }),
+    });
+    global.fetch = fetchMock as unknown as typeof fetch;
+
+    const client = createAiClient();
+    await client.chat({
+      model: 'minimax/minimax-m3',
+      system: 'sys',
+      messages: [{ role: 'user', content: 'q' }],
+      responseFormat: { type: 'json_object' },
+    });
+
+    const [, init] = fetchMock.mock.calls[0];
+    const body = JSON.parse(init.body);
+    expect(body.response_format).toEqual({ type: 'json_object' });
+    global.fetch = originalFetch;
+  });
+});
