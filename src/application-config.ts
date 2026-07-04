@@ -31,5 +31,29 @@ export default defineApplication({
         'Default model for summarize-conversation (internal). Defaults to deepseek/deepseek-chat.',
       isRequired: false,
     },
+    META_ACCESS_TOKEN: {
+      description:
+        'Meta Cloud API access token (WhatsApp Business). Optional: without it sendWhatsApp keeps Fase 1 stub behavior (records outbound, no real send).',
+      isSecret: true,
+      isRequired: false,
+    },
+    META_PHONE_NUMBER_ID: {
+      description: 'WhatsApp Business phone number ID (Meta Cloud API).',
+      isRequired: false,
+    },
+    META_VERIFY_TOKEN: {
+      description: 'Webhook verify token (GET handshake, hub.verify_token).',
+      isSecret: true,
+      isRequired: false,
+    },
+    META_APP_SECRET: {
+      description: 'Meta app secret used to verify X-Hub-Signature-256 on inbound webhooks.',
+      isSecret: true,
+      isRequired: false,
+    },
+    META_GRAPH_BASE_URL: {
+      description: 'Graph API base URL. Defaults to https://graph.facebook.com/v20.0.',
+      isRequired: false,
+    },
   },
 });
