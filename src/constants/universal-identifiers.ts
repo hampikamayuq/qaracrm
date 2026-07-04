@@ -10,6 +10,7 @@ export const MAIN_PAGE_LAYOUT_TAB_UNIVERSAL_IDENTIFIER = '30eccdec-c4ba-4b40-899
 export const MAIN_PAGE_WIDGET_UNIVERSAL_IDENTIFIER = '8e3306c5-343e-4286-b857-f420ec696013';
 export const MAIN_PAGE_NAVIGATION_MENU_ITEM_UNIVERSAL_IDENTIFIER =
   '6faa25d4-aadf-477f-a96a-1484c95ed1af';
+export const LEAD_KANBAN_FRONT_COMPONENT_UNIVERSAL_IDENTIFIER = 'f6f45ad6-980d-464e-b21a-95fdf1d4bc34';
 
 // Universal identifiers shared across entity definitions (UUID v4).
 
