@@ -119,6 +119,27 @@ export default defineObject({
       name: 'convertedAt',
       label: 'Convertido em',
       icon: 'IconCalendarCheck',
+    },
+    {
+      universalIdentifier: '7a9c0d4f-2e9b-4d1f-9d0c-3a4b1e7f8a01',
+      type: FieldType.RICH_TEXT,
+      name: 'notes',
+      label: 'Observações',
+      icon: 'IconNotes',
+    },
+    {
+      universalIdentifier: '2f4b8a1e-9c3d-4d2a-8e7b-1c5d9f3a6b02',
+      type: FieldType.DATE_TIME,
+      name: 'lastFollowUpAt',
+      label: 'Último Follow-up',
+      icon: 'IconCalendarEvent',
+    },
+    {
+      universalIdentifier: '8d6e2c5a-3b1f-4a7d-9c4e-5f8b2d1a7c03',
+      type: FieldType.DATE_TIME,
+      name: 'nextFollowUpAt',
+      label: 'Próximo Follow-up',
+      icon: 'IconCalendarPlus',
     }
   ],
 });
