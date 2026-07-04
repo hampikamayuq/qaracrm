@@ -98,12 +98,46 @@ describe('write tools', () => {
     expect(create).toHaveBeenCalledWith('noteTarget', { noteId: 'n1', targetConversationId: UUID });
   });
 
-  it('sendWhatsApp records an outbound chatMessage (stub)', async () => {
+  it('sendWhatsApp records outbound without sending when Meta is not configured', async () => {
+    const get = vi.fn().mockResolvedValue({ id: UUID, channel: 'WHATSAPP', externalId: '5511999998888' });
     const create = vi.fn().mockResolvedValue({ id: 'm1' });
     const update = vi.fn().mockResolvedValue({ id: 'c1' });
-    const r = await sendWhatsApp.execute({ conversationId: UUID, text: 'Olá' }, api({ create, update }));
-    expect(create).toHaveBeenCalledWith('chatMessage', expect.objectContaining({ direction: 'OUT', body: 'Olá' }));
-    expect(JSON.parse(r).stub).toBe(true);
+    const r = await sendWhatsApp.execute({ conversationId: UUID, text: 'Olá' }, api({ get, create, update }));
+    expect(create).toHaveBeenCalledWith(
+      'chatMessage',
+      expect.objectContaining({ direction: 'OUT', body: 'Olá', deliveryStatus: 'PENDING' }),
+    );
+    expect(JSON.parse(r)).toMatchObject({ ok: true, sent: false, messageId: 'm1' });
+  });
+
+  it('sendWhatsApp sends via Meta and stores the wamid when configured', async () => {
+    process.env.META_ACCESS_TOKEN = 'tok';
+    process.env.META_PHONE_NUMBER_ID = 'phone';
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ messages: [{ id: 'wamid.SENT1' }] }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    try {
+      const get = vi.fn().mockResolvedValue({ id: UUID, channel: 'WHATSAPP', externalId: '5511999998888' });
+      const create = vi.fn().mockResolvedValue({ id: 'm2' });
+      const r = await sendWhatsApp.execute({ conversationId: UUID, text: 'Olá' }, api({ get, create }));
+      expect(fetchMock).toHaveBeenCalledOnce();
+      expect(create).toHaveBeenCalledWith(
+        'chatMessage',
+        expect.objectContaining({ externalId: 'wamid.SENT1', deliveryStatus: 'SENT' }),
+      );
+      expect(JSON.parse(r)).toMatchObject({ ok: true, sent: true });
+    } finally {
+      delete process.env.META_ACCESS_TOKEN;
+      delete process.env.META_PHONE_NUMBER_ID;
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('sendWhatsApp fails cleanly for a missing conversation', async () => {
+    const r = await sendWhatsApp.execute({ conversationId: UUID, text: 'Olá' }, api());
+    expect(JSON.parse(r)).toMatchObject({ ok: false, error: 'conversation_not_found' });
   });
 
   it('handoffToHuman sets needsHuman + status', async () => {
