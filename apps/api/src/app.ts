@@ -1,16 +1,16 @@
 import express from 'express';
 import cors from 'cors';
-import authRoutes from './routes/auth-routes';
-import metaWebhookRoutes from './routes/meta-webhook-routes';
-import tawanyRoutes from './routes/tawany-routes';
-import operationsRoutes from './routes/operations-routes';
-import inboxRoutes from './routes/inbox-routes';
-import appointmentRoutes from './routes/appointment-routes';
-import lgpdRoutes from './routes/lgpd-routes';
-import { prisma } from './lib/deps';
-import { createPrismaDataApi } from './lib/prisma-data-api';
-import { startScheduler } from './lib/scheduler';
-import { assertProductionConfig, requestLogger, securityHeaders } from './lib/production';
+import authRoutes from './routes/auth-routes.js';
+import metaWebhookRoutes from './routes/meta-webhook-routes.js';
+import tawanyRoutes from './routes/tawany-routes.js';
+import operationsRoutes from './routes/operations-routes.js';
+import inboxRoutes from './routes/inbox-routes.js';
+import appointmentRoutes from './routes/appointment-routes.js';
+import lgpdRoutes from './routes/lgpd-routes.js';
+import { prisma } from './lib/deps.js';
+import { createPrismaDataApi } from './lib/prisma-data-api.js';
+import { startScheduler } from './lib/scheduler.js';
+import { assertProductionConfig, requestLogger, securityHeaders } from './lib/production.js';
 
 assertProductionConfig();
 const app = express();

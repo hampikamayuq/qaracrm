@@ -1,4 +1,4 @@
-import app from './app';
+import app from './app.js';
 
 const PORT = Number.parseInt(process.env.PORT ?? '4000', 10);
 

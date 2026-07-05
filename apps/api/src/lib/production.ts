@@ -1,7 +1,9 @@
 import type { NextFunction, Request, Response } from 'express';
 import { logger } from './logger';
 
-export const assertProductionConfig = (env: Pick<NodeJS.ProcessEnv, 'NODE_ENV' | 'JWT_SECRET'> = process.env): void => {
+export const assertProductionConfig = (
+  env: Partial<Record<'NODE_ENV' | 'JWT_SECRET', string | undefined>> = process.env,
+): void => {
   if (env.NODE_ENV !== 'production') return;
   if (!env.JWT_SECRET || Buffer.byteLength(env.JWT_SECRET) < 32) {
     throw new Error('JWT_SECRET must be at least 32 bytes in production');

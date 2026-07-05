@@ -68,7 +68,7 @@ export const updateAppointmentRoute = async (
   res: Response,
   api: DataApi = data,
 ): Promise<void> => {
-  const id = req.params.id;
+  const id = typeof req.params.id === 'string' ? req.params.id : '';
   const input = cleanAppointmentInput(req.body);
   if (!id || !input) {
     jsonError(res, 400, 'valid appointment update required');

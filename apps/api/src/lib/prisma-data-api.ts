@@ -27,7 +27,7 @@ export const createPrismaDataApi = (prisma: PrismaClient): DataApi => ({
   async get(object: string, id: string, select?: Record<string, unknown>) {
     const delegate = MODEL_MAP[object] as string | undefined;
     if (!delegate) throw new Error(`Unknown object: ${object}`);
-    const rec = (prisma as Record<string, unknown>)[delegate as string] as {
+    const rec = (prisma as unknown as Record<string, unknown>)[delegate as string] as {
       findUnique(args: unknown): Promise<unknown>;
     };
     return rec.findUnique({
@@ -39,7 +39,7 @@ export const createPrismaDataApi = (prisma: PrismaClient): DataApi => ({
   async list(object: string, options?: ListOptions) {
     const delegate = MODEL_MAP[object] as string | undefined;
     if (!delegate) throw new Error(`Unknown object: ${object}`);
-    const rec = (prisma as Record<string, unknown>)[delegate as string] as {
+    const rec = (prisma as unknown as Record<string, unknown>)[delegate as string] as {
       findMany(args: unknown): Promise<unknown[]>;
     };
 
@@ -80,7 +80,7 @@ export const createPrismaDataApi = (prisma: PrismaClient): DataApi => ({
   async create(object: string, data: Record<string, unknown>) {
     const delegate = MODEL_MAP[object] as string | undefined;
     if (!delegate) throw new Error(`Unknown object: ${object}`);
-    const rec = (prisma as Record<string, unknown>)[delegate as string] as {
+    const rec = (prisma as unknown as Record<string, unknown>)[delegate as string] as {
       create(args: unknown): Promise<unknown>;
     };
     return rec.create({ data }) as Promise<Record<string, unknown>>;
@@ -89,7 +89,7 @@ export const createPrismaDataApi = (prisma: PrismaClient): DataApi => ({
   async update(object: string, id: string, data: Record<string, unknown>) {
     const delegate = MODEL_MAP[object] as string | undefined;
     if (!delegate) throw new Error(`Unknown object: ${object}`);
-    const rec = (prisma as Record<string, unknown>)[delegate as string] as {
+    const rec = (prisma as unknown as Record<string, unknown>)[delegate as string] as {
       update(args: unknown): Promise<unknown>;
     };
     return rec.update({ where: { id }, data }) as Promise<Record<string, unknown>>;

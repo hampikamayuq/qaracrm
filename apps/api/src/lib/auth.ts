@@ -1,5 +1,5 @@
 import bcrypt from 'bcrypt';
-import jwt from 'jsonwebtoken';
+import jwt, { type SignOptions } from 'jsonwebtoken';
 
 const SALT_ROUNDS = 12;
 
@@ -22,9 +22,9 @@ export const verifyPassword = async (password: string, hash: string): Promise<bo
 
 export const createToken = (
   payload: TokenPayload,
-  expiresIn: string = process.env.SESSION_EXPIRY_HOURS
+  expiresIn: SignOptions['expiresIn'] = (process.env.SESSION_EXPIRY_HOURS
     ? `${process.env.SESSION_EXPIRY_HOURS}h`
-    : '24h',
+    : '24h') as SignOptions['expiresIn'],
 ): string => jwt.sign(payload, getSecret(), { expiresIn });
 
 export const verifyToken = (token: string): (TokenPayload & { exp: number }) | null => {
