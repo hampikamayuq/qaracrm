@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { runTawany } from './tawany-handler';
+import { runTawany, runTawanyHandler } from './tawany-handler';
 import type { DataApi } from 'src/lib/data';
 import type { AiClient, ChatResult } from 'src/lib/ai-client';
 
@@ -8,7 +8,14 @@ vi.mock('src/lib/tawany/prompt-builder', () => ({
   buildMessages: () => [{ role: 'user', content: 'oi' }],
 }));
 
+vi.mock('./qara-classifier', () => ({
+  runQaraClassifier: vi.fn(),
+}));
+
+import { runQaraClassifier } from './qara-classifier';
+
 const UUID = '00000000-0000-4000-8000-000000000000';
+const LEAD_ID = 'l1';
 
 const chatResult = (over: Partial<ChatResult>): ChatResult => ({
   content: null,
@@ -21,8 +28,8 @@ const chatResult = (over: Partial<ChatResult>): ChatResult => ({
 const makeData = (): DataApi => ({
   get: vi.fn().mockImplementation(async (obj: string) =>
     obj === 'conversation'
-      ? { id: UUID, leadId: 'l1', summary: null }
-      : { id: 'l1', name: { firstName: 'Maria', lastName: 'Silva' }, stage: 'NOVO', score: 50, intent: null, tags: [] },
+      ? { id: UUID, leadId: LEAD_ID, status: 'OPEN', needsHuman: false, summary: null }
+      : { id: LEAD_ID, name: { firstName: 'Maria', lastName: 'Silva' }, stage: 'NOVO', score: 50, intent: null, tags: [] },
   ),
   list: vi.fn().mockImplementation(async (obj: string) =>
     obj === 'chatMessage'
@@ -41,6 +48,7 @@ const makeAi = (...results: ChatResult[]): AiClient => {
 
 beforeEach(() => {
   process.env.DEFAULT_MODEL_PATIENT = 'minimax/minimax-m3';
+  vi.mocked(runQaraClassifier).mockReset();
 });
 
 describe('runTawany', () => {
@@ -141,5 +149,68 @@ describe('runTawany', () => {
       },
     );
     expect(r.status).toBe('handoff');
+  });
+});
+
+describe('runTawanyHandler', () => {
+  it('skips outbound and already-handled messages', async () => {
+    const data = makeData();
+    const r = await runTawanyHandler(
+      { id: 'm1', conversationId: UUID, direction: 'OUT', body: 'oi' },
+      { ai: makeAi(chatResult({ content: 'ok' })), data },
+    );
+    expect(r.status).toBe('skipped');
+    expect(data.get).not.toHaveBeenCalled();
+  });
+
+  it('skips when conversation is closed', async () => {
+    const data = makeData();
+    (data.get as ReturnType<typeof vi.fn>).mockImplementation(async (obj: string) =>
+      obj === 'conversation' ? { id: UUID, leadId: LEAD_ID, status: 'RESOLVED', needsHuman: false } : null,
+    );
+    const r = await runTawanyHandler(
+      { id: 'm1', conversationId: UUID, direction: 'IN', body: 'oi' },
+      { ai: makeAi(chatResult({ content: 'ok' })), data },
+    );
+    expect(r.status).toBe('skipped');
+    expect(vi.mocked(runQaraClassifier)).not.toHaveBeenCalled();
+  });
+
+  it('runs Tawany and then calls runQaraClassifier with the inbound body + leadId', async () => {
+    const data = makeData();
+    vi.mocked(runQaraClassifier).mockResolvedValue(null);
+    const r = await runTawanyHandler(
+      { id: 'm1', conversationId: UUID, direction: 'IN', body: 'Quero marcar consulta' },
+      { ai: makeAi(chatResult({ content: 'Olá!', finishReason: 'stop' })), data },
+    );
+    expect(r.status).toBe('replied');
+    expect(vi.mocked(runQaraClassifier)).toHaveBeenCalledWith(
+      { message: 'Quero marcar consulta', leadId: LEAD_ID, conversationId: UUID },
+      expect.objectContaining({ data }),
+    );
+  });
+
+  it('classifier failure does not break Tawany (logs and continues)', async () => {
+    const data = makeData();
+    vi.mocked(runQaraClassifier).mockRejectedValue(new Error('classifier boom'));
+    const r = await runTawanyHandler(
+      { id: 'm1', conversationId: UUID, direction: 'IN', body: 'oi' },
+      { ai: makeAi(chatResult({ content: 'Olá!', finishReason: 'stop' })), data },
+    );
+    expect(r.status).toBe('replied');
+    expect(data.update).toHaveBeenCalledWith('chatMessage', 'm1', { agentHandled: true });
+  });
+
+  it('skips classifier when conversation has no leadId', async () => {
+    const data = makeData();
+    (data.get as ReturnType<typeof vi.fn>).mockImplementation(async (obj: string) =>
+      obj === 'conversation' ? { id: UUID, leadId: null, status: 'OPEN', needsHuman: false } : null,
+    );
+    const r = await runTawanyHandler(
+      { id: 'm1', conversationId: UUID, direction: 'IN', body: 'oi' },
+      { ai: makeAi(chatResult({ content: 'Olá!', finishReason: 'stop' })), data },
+    );
+    expect(r.status).toBe('replied');
+    expect(vi.mocked(runQaraClassifier)).not.toHaveBeenCalled();
   });
 });
