@@ -8,6 +8,7 @@
 
 import { QARA_CLASSIFICATION_PROMPT } from 'src/lib/prompts';
 import { modelWithFallback, type AiClient } from 'src/lib/ai-client';
+import { stripJsonFences } from 'src/lib/ai/parse-json';
 import { ClassificationResult } from './schema';
 
 export type ClassifyPath = 'llm' | 'fallback';
@@ -86,7 +87,7 @@ export const classifyMessage = async (
 
   let parsed: unknown;
   try {
-    parsed = JSON.parse(raw);
+    parsed = JSON.parse(stripJsonFences(raw));
   } catch {
     return safeFallback();
   }

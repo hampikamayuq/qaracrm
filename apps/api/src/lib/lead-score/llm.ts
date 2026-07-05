@@ -3,6 +3,7 @@
 // an AiClient; never touches Twenty's data API.
 
 import { modelWithFallback, type AiClient } from 'src/lib/ai-client';
+import { stripJsonFences } from 'src/lib/ai/parse-json';
 import type { ClassificationResult } from 'src/lib/classification/schema';
 import { QARA_SCORE_PROMPT } from 'src/lib/prompts';
 import { heuristicScore, type HeuristicLead, type HeuristicMessage, type HeuristicResult } from './heuristic';
@@ -20,7 +21,7 @@ const parseScoreJson = (raw: string | null): { score: number; reasons: string[] 
   if (!raw) return null;
   let parsed: unknown;
   try {
-    parsed = JSON.parse(raw);
+    parsed = JSON.parse(stripJsonFences(raw));
   } catch {
     return null;
   }
