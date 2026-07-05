@@ -81,7 +81,37 @@ describe('LeadKanban', () => {
 
     // Should render the lead name without crashing despite null whatsapp
     expect(await screen.findByText('Alice Brown')).toBeInTheDocument();
-    // Verify score is also rendered (confirms card rendered correctly)
-    expect(await screen.findByText(/score: 60/i)).toBeInTheDocument();
+    // Verify score chip rendered the numeric value (confirms card rendered correctly)
+    expect(await screen.findByText('60')).toBeInTheDocument();
+  });
+
+  it('renders score chip with red background for cold scores (<40)', async () => {
+    mockDataApi.list.mockResolvedValue([
+      { id: 'cold', name: { firstName: 'Frio', lastName: 'Lead' }, stage: 'NOVO', score: 20, whatsapp: { primaryPhoneNumber: '111111111' } },
+    ]);
+    render(<LeadKanban />);
+    const chip = await screen.findByText('20');
+    // ponytail: thresholds casam com a faixa ambígua do scorer (45-65). 20 = cold.
+    expect(chip).toHaveStyle({ background: '#c62828' });
+  });
+
+  it('renders score chip with amber background for warm scores (40-65)', async () => {
+    mockDataApi.list.mockResolvedValue([
+      { id: 'warm', name: { firstName: 'Morno', lastName: 'Lead' }, stage: 'NOVO', score: 55, whatsapp: { primaryPhoneNumber: '222222222' } },
+    ]);
+    render(<LeadKanban />);
+    const chip = await screen.findByText('55');
+    // ponytail: 55 cai na faixa ambígua; chip amber para sinalizar "morno".
+    expect(chip).toHaveStyle({ background: '#f9a825' });
+  });
+
+  it('renders score chip with green background for hot scores (>65)', async () => {
+    mockDataApi.list.mockResolvedValue([
+      { id: 'hot', name: { firstName: 'Quente', lastName: 'Lead' }, stage: 'NOVO', score: 80, whatsapp: { primaryPhoneNumber: '333333333' } },
+    ]);
+    render(<LeadKanban />);
+    const chip = await screen.findByText('80');
+    // ponytail: >65 = hot. Verde para "pronto para agendar".
+    expect(chip).toHaveStyle({ background: '#2e7d32' });
   });
 });

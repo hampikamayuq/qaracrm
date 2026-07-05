@@ -3,7 +3,7 @@ import { heuristicScore } from './heuristic';
 import type { ClassificationResult } from 'src/lib/classification/schema';
 
 const cls = (over: Partial<ClassificationResult> = {}): ClassificationResult => ({
-  intencao_principal: 'agendar',
+  intencao_principal: 'informacao',
   temperatura: 'WARM',
   prioridade: 'P3',
   pipeline_funil: 'dermatologia-clinica',

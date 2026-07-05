@@ -12,7 +12,12 @@ vi.mock('./qara-classifier', () => ({
   runQaraClassifier: vi.fn(),
 }));
 
+vi.mock('src/lib/lead-score/orchestrator', () => ({
+  runLeadScorer: vi.fn(),
+}));
+
 import { runQaraClassifier } from './qara-classifier';
+import { runLeadScorer } from 'src/lib/lead-score/orchestrator';
 
 const UUID = '00000000-0000-4000-8000-000000000000';
 const LEAD_ID = 'l1';
@@ -26,11 +31,11 @@ const chatResult = (over: Partial<ChatResult>): ChatResult => ({
 });
 
 const makeData = (): DataApi => ({
-  get: vi.fn().mockImplementation(async (obj: string) =>
-    obj === 'conversation'
-      ? { id: UUID, leadId: LEAD_ID, status: 'OPEN', needsHuman: false, summary: null }
-      : { id: LEAD_ID, name: { firstName: 'Maria', lastName: 'Silva' }, stage: 'NOVO', score: 50, intent: null, tags: [] },
-  ),
+  get: vi.fn().mockImplementation(async (obj: string) => {
+    if (obj === 'conversation') return { id: UUID, leadId: LEAD_ID, status: 'OPEN', needsHuman: false, summary: null };
+    if (obj === 'lead') return { id: LEAD_ID, name: { firstName: 'Maria', lastName: 'Silva' }, stage: 'NOVO', score: 50, intent: null, source: 'INDICACAO', tags: [] };
+    return { id: LEAD_ID, name: { firstName: 'Maria', lastName: 'Silva' }, stage: 'NOVO', score: 50, intent: null, tags: [] };
+  }),
   list: vi.fn().mockImplementation(async (obj: string) =>
     obj === 'chatMessage'
       ? [{ id: 'm1', direction: 'IN', body: 'oi', sentAt: '2026-07-04T10:00:00Z' }]
@@ -49,6 +54,7 @@ const makeAi = (...results: ChatResult[]): AiClient => {
 beforeEach(() => {
   process.env.DEFAULT_MODEL_PATIENT = 'minimax/minimax-m3';
   vi.mocked(runQaraClassifier).mockReset();
+  vi.mocked(runLeadScorer).mockReset();
 });
 
 describe('runTawany', () => {
@@ -212,5 +218,77 @@ describe('runTawanyHandler', () => {
     );
     expect(r.status).toBe('replied');
     expect(vi.mocked(runQaraClassifier)).not.toHaveBeenCalled();
+  });
+
+  it('calls runLeadScorer after classifier and writes score + scoreReasons back to the lead', async () => {
+    const data = makeData();
+    vi.mocked(runQaraClassifier).mockResolvedValue({
+      path: 'llm',
+      tagsWritten: 1,
+      result: {
+        intencao_principal: 'agendar',
+        temperatura: 'HOT',
+        prioridade: 'P1',
+        pipeline_funil: 'dermatologia-clinica',
+        medico_indicado: null,
+        unidade: null,
+        confianca: 0.9,
+        tags_sugeridas: ['LEAD_QUENTE'],
+        proxima_acao: 'handoff',
+        razoes: ['agendar detected'],
+      },
+    });
+    vi.mocked(runLeadScorer).mockResolvedValue({
+      score: 95,
+      reasons: ['temperatura: HOT', 'intencao: agendar', 'prioridade: P1'],
+      path: 'heuristic',
+    });
+    const r = await runTawanyHandler(
+      { id: 'm1', conversationId: UUID, direction: 'IN', body: 'Quero marcar consulta' },
+      { ai: makeAi(chatResult({ content: 'Olá!', finishReason: 'stop' })), data },
+    );
+    expect(r.status).toBe('replied');
+    expect(vi.mocked(runLeadScorer)).toHaveBeenCalledWith(
+      { intent: null, source: 'INDICACAO' },
+      expect.any(Array),
+      expect.objectContaining({ temperatura: 'HOT', prioridade: 'P1' }),
+      expect.objectContaining({ ai: expect.anything() }),
+    );
+    expect(data.update).toHaveBeenCalledWith('lead', LEAD_ID, {
+      score: 95,
+      scoreReasons: ['temperatura: HOT', 'intencao: agendar', 'prioridade: P1'],
+    });
+  });
+
+  it('runs scorer with null classification when the classifier returns null', async () => {
+    const data = makeData();
+    vi.mocked(runQaraClassifier).mockResolvedValue(null);
+    vi.mocked(runLeadScorer).mockResolvedValue({
+      score: 50,
+      reasons: ['heuristic only'],
+      path: 'heuristic',
+    });
+    await runTawanyHandler(
+      { id: 'm1', conversationId: UUID, direction: 'IN', body: 'oi' },
+      { ai: makeAi(chatResult({ content: 'Olá!', finishReason: 'stop' })), data },
+    );
+    expect(vi.mocked(runLeadScorer)).toHaveBeenCalledWith(
+      expect.any(Object),
+      expect.any(Array),
+      null,
+      expect.objectContaining({ ai: expect.anything() }),
+    );
+  });
+
+  it('scorer failure does not break Tawany (logs and continues)', async () => {
+    const data = makeData();
+    vi.mocked(runQaraClassifier).mockResolvedValue(null);
+    vi.mocked(runLeadScorer).mockRejectedValue(new Error('scorer boom'));
+    const r = await runTawanyHandler(
+      { id: 'm1', conversationId: UUID, direction: 'IN', body: 'oi' },
+      { ai: makeAi(chatResult({ content: 'Olá!', finishReason: 'stop' })), data },
+    );
+    expect(r.status).toBe('replied');
+    expect(data.update).toHaveBeenCalledWith('chatMessage', 'm1', { agentHandled: true });
   });
 });

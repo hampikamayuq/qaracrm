@@ -58,18 +58,18 @@ export const llmScore = async (
     `Últimas mensagens (mais recentes por último):\n${last || '(nenhuma)'}\n\n` +
     `Responda APENAS com JSON: {"score": <0-100>, "reasons": ["...", "..."]}`;
 
-  try {
-    const res = await ai.chat({
-      model: process.env.DEFAULT_MODEL_INTERNAL ?? 'minimax/minimax-m3',
-      system: QARA_SCORE_PROMPT,
-      messages: [{ role: 'user', content: userBlock }],
-      responseFormat: { type: 'json_object' },
-    });
-    const parsed = parseScoreJson(res.content);
-    if (parsed) return parsed;
-  } catch {
-    // fall through to heuristic
-  }
+  // ponytail: no try/catch around ai.chat() itself — a network/timeout
+  // failure must propagate so the orchestrator's own catch marks path:
+  // 'fallback'. Only unusable *content* (bad JSON, missing fields) is
+  // handled here via parseScoreJson, which returns null instead of throwing.
+  const res = await ai.chat({
+    model: process.env.DEFAULT_MODEL_INTERNAL ?? 'minimax/minimax-m3',
+    system: QARA_SCORE_PROMPT,
+    messages: [{ role: 'user', content: userBlock }],
+    responseFormat: { type: 'json_object' },
+  });
+  const parsed = parseScoreJson(res.content);
+  if (parsed) return parsed;
 
   const fallback = heuristicScore(lead, recentMessages, classification);
   return {

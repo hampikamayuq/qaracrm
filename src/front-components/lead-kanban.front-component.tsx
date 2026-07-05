@@ -17,6 +17,30 @@ type LeadRow = {
 const leadDisplayName = (lead: LeadRow): string =>
   lead.name ? `${lead.name.firstName} ${lead.name.lastName}`.trim() : '(sem nome)';
 
+// ponytail: thresholds casam com a faixa ambígua do scorer (45-65). <40 cold,
+// 40-65 warm, >65 hot. Mantém o chip legível em qualquer tema.
+const scoreChipColor = (score: number): string => {
+  if (score < 40) return '#c62828';
+  if (score <= 65) return '#f9a825';
+  return '#2e7d32';
+};
+
+const ScoreChip = ({ score }: { score: number }) => (
+  <span
+    style={{
+      display: 'inline-block',
+      background: scoreChipColor(score),
+      color: '#fff',
+      fontSize: '11px',
+      fontWeight: 600,
+      padding: '2px 6px',
+      borderRadius: '4px',
+    }}
+  >
+    {score}
+  </span>
+);
+
 const LeadCard = ({ lead, onStageChange }: { lead: LeadRow; onStageChange: (id: string, stage: string) => void }) => (
   <div
     style={{
@@ -26,7 +50,7 @@ const LeadCard = ({ lead, onStageChange }: { lead: LeadRow; onStageChange: (id: 
   >
     <strong>{leadDisplayName(lead)}</strong>
     <div style={{ fontSize: '12px', color: '#777' }}>{lead.whatsapp?.primaryPhoneNumber ?? ''}</div>
-    <div style={{ fontSize: '12px' }}>Score: {lead.score}</div>
+    <div style={{ fontSize: '12px', marginTop: '2px' }}><ScoreChip score={lead.score} /></div>
     <select
       value={lead.stage}
       onChange={(e) => onStageChange(lead.id, e.target.value)}

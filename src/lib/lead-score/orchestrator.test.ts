@@ -12,7 +12,7 @@ const chatResult = (over: Partial<ChatResult>): ChatResult => ({
 });
 
 const cls = (over: Partial<ClassificationResult> = {}): ClassificationResult => ({
-  intencao_principal: 'agendar',
+  intencao_principal: 'informacao',
   temperatura: 'WARM',
   prioridade: 'P3',
   pipeline_funil: 'dermatologia-clinica',
@@ -152,13 +152,13 @@ describe('runLeadScorer (ambiguous band → LLM)', () => {
   });
 
   it('boundary score 45 is ambiguous (lower edge, inclusive)', async () => {
-    // Build a classification that lands at 45. base WARM=55, -10 via
-    // hesitation message → 45.
+    // Build a classification that lands at 45. base COLD=25, +20 via
+    // booking-keyword message → 45.
     const ai = makeAi(JSON.stringify({ score: 50, reasons: ['nudge'] }));
     const r = await runLeadScorer(
       { intent: null, source: null },
-      [{ body: 'Achei caro, talvez não dê' }],
-      cls({ intencao_principal: 'informacao' }),
+      [{ body: 'Quero agendar uma consulta' }],
+      cls({ temperatura: 'COLD' }),
       { ai },
     );
     expect(r.path).toBe('llm');

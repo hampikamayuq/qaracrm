@@ -8,6 +8,7 @@ import { handoff } from 'src/lib/handoff';
 import { buildTawanyContext } from 'src/lib/tawany/context';
 import { buildMessages, buildSystemPrompt } from 'src/lib/tawany/prompt-builder';
 import { runQaraClassifier } from './qara-classifier';
+import { runLeadScorer } from 'src/lib/lead-score/orchestrator';
 
 const MAX_ITERATIONS = 6;
 
@@ -147,12 +148,14 @@ export const runTawanyHandler = async (
       typeof conv.leadId === 'string' && conv.leadId.length > 0 &&
       typeof message.body === 'string' && message.body.trim().length > 0
     ) {
+      let classification: import('src/lib/classification/schema').ClassificationResult | null = null;
       try {
         const cls = await runQaraClassifier(
           { message: message.body, leadId: conv.leadId, conversationId: message.conversationId },
           { ai, data: deps.data },
         );
         if (cls) {
+          classification = cls.result;
           console.log(JSON.stringify({
             event: 'qara_classify',
             messageId: message.id,
@@ -165,6 +168,41 @@ export const runTawanyHandler = async (
         }
       } catch (e) {
         console.error('[tawany-handler] classifier failed (non-fatal):', (e as Error).message);
+      }
+
+      // Lead scorer: re-calcula score + scoreReasons usando o classification recém-feito
+      // (ou cai no caminho message+intent-only se o classificador tiver falhado).
+      // Falha do scorer NUNCA quebra o run de Tawany — só logamos.
+      try {
+        const lead = (await deps.data.get('lead', conv.leadId, { id: true, intent: true, source: true })) as { id?: string; intent?: string | null; source?: string | null } | null;
+        if (lead) {
+          const messages = (await deps.data.list('chatMessage', {
+            filter: { conversation: { lead: { id: { eq: conv.leadId } } } },
+            orderBy: { sentAt: 'DESC' },
+            limit: 10,
+            select: { body: true, sentAt: true },
+          })) as Array<{ body?: string | null; sentAt?: string | null }>;
+          const recent = [...messages]
+            .sort((a, b) => String(a.sentAt ?? '').localeCompare(String(b.sentAt ?? '')))
+            .map((m) => ({ body: m.body ?? null }));
+          const result = await runLeadScorer(
+            { intent: lead.intent ?? null, source: lead.source ?? null },
+            recent,
+            classification,
+            { ai },
+          );
+          await deps.data.update('lead', conv.leadId, { score: result.score, scoreReasons: result.reasons });
+          console.log(JSON.stringify({
+            event: 'lead_score',
+            messageId: message.id,
+            leadId: conv.leadId,
+            path: result.path,
+            score: result.score,
+            reasonCount: result.reasons.length,
+          }));
+        }
+      } catch (e) {
+        console.error('[tawany-handler] scorer failed (non-fatal):', (e as Error).message);
       }
     }
 
