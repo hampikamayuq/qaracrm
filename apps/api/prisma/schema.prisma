@@ -1,0 +1,250 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String         @id @default(uuid())
+  name         String
+  email        String         @unique
+  password     String
+  role         String         // "admin" | "recepcao" | "medico" | "financeiro" | "marketing" | "agente_ia"
+  active       Boolean        @default(true)
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+  sessions     Session[]
+  tasks        Task[]
+  suggestions  AiSuggestion[] // approved suggestions
+  conversations Conversation[] // assigned conversations
+}
+
+model Session {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  token     String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+}
+
+model Lead {
+  id            String         @id @default(uuid())
+  name          String
+  phone         String?
+  email         String?
+  source        String?
+  intent        String?
+  score         Int            @default(0)
+  scoreReasons  Json           @default("[]")
+  tags          Json           @default("[]")
+  optedOut      Boolean        @default(false)
+  optedOutAt    DateTime?
+  stageId       String?
+  stage         PipelineStage? @relation(fields: [stageId], references: [id])
+  conversations Conversation[]
+  patients      Patient[]
+  appointments  Appointment[]
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+
+  @@index([stageId])
+  @@index([score])
+}
+
+model Patient {
+  id           String        @id @default(uuid())
+  name         String
+  phone        String?
+  email        String?
+  leadId       String?
+  lead         Lead?         @relation(fields: [leadId], references: [id])
+  appointments Appointment[]
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+}
+
+model Pipeline {
+  id     String          @id @default(uuid())
+  name   String
+  order  Int             @default(0)
+  stages PipelineStage[]
+}
+
+model PipelineStage {
+  id         String   @id @default(uuid())
+  name       String
+  order      Int      @default(0)
+  pipelineId String
+  pipeline   Pipeline @relation(fields: [pipelineId], references: [id])
+  leads      Lead[]
+}
+
+model Conversation {
+  id            String         @id @default(uuid())
+  leadId        String
+  lead          Lead           @relation(fields: [leadId], references: [id])
+  status        String         @default("OPEN") // OPEN | PENDING_PATIENT | PENDING_HUMAN | NEEDS_HUMAN | RESOLVED | CLOSED
+  needsHuman    Boolean        @default(false)
+  metaContactId String?
+  metaThreadId  String?
+  externalId    String?
+  assignedToId  String?
+  assignedTo    User?          @relation(fields: [assignedToId], references: [id])
+  messages      ChatMessage[]
+  aiSuggestions AiSuggestion[]
+  tasks         Task[]
+  activities    Activity[]
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+
+  @@index([leadId])
+  @@index([status])
+  @@index([assignedToId])
+}
+
+model ChatMessage {
+  id             String       @id @default(uuid())
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id])
+  externalId     String?
+  direction      String       // "IN" | "OUT"
+  body           String
+  mediaUrl       String?
+  agentHandled   Boolean      @default(false)
+  sentAt         DateTime     @default(now())
+  createdAt      DateTime     @default(now())
+
+  @@unique([conversationId, externalId])
+  @@index([conversationId, sentAt])
+}
+
+model AiSuggestion {
+  id             String       @id @default(uuid())
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id])
+  messageId      String?
+  model          String?
+  promptVersion  String?      // NOVO — rastrear versão do system prompt
+  body           String
+  riskLevel      String?      // "low" | "medium" | "high"
+  status         String       @default("PENDING") // PENDING | APPROVED | REJECTED | SENT | FAILED
+  approvedById   String?
+  approvedBy     User?        @relation(fields: [approvedById], references: [id])
+  decidedAt      DateTime?
+  createdAt      DateTime     @default(now())
+
+  @@index([conversationId, status, createdAt])
+}
+
+model Task {
+  id             String       @id @default(uuid())
+  title          String
+  description    String?
+  status         String       @default("OPEN") // OPEN | IN_PROGRESS | DONE
+  priority       String       @default("MEDIUM") // LOW | MEDIUM | HIGH | URGENT
+  conversationId String?
+  conversation   Conversation? @relation(fields: [conversationId], references: [id])
+  assignedToId   String?
+  assignedTo     User?         @relation(fields: [assignedToId], references: [id])
+  dueAt          DateTime?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  @@index([assignedToId])
+  @@index([status])
+}
+
+model Activity {
+  id             String       @id @default(uuid())
+  targetType     String       // "conversation" | "lead" | "patient"
+  targetId       String
+  body           String
+  conversationId String?
+  conversation   Conversation? @relation(fields: [conversationId], references: [id])
+  createdAt      DateTime     @default(now())
+
+  @@index([targetType, targetId])
+}
+
+model Professional {
+  id           String        @id @default(uuid())
+  name         String
+  specialty    String
+  active       Boolean       @default(true)
+  appointments Appointment[]
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+}
+
+model Service {
+  id             String        @id @default(uuid())
+  name           String
+  description    String?
+  priceCents     Int           @default(0)
+  active         Boolean       @default(true)
+  professionalId String?
+  appointments   Appointment[]
+}
+
+model Appointment {
+  id             String        @id @default(uuid())
+  leadId         String?
+  lead           Lead?         @relation(fields: [leadId], references: [id])
+  patientId      String?
+  patient        Patient?      @relation(fields: [patientId], references: [id])
+  professionalId String?
+  professional   Professional? @relation(fields: [professionalId], references: [id])
+  serviceId      String?
+  service        Service?      @relation(fields: [serviceId], references: [id])
+  scheduledAt    DateTime
+  status         String        @default("SCHEDULED") // SCHEDULED | CONFIRMED | DONE | NO_SHOW | CANCELLED
+  reminderD1Sent Boolean       @default(false)
+  notes          String?
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  @@index([scheduledAt, status])
+}
+
+model WebhookEvent {
+  id        String   @id @default(uuid())
+  source    String   @default("meta")
+  payload   Json
+  signature String?
+  processed Boolean  @default(false)
+  error     String?
+  createdAt DateTime @default(now())
+
+  @@index([processed, createdAt])
+}
+
+model AiRunLog {
+  id             String   @id @default(uuid())
+  layer          String
+  model          String?
+  fallbackUsed   Boolean  @default(false)
+  latencyMs      Int?
+  success        Boolean
+  validationPass Boolean?
+  reason         String?
+  conversationId String?
+  messageId      String?
+  createdAt      DateTime @default(now())
+
+  @@index([layer, createdAt])
+  @@index([conversationId])
+}
+
+model KnowledgeArticle {
+  id        String   @id @default(uuid())
+  title     String
+  content   String
+  tags      Json     @default("[]")
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
