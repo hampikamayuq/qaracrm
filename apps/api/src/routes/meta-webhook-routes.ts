@@ -1,10 +1,12 @@
 import { Router } from 'express';
 import type { Request, Response } from 'express';
 import { prisma } from '../lib/deps';
+import { createAiClient } from '../lib/ai-client';
 import { createPrismaDataApi } from '../lib/prisma-data-api';
 import { handleMetaWebhook } from '../logic-functions/meta-webhook';
 import { verifyMetaSignature } from '../lib/meta-signature';
 import { isDuplicateWebhook } from '../lib/webhook-dedup';
+import { forwardWebhookToTwenty, runShadowForProcessedMessages } from '../lib/shadow';
 
 const router: Router = Router();
 const data = createPrismaDataApi(prisma);
@@ -61,17 +63,26 @@ export const receiveMetaWebhook = async (req: Request, res: Response): Promise<v
       },
     });
 
+    void forwardWebhookToTwenty({
+      rawBody: rawBytes ?? Buffer.from(rawBody),
+      signature,
+    }).catch((err) => console.error('[shadow] forward to Twenty failed:', (err as Error).message));
+
     // Always return 200 to Meta immediately — they retry non-200
     res.status(200).json({ success: true, data: { eventId: webhookEvent.id } });
 
     // [BLOQUEANTE] Process async: don't block the HTTP response
     setImmediate(async () => {
       try {
-        await handleMetaWebhook(req.body, data);
+        const result = await handleMetaWebhook(req.body, data);
         await prisma.webhookEvent.update({
           where: { id: webhookEvent.id },
           data: { processed: true },
         });
+        void runShadowForProcessedMessages(result.processedMessages, {
+          createAi: createAiClient,
+          data,
+        }).catch((err) => console.error('[shadow] tawany shadow run failed:', (err as Error).message));
       } catch (err) {
         console.error('[meta-webhook] async processing error:', (err as Error).message);
         await prisma.webhookEvent.update({

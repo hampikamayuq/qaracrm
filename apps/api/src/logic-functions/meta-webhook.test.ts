@@ -62,7 +62,7 @@ describe('handleMetaWebhook — inbound messages', () => {
       .mockResolvedValueOnce({ id: 'conv-1' }) // conversation
       .mockResolvedValueOnce({ id: 'msg-1' }); // chatMessage
     const update = vi.fn().mockResolvedValue({ id: 'conv-1' });
-    await handleMetaWebhook(waBody, api({ list, create, update }), processDebounce());
+    const result = await handleMetaWebhook(waBody, api({ list, create, update }), processDebounce());
 
     expect(create).toHaveBeenNthCalledWith(
       1,
@@ -88,6 +88,7 @@ describe('handleMetaWebhook — inbound messages', () => {
     expect(update).toHaveBeenCalledWith('conversation', 'conv-1', {
       lastMessageAt: expect.any(String),
     });
+    expect(result.processedMessages).toEqual([{ conversationId: 'conv-1', messageId: 'msg-1' }]);
   });
 
   it('reuses an existing conversation', async () => {

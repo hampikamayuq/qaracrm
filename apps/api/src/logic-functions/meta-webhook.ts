@@ -6,6 +6,10 @@ import { sendWhatsApp } from '../lib/tools/sendWhatsApp';
 const OPT_OUT_CONFIRMATION =
   'Você foi removido da nossa lista de contatos. Se mudar de ideia, é só enviar uma mensagem.';
 
+export type MetaWebhookProcessingResult = {
+  processedMessages: Array<{ conversationId: string; messageId: string }>;
+};
+
 const applyStatus = async (status: MetaStatusUpdate, data: DataApi): Promise<void> => {
   const found = await data.list('chatMessage', {
     filter: { externalId: { eq: status.externalId } },
@@ -40,17 +44,17 @@ const ingestMessage = async (
   msg: MetaInboundMessage,
   data: DataApi,
   debounce: Debouncer,
-): Promise<void> => {
+): Promise<{ conversationId: string; messageId: string } | null> => {
   const dup = await data.list('chatMessage', {
     filter: { externalId: { eq: msg.externalId } },
     limit: 1,
     select: { id: true },
   });
-  if (dup.length > 0) return; // Meta retry — já processada
+  if (dup.length > 0) return null; // Meta retry — já processada
 
   const conversation = await findOrCreateConversation(msg, data);
   const gate = debounce.check(conversation.id, msg.externalId, msg.text);
-  await data.create('chatMessage', {
+  const created = await data.create('chatMessage', {
     conversationId: conversation.id,
     direction: 'IN',
     body: msg.text,
@@ -72,25 +76,33 @@ const ingestMessage = async (
     });
     await sendWhatsApp.execute({ conversationId: conversation.id, text: OPT_OUT_CONFIRMATION }, data);
     console.log(JSON.stringify({ event: 'meta_optout', conversationId: conversation.id, messageId: msg.externalId }));
-    return;
+    return null;
   }
 
   await data.update('conversation', conversation.id, { lastMessageAt: msg.sentAt });
   if (gate.status === 'skip') {
     console.log(JSON.stringify({ event: 'meta_debounce_skip', conversationId: conversation.id, messageId: msg.externalId }));
+    return null;
   }
+  const messageId = typeof created.id === 'string' ? created.id : '';
+  return messageId ? { conversationId: conversation.id, messageId } : null;
 };
 
 export const handleMetaWebhook = async (
   body: unknown,
   data: DataApi,
   debounce: Debouncer = defaultDebounce,
-): Promise<void> => {
+): Promise<MetaWebhookProcessingResult> => {
   const { messages, statuses } = parseMetaEvent(body);
+  const processedMessages: MetaWebhookProcessingResult['processedMessages'] = [];
   for (const status of statuses) await applyStatus(status, data);
-  for (const msg of messages) await ingestMessage(msg, data, debounce);
+  for (const msg of messages) {
+    const processed = await ingestMessage(msg, data, debounce);
+    if (processed) processedMessages.push(processed);
+  }
 
   console.log(
     JSON.stringify({ event: 'meta_webhook', messages: messages.length, statuses: statuses.length }),
   );
+  return { processedMessages };
 };

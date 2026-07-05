@@ -4295,7 +4295,7 @@ git commit -m "feat: task 15 production lgpd"
 
 **Goal:** Run the standalone in shadow mode with real forwarding to Twenty. Meta has ONE callback URL → standalone receives, persists, then forwards raw bytes to Twenty.
 
-- [ ] **Step 1: Write shadow mode utility**
+- [x] **Step 1: Write shadow mode utility**
 
 Create `apps/api/src/lib/shadow.ts`:
 
@@ -4355,7 +4355,7 @@ export const recordShadowRun = async (
 };
 ```
 
-- [ ] **Step 2: Wire forwarding + shadow into webhook handler**
+- [x] **Step 2: Wire forwarding + shadow into webhook handler**
 
 Read `apps/api/src/routes/meta-webhook-routes.ts`. After `handleMetaWebhook` processes the event (persists WebhookEvent + creates ChatMessage/Conversation), add the forwarding logic. The key insight: Meta accepts ONE callback URL — standalone receives, persists, then fire-and-forget forwards raw bytes + signature to Twenty:
 
@@ -4401,9 +4401,11 @@ if (isShadowMode() && result) {
 
 > **Rollback:** If the standalone crashes, repoint the Meta callback URL to Twenty directly (1 minute in the Meta dashboard). No code change needed.
 
-- [ ] **Step 3: Write shadow comparison script**
+- [x] **Step 3: Write shadow comparison script**
 
 Create `apps/api/src/scripts/shadow-compare.ts`. Twenty sends the reply to the patient → Meta sends the OUT message/status back → standalone ingests it via webhook. This script compares each shadow_run with the actual Twenty reply:
+
+Implementation note: `Activity.body` is a string in the current Prisma schema, so shadow runs are stored as JSON strings and queried with `contains`.
 
 ```typescript
 import { prisma } from '../lib/deps';
@@ -4491,7 +4493,7 @@ function normalize(text: string): string {
 shadowCompare().catch(console.error);
 ```
 
-- [ ] **Step 4: Write shadow mode runbook**
+- [x] **Step 4: Write shadow mode runbook**
 
 Create `docs/superpowers/specs/shadow-mode-runbook.md`:
 
@@ -4539,18 +4541,18 @@ Create `docs/superpowers/specs/shadow-mode-runbook.md`:
 - Re-enable `TWENTY_FORWARD_URL` if partial forwarding is desired
 ```
 
-- [ ] **Step 5: Add SHADOW_MODE and TWENTY_FORWARD_URL to .env.example**
+- [x] **Step 5: Add SHADOW_MODE and TWENTY_FORWARD_URL to .env.example**
 
 ```env
 SHADOW_MODE="shadow"
 TWENTY_FORWARD_URL=""
 ```
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
-git add apps/api/src/lib/shadow.ts apps/api/src/routes/meta-webhook-routes.ts apps/api/src/scripts/shadow-compare.ts apps/api/.env.example docs/superpowers/specs/shadow-mode-runbook.md
-git commit -m "feat: task 11 — shadow mode with forwarding architecture + real comparison script"
+git add apps/api/src/lib/shadow.ts apps/api/src/lib/shadow.test.ts apps/api/src/logic-functions/meta-webhook.ts apps/api/src/logic-functions/meta-webhook.test.ts apps/api/src/routes/meta-webhook-routes.ts apps/api/src/routes/meta-webhook-routes.test.ts apps/api/src/scripts/shadow-compare.ts apps/api/.env.example docs/superpowers/specs/shadow-mode-runbook.md
+git commit -m "feat: task 11 shadow mode"
 ```
 
 ---

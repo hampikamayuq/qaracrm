@@ -13,11 +13,16 @@ vi.mock('../lib/deps', () => ({
 }));
 
 vi.mock('../logic-functions/meta-webhook', () => ({
-  handleMetaWebhook: vi.fn().mockResolvedValue(undefined),
+  handleMetaWebhook: vi.fn().mockResolvedValue({ processedMessages: [] }),
 }));
 
 vi.mock('../lib/meta-signature', () => ({
   verifyMetaSignature: vi.fn().mockReturnValue(true),
+}));
+
+vi.mock('../lib/shadow', () => ({
+  forwardWebhookToTwenty: vi.fn().mockResolvedValue(false),
+  runShadowForProcessedMessages: vi.fn().mockResolvedValue(undefined),
 }));
 
 const req = (overrides: Partial<Request>): Request => overrides as Request;
@@ -98,6 +103,27 @@ describe('Meta Webhook Routes', () => {
     expect(response.status).toHaveBeenCalledWith(200);
     expect(response.json).toHaveBeenCalledWith({ success: true, data: { eventId: 'evt-1' } });
     expect(prisma.webhookEvent.create).toHaveBeenCalled();
+  });
+
+  it('forwards raw webhook bytes to Twenty after persistence', async () => {
+    const { receiveMetaWebhook } = await import('./meta-webhook-routes');
+    const { forwardWebhookToTwenty } = await import('../lib/shadow');
+    const response = res();
+    const rawBody = Buffer.from('{"entry":[]}');
+
+    await receiveMetaWebhook(
+      req({
+        headers: { 'x-hub-signature-256': 'sha256=abc' },
+        body: { object: 'whatsapp_business_account', entry: [] },
+        rawBody,
+      } as Partial<Request> & { rawBody: Buffer }),
+      response,
+    );
+
+    expect(forwardWebhookToTwenty).toHaveBeenCalledWith({
+      rawBody,
+      signature: 'sha256=abc',
+    });
   });
 
   it('deduplicates matching signatures before persisting WebhookEvent', async () => {
