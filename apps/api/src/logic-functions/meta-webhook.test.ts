@@ -1,11 +1,8 @@
-import { createHmac } from 'node:crypto';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { DataApi } from 'src/lib/data';
+import { describe, expect, it, vi } from 'vitest';
+import type { DataApi } from '../lib/data';
 import { handleMetaWebhook } from './meta-webhook';
 
-const SECRET = 'app-secret';
-const sign = (raw: string): string =>
-  `sha256=${createHmac('sha256', SECRET).update(raw, 'utf8').digest('hex')}`;
+// Auth + HMAC now handled by meta-webhook-routes.ts — this file tests only event processing.
 
 const api = (over: Partial<DataApi> = {}): DataApi => ({
   get: vi.fn().mockResolvedValue(null),
@@ -38,42 +35,6 @@ const waBody = {
   ],
 };
 
-const event = (body: object, rawOverride?: string, sigOverride?: string) => {
-  const raw = rawOverride ?? JSON.stringify(body);
-  return {
-    headers: { 'x-hub-signature-256': sigOverride ?? sign(raw) },
-    queryStringParameters: {},
-    pathParameters: {},
-    body,
-    rawBody: raw,
-    isBase64Encoded: false,
-    requestContext: { http: { method: 'POST', path: '/meta/webhook' } },
-    userWorkspaceId: null,
-  };
-};
-
-beforeEach(() => {
-  process.env.META_APP_SECRET = SECRET;
-});
-afterEach(() => {
-  delete process.env.META_APP_SECRET;
-});
-
-describe('handleMetaWebhook — auth', () => {
-  it('503s when META_APP_SECRET is not configured', async () => {
-    delete process.env.META_APP_SECRET;
-    const res = await handleMetaWebhook(event(waBody), api());
-    expect(res.status).toBe(503);
-  });
-
-  it('401s on invalid signature and on missing rawBody', async () => {
-    const bad = await handleMetaWebhook(event(waBody, undefined, 'sha256=deadbeef'), api());
-    expect(bad.status).toBe(401);
-    const noRaw = { ...event(waBody), rawBody: undefined };
-    expect((await handleMetaWebhook(noRaw, api())).status).toBe(401);
-  });
-});
-
 describe('handleMetaWebhook — inbound messages', () => {
   it('creates conversation + IN message for a new sender', async () => {
     const list = vi.fn().mockResolvedValue([]); // no dup, no existing conversation
@@ -82,9 +43,8 @@ describe('handleMetaWebhook — inbound messages', () => {
       .mockResolvedValueOnce({ id: 'conv-1' }) // conversation
       .mockResolvedValueOnce({ id: 'msg-1' }); // chatMessage
     const update = vi.fn().mockResolvedValue({ id: 'conv-1' });
-    const res = await handleMetaWebhook(event(waBody), api({ list, create, update }));
+    await handleMetaWebhook(waBody, api({ list, create, update }));
 
-    expect(res.status).toBe(200);
     expect(create).toHaveBeenNthCalledWith(
       1,
       'conversation',
@@ -117,7 +77,7 @@ describe('handleMetaWebhook — inbound messages', () => {
       .mockResolvedValueOnce([]) // dedup: no message with this externalId
       .mockResolvedValueOnce([{ id: 'conv-9' }]); // conversation found
     const create = vi.fn().mockResolvedValue({ id: 'msg-2' });
-    await handleMetaWebhook(event(waBody), api({ list, create }));
+    await handleMetaWebhook(waBody, api({ list, create }));
     expect(create).toHaveBeenCalledTimes(1);
     expect(create).toHaveBeenCalledWith(
       'chatMessage',
@@ -128,8 +88,7 @@ describe('handleMetaWebhook — inbound messages', () => {
   it('skips duplicate messages (Meta retry)', async () => {
     const list = vi.fn().mockResolvedValueOnce([{ id: 'already' }]);
     const create = vi.fn();
-    const res = await handleMetaWebhook(event(waBody), api({ list, create }));
-    expect(res.status).toBe(200);
+    await handleMetaWebhook(waBody, api({ list, create }));
     expect(create).not.toHaveBeenCalled();
   });
 });
@@ -153,15 +112,13 @@ describe('handleMetaWebhook — statuses', () => {
   it('updates deliveryStatus of the matching outbound message', async () => {
     const list = vi.fn().mockResolvedValue([{ id: 'msg-out-1' }]);
     const update = vi.fn().mockResolvedValue({ id: 'msg-out-1' });
-    const res = await handleMetaWebhook(event(statusBody), api({ list, update }));
-    expect(res.status).toBe(200);
+    await handleMetaWebhook(statusBody, api({ list, update }));
     expect(update).toHaveBeenCalledWith('chatMessage', 'msg-out-1', { deliveryStatus: 'READ' });
   });
 
   it('ignores statuses for unknown messages', async () => {
     const update = vi.fn();
-    const res = await handleMetaWebhook(event(statusBody), api({ update }));
-    expect(res.status).toBe(200);
+    await handleMetaWebhook(statusBody, api({ update }));
     expect(update).not.toHaveBeenCalled();
   });
 });

@@ -1518,11 +1518,11 @@ git commit -m "feat: task 5 — JWT auth with User/Session models, login/logout/
 - Produces: `POST /api/webhooks/meta` and `GET /api/webhooks/meta` (verification endpoint)
 - Meta sends `messages` events → webhook creates Conversation + ChatMessage records
 
-- [ ] **Step 1: Extract handler functions from meta-webhook.ts**
+- [x] **Step 1: Extract handler functions from meta-webhook.ts**
 
 Read `apps/api/src/logic-functions/meta-webhook.ts`. The `handleMetaWebhook` function and helpers (`findOrCreateConversation`, `ingestMessage`) are reusable as-is — they call `data.get`/`data.create`/`data.update`. Only the `defineLogicFunction` wrapper needs removal.
 
-- [ ] **Step 2: Write the webhook route with raw body capture + WebhookEvent persistence**
+- [x] **Step 2: Write the webhook route with raw body capture + WebhookEvent persistence**
 
 ```typescript
 import { Router } from 'express';
@@ -1606,7 +1606,7 @@ router.post('/', async (req: Request, res: Response) => {
 export default router;
 ```
 
-- [ ] **Step 3: Write webhook idempotency dedup (TDD)**
+- [x] **Step 3: Write webhook idempotency dedup (TDD)**
 
 Meta retries the same webhook with the same `X-Hub-Signature-256` within seconds. Without dedup, a duplicate `messages` event creates two `ChatMessage` rows and Tawany replies twice. Block duplicates BEFORE persisting `WebhookEvent` — search the table for any event with the same `source + signature` in the last 5 minutes. Window is 5 minutes because Meta's retry policy tops out there; longer window = a real second event with the same signature would also be silently dropped.
 
@@ -1706,7 +1706,7 @@ if (duplicate) {
 }
 ```
 
-- [ ] **Step 4: Write the webhook test**
+- [x] **Step 4: Write the webhook test**
 
 Create `apps/api/src/routes/meta-webhook-routes.test.ts`:
 
@@ -1771,7 +1771,7 @@ describe('Meta Webhook Routes', () => {
 });
 ```
 
-- [ ] **Step 5: Add rawBody capture to Express app config**
+- [x] **Step 5: Add rawBody capture to Express app config**
 
 In `apps/api/src/index.ts`, update the `express.json()` middleware to capture raw body bytes for HMAC verification:
 
@@ -1785,13 +1785,13 @@ app.use(express.json({
 }));
 ```
 
-- [ ] **Step 6: Install supertest for integration tests**
+- [x] **Step 6: Install supertest for integration tests**
 
 ```bash
 cd apps/api && pnpm add -D supertest @types/supertest
 ```
 
-- [ ] **Step 7: Run webhook tests**
+- [x] **Step 7: Run webhook tests**
 
 ```bash
 cd apps/api && pnpm vitest run src/routes/meta-webhook-routes.test.ts
@@ -1799,7 +1799,7 @@ cd apps/api && pnpm vitest run src/routes/meta-webhook-routes.test.ts
 
 Expected: 3 tests PASS.
 
-- [ ] **Step 8: Clean up defineLogicFunction wrapper in meta-webhook.ts**
+- [x] **Step 8: Clean up defineLogicFunction wrapper in meta-webhook.ts**
 
 Read `apps/api/src/logic-functions/meta-webhook.ts`. Remove the `defineLogicFunction` wrapper at the bottom (the `export default defineLogicFunction({...})` block). Ensure `handleMetaWebhook` is still exported.
 

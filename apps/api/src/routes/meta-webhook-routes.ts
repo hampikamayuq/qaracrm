@@ -1,0 +1,93 @@
+import { Router } from 'express';
+import type { Request, Response } from 'express';
+import { prisma } from '../lib/deps';
+import { createPrismaDataApi } from '../lib/prisma-data-api';
+import { handleMetaWebhook } from '../logic-functions/meta-webhook';
+import { verifyMetaSignature } from '../lib/meta-signature';
+import { isDuplicateWebhook } from '../lib/webhook-dedup';
+
+const router: Router = Router();
+const data = createPrismaDataApi(prisma);
+
+// Meta verification endpoint (GET)
+export const verifyMetaWebhook = (req: Request, res: Response): void => {
+  const mode = req.query['hub.mode'];
+  const token = req.query['hub.verify_token'];
+  const challenge = req.query['hub.challenge'];
+
+  if (mode === 'subscribe' && token === (process.env.META_VERIFY_TOKEN ?? 'qara-verify-token')) {
+    res.status(200).send(challenge as string);
+    return;
+  }
+  res.sendStatus(403);
+};
+
+// Incoming webhook events (POST)
+export const receiveMetaWebhook = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const signature = req.headers['x-hub-signature-256'] as string | undefined;
+
+    // [BLOQUEANTE] Use raw bytes for HMAC verification (not JSON.stringify)
+    const rawBytes = (req as unknown as { rawBody?: Buffer }).rawBody;
+    const rawBody = rawBytes ? rawBytes.toString('utf-8') : JSON.stringify(req.body);
+
+    // Verify HMAC signature if secret is configured
+    if (process.env.META_APP_SECRET) {
+      if (!signature) {
+        res.sendStatus(403);
+        return;
+      }
+      const valid = verifyMetaSignature(rawBody, signature, process.env.META_APP_SECRET);
+      if (!valid) {
+        res.sendStatus(403);
+        return;
+      }
+    }
+
+    // Signature-based dedup (5-min window)
+    const duplicate = await isDuplicateWebhook(prisma, 'meta', signature ?? null);
+    if (duplicate) {
+      res.status(200).json({ success: true, data: { deduplicated: true } });
+      return;
+    }
+
+    // [BLOQUEANTE] Persist WebhookEvent before processing (replay-safe, no queues needed)
+    const webhookEvent = await prisma.webhookEvent.create({
+      data: {
+        source: 'meta',
+        payload: req.body,
+        signature: signature ?? null,
+        processed: false,
+      },
+    });
+
+    // Always return 200 to Meta immediately — they retry non-200
+    res.status(200).json({ success: true, data: { eventId: webhookEvent.id } });
+
+    // [BLOQUEANTE] Process async: don't block the HTTP response
+    setImmediate(async () => {
+      try {
+        await handleMetaWebhook(req.body, data);
+        await prisma.webhookEvent.update({
+          where: { id: webhookEvent.id },
+          data: { processed: true },
+        });
+      } catch (err) {
+        console.error('[meta-webhook] async processing error:', (err as Error).message);
+        await prisma.webhookEvent.update({
+          where: { id: webhookEvent.id },
+          data: { processed: true, error: (err as Error).message.slice(0, 500) },
+        });
+      }
+    });
+  } catch (e) {
+    console.error('[meta-webhook] error:', (e as Error).message);
+    // Always return 200 to Meta — they retry non-200
+    res.status(200).json({ success: false, error: (e as Error).message });
+  }
+};
+
+router.get('/', verifyMetaWebhook);
+router.post('/', receiveMetaWebhook);
+
+export default router;

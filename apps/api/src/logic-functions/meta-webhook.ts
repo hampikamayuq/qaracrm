@@ -1,8 +1,5 @@
-import { defineLogicFunction } from 'twenty-sdk/define';
-import { Response, type RoutePayload } from 'twenty-sdk/logic-function';
-import { createDataApi, type DataApi } from 'src/lib/data';
-import { verifyMetaSignature } from 'src/lib/meta-signature';
-import { parseMetaEvent, type MetaInboundMessage, type MetaStatusUpdate } from 'src/lib/meta-parse';
+import { type DataApi } from '../lib/data';
+import { parseMetaEvent, type MetaInboundMessage, type MetaStatusUpdate } from '../lib/meta-parse';
 
 const applyStatus = async (status: MetaStatusUpdate, data: DataApi): Promise<void> => {
   const found = await data.list('chatMessage', {
@@ -57,38 +54,14 @@ const ingestMessage = async (msg: MetaInboundMessage, data: DataApi): Promise<vo
 };
 
 export const handleMetaWebhook = async (
-  event: RoutePayload,
+  body: unknown,
   data: DataApi,
-): Promise<Response> => {
-  const appSecret = process.env.META_APP_SECRET;
-  if (!appSecret) return new Response('Meta not configured', { status: 503 });
-
-  const signature = event.headers?.['x-hub-signature-256'];
-  if (!event.rawBody || !verifyMetaSignature(event.rawBody, signature, appSecret)) {
-    return new Response('Invalid signature', { status: 401 });
-  }
-
-  const { messages, statuses } = parseMetaEvent(event.body);
+): Promise<void> => {
+  const { messages, statuses } = parseMetaEvent(body);
   for (const status of statuses) await applyStatus(status, data);
   for (const msg of messages) await ingestMessage(msg, data);
 
   console.log(
     JSON.stringify({ event: 'meta_webhook', messages: messages.length, statuses: statuses.length }),
   );
-  return new Response('OK', { status: 200 });
 };
-
-export default defineLogicFunction({
-  universalIdentifier: '27d865bc-66f7-407d-a49f-d3763e313c87',
-  name: 'meta-webhook',
-  description:
-    'Recebe eventos do Meta (WhatsApp/Instagram): mensagens inbound + delivery statuses. Assinatura HMAC obrigatória.',
-  timeoutSeconds: 30,
-  httpRouteTriggerSettings: {
-    path: '/meta/webhook',
-    httpMethod: 'POST',
-    isAuthRequired: false,
-    forwardedRequestHeaders: ['x-hub-signature-256'],
-  },
-  handler: (event: RoutePayload) => handleMetaWebhook(event, createDataApi()),
-});
