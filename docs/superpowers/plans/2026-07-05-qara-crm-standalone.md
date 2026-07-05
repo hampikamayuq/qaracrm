@@ -1993,7 +1993,7 @@ if (!injectionCheck.safe) {
 }
 ```
 
-- [ ] **Step 7: Add circuit breaker for Meta API (TDD)**
+- [x] **Step 7: Add circuit breaker for Meta API (TDD)**
 
 When Meta's Graph API goes down (5xx, rate-limit, timeout), every Tawany reply becomes a retry storm that piles on the down service. A circuit breaker stops sending after N consecutive failures and short-circuits to a fast `circuit_open` error for a cooldown period — Tawany's existing catch path then routes to handoff instead of an unbounded queue.
 

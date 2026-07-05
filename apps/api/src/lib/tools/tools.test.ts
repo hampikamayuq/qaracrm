@@ -8,7 +8,7 @@ import { updateLead } from './updateLead';
 import { updateConversation } from './updateConversation';
 import { assignTag } from './assignTag';
 import { createActivity } from './createActivity';
-import { sendWhatsApp } from './sendWhatsApp';
+import { metaGraphBreaker, sendWhatsApp } from './sendWhatsApp';
 import { handoffToHuman } from './handoffToHuman';
 import { tawanyTools, ALL_TOOLS } from './index';
 
@@ -111,6 +111,7 @@ describe('write tools', () => {
   });
 
   it('sendWhatsApp sends via Meta and stores the wamid when configured', async () => {
+    metaGraphBreaker.reset();
     process.env.META_ACCESS_TOKEN = 'tok';
     process.env.META_PHONE_NUMBER_ID = 'phone';
     const fetchMock = vi.fn().mockResolvedValue({
@@ -129,6 +130,29 @@ describe('write tools', () => {
       );
       expect(JSON.parse(r)).toMatchObject({ ok: true, sent: true });
     } finally {
+      metaGraphBreaker.reset();
+      delete process.env.META_ACCESS_TOKEN;
+      delete process.env.META_PHONE_NUMBER_ID;
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('sendWhatsApp short-circuits Meta calls when the breaker is open', async () => {
+    metaGraphBreaker.reset();
+    process.env.META_ACCESS_TOKEN = 'tok';
+    process.env.META_PHONE_NUMBER_ID = 'phone';
+    const fetchMock = vi.fn().mockResolvedValue({ ok: false, status: 500 });
+    vi.stubGlobal('fetch', fetchMock);
+    try {
+      const get = vi.fn().mockResolvedValue({ id: UUID, channel: 'WHATSAPP', externalId: '5511999998888' });
+      const ctx = api({ get });
+      for (let i = 0; i < 5; i++) {
+        await expect(sendWhatsApp.execute({ conversationId: UUID, text: 'Olá' }, ctx)).rejects.toThrow('Meta API error: 500');
+      }
+      await expect(sendWhatsApp.execute({ conversationId: UUID, text: 'Olá' }, ctx)).rejects.toThrow('circuit_open:meta-graph');
+      expect(fetchMock).toHaveBeenCalledTimes(5);
+    } finally {
+      metaGraphBreaker.reset();
       delete process.env.META_ACCESS_TOKEN;
       delete process.env.META_PHONE_NUMBER_ID;
       vi.unstubAllGlobals();

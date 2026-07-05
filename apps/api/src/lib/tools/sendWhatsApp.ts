@@ -1,6 +1,12 @@
 import { z } from 'zod';
 import type { DataApi } from 'src/lib/data';
+import { CircuitBreaker } from 'src/lib/resilience/circuit-breaker';
 import { isMetaSendConfigured, sendViaMeta } from 'src/lib/whatsapp-client';
+
+export const metaGraphBreaker = new CircuitBreaker('meta-graph', {
+  threshold: 5,
+  cooldownMs: 30_000,
+});
 
 // Fase 2: envio real via Meta Cloud API quando configurado; sem config
 // (dev/test) mantém o comportamento Fase 1 de apenas registrar no CRM.
@@ -22,7 +28,9 @@ export const sendWhatsApp = {
     const to = typeof conv.externalId === 'string' ? conv.externalId : '';
     const canSend = isMetaSendConfigured() && conv.channel === 'WHATSAPP' && to.length > 0;
     // Erro do sendViaMeta propaga: o tawany-handler converte em handoff.
-    const wamid = canSend ? await sendViaMeta(to, args.text) : null;
+    const wamid = canSend
+      ? await metaGraphBreaker.execute(() => sendViaMeta(to, args.text))
+      : null;
 
     const message = await ctx.create('chatMessage', {
       body: args.text,

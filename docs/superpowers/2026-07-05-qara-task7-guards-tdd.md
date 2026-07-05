@@ -1,4 +1,4 @@
-# Task 7 TDD — Tawany Guards Slice
+# Task 7 TDD — Tawany Guards + Circuit Breaker Slices
 
 Source plan: `docs/superpowers/plans/2026-07-05-qara-crm-standalone.md`, Task 7.
 
@@ -8,6 +8,7 @@ Source plan: `docs/superpowers/plans/2026-07-05-qara-crm-standalone.md`, Task 7.
 - As a patient, sending an opt-out phrase stops AI handling before any LLM call.
 - As QARA ops, prompt-injection attempts are blocked before model exposure and recorded as an AI run failure.
 - As compliance, affirmative Mohs or skin-cancer statements are blocked unless framed as a future hypothesis.
+- As QARA ops, repeated Meta Graph API failures open a circuit and short-circuit later sends without another outbound `fetch`.
 
 ## Evidence
 
@@ -18,6 +19,9 @@ Source plan: `docs/superpowers/plans/2026-07-05-qara-crm-standalone.md`, Task 7.
 | 3 | Tawany opt-out and prompt-injection guards run before any AI call and mark conversation for human handling | `src/logic-functions/tawany-handler.test.ts` | PASS | Same green command below |
 | 4 | Reply validator rejects affirmative Mohs and skin-cancer statements while allowing future-hypothesis wording | `src/lib/guards/reply-validator.test.ts` | PASS | Same green command below |
 | 5 | Wrapper removal did not regress classifier or scorer logic-function tests | `src/logic-functions/qara-classifier.test.ts`, `src/logic-functions/lead-scorer.test.ts` | PASS | `pnpm --filter @qara/api exec vitest run src/logic-functions/qara-classifier.test.ts src/logic-functions/lead-scorer.test.ts` |
+| 6 | RED captured missing circuit breaker module | `pnpm --filter @qara/api exec vitest run src/lib/resilience/circuit-breaker.test.ts` | FAIL as expected | Missing `./circuit-breaker` |
+| 7 | Circuit breaker opens after threshold, short-circuits, half-opens after cooldown, and supports reset | `src/lib/resilience/circuit-breaker.test.ts` | PASS | `pnpm --filter @qara/api exec vitest run src/lib/resilience/circuit-breaker.test.ts src/lib/tools/tools.test.ts` |
+| 8 | `sendWhatsApp` wraps Meta sends and stops calling `fetch` after the breaker opens | `src/lib/tools/tools.test.ts` | PASS | Same circuit green command |
 
 Green command:
 
@@ -35,7 +39,15 @@ pnpm --filter @qara/api exec vitest run src/logic-functions/qara-classifier.test
 
 Result: 2 files passed, 10 tests passed.
 
+Circuit breaker command:
+
+```bash
+pnpm --filter @qara/api exec vitest run src/lib/resilience/circuit-breaker.test.ts src/lib/tools/tools.test.ts
+```
+
+Result: 2 files passed, 24 tests passed.
+
 Known gaps:
 
-- Task 7 still needs circuit breaker, token/input caps, context-window truncation, AiSuggestion routes, approval flow, and Prisma additions.
+- Task 7 still needs token/input caps, context-window truncation, AiSuggestion routes, approval flow, and Prisma additions.
 - `pnpm --filter @qara/api exec tsc --noEmit` remains blocked until the remaining legacy Twenty app files are migrated or excluded. The failure includes `twenty-sdk` imports, old TSX front components/tests, and NodeNext extension issues outside this slice.
