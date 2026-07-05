@@ -10,8 +10,6 @@
 // can re-trigger. Keep this LF thin — the actual scoring logic lives in
 // src/lib/lead-score/orchestrator.ts and is unit-tested there.
 
-import { defineLogicFunction } from 'twenty-sdk/define';
-import { LEAD_SCORER_LOGIC_FUNCTION_UNIVERSAL_IDENTIFIER } from 'src/constants/universal-identifiers';
 import {
   runLeadScorer,
   type OrchestratorResult,
@@ -72,15 +70,3 @@ export const runLeadScorerLF = async (
 
   return { leadId: input.leadId, ...result, written: true };
 };
-
-export default defineLogicFunction({
-  universalIdentifier: LEAD_SCORER_LOGIC_FUNCTION_UNIVERSAL_IDENTIFIER,
-  name: 'lead-scorer',
-  description:
-    'Recalcula o score de um lead combinando o classificador estruturado (temperatura/prioridade) com sinais da conversa (agendamento/hesitação) e, quando o score cai na faixa ambígua (45-65), pede ao LLM um desempate. Escreve score e scoreReasons no lead.',
-  timeoutSeconds: 30,
-  handler: async (input: LeadScorerInput, deps: LeadScorerDeps) => {
-    if (typeof input.leadId !== 'string' || input.leadId.length === 0) return null;
-    return runLeadScorerLF(input, deps);
-  },
-});

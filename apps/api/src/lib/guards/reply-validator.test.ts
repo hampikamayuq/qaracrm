@@ -56,4 +56,21 @@ describe('validateReply', () => {
     const r = validateReply('A Dra. Manuela atende casos de dermatite atópica.', { knownPrices });
     expect(r.ok).toBe(true);
   });
+
+  it('fails on affirmative Mohs mention', () => {
+    const r = validateReply('Recomendo a cirurgia de Mohs para o seu caso.', { knownPrices });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.reason).toMatch(/mohs/i);
+  });
+
+  it('fails on affirmative skin cancer mention', () => {
+    const r = validateReply('Isso é câncer de pele e precisa operar.', { knownPrices });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.reason).toMatch(/mohs|skin_cancer/i);
+  });
+
+  it('allows future-hypothesis Mohs mention', () => {
+    const r = validateReply('Se for necessário, poderíamos considerar cirurgia de Mohs no futuro.', { knownPrices });
+    expect(r.ok).toBe(true);
+  });
 });

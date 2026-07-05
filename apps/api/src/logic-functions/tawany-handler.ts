@@ -1,9 +1,8 @@
-import { defineLogicFunction, type ObjectRecordCreateEvent } from 'twenty-sdk/define';
-import type { DatabaseEventPayload } from 'twenty-sdk/logic-function';
 import { createAiClient, modelWithFallback, type AiClient } from 'src/lib/ai-client';
-import { createDataApi, type DataApi } from 'src/lib/data';
+import type { DataApi } from 'src/lib/data';
 import { tawanyTools } from 'src/lib/tools';
 import { validateReply } from 'src/lib/guards/reply-validator';
+import { detectInjection } from 'src/lib/guards/prompt-injection';
 import { handoff } from 'src/lib/handoff';
 import { recordAiRun } from 'src/lib/ai-run-log';
 import { buildTawanyContext } from 'src/lib/tawany/context';
@@ -13,6 +12,7 @@ import { runLeadScorer } from 'src/lib/lead-score/orchestrator';
 import { runLeadsNovosFlow } from './leads-novos-flow';
 
 const MAX_ITERATIONS = 6;
+const OPT_OUT_PATTERN = /\b(sair|parar|cancelar|n[aã]o quero mais|n[aã]o enviar|remover|descadastrar)\b/iu;
 
 export type TawanyHandlerParams = { messageId: string; conversationId: string };
 export type TawanyDeps = { ai: AiClient; data: DataApi };
@@ -159,9 +159,9 @@ type ChatMessageRecord = {
 
 export type TawanyHandlerRunResult =
   | { status: 'skipped'; reason: string }
-  | { status: 'replied' | 'handoff'; toolCalls: number };
+  | { status: 'replied' | 'handoff'; toolCalls: number; reason?: string };
 
-// ponytail: extraído para ser testável sem instanciar defineLogicFunction.
+// ponytail: extraído para ser testável sem depender do runtime HTTP.
 // Espelha o handler real: skip se não-IN ou já tratado; gate de conversation;
 // cria ai; roda Tawany; roda classificador. Falha do classificador é logada, não fatal.
 export const runTawanyHandler = async (
@@ -191,6 +191,45 @@ export const runTawanyHandler = async (
         convNeedsHuman: conv?.needsHuman,
       }));
       return { status: 'skipped', reason: 'conversation_closed' };
+    }
+
+    if (OPT_OUT_PATTERN.test(message.body)) {
+      if (typeof conv.leadId === 'string' && conv.leadId.length > 0) {
+        await deps.data.update('lead', conv.leadId, { optedOut: true, optedOutAt: new Date() });
+      }
+      await deps.data.update('conversation', message.conversationId, {
+        needsHuman: true,
+        status: 'PENDING_HUMAN',
+      });
+      console.log(JSON.stringify({
+        event: 'tawany_run',
+        messageId: message.id,
+        status: 'handoff',
+        reason: 'opt_out_detected',
+      }));
+      return { status: 'handoff', toolCalls: 0, reason: 'opt_out_detected' };
+    }
+
+    const injectionCheck = detectInjection(message.body);
+    if (!injectionCheck.safe) {
+      await deps.data.update('conversation', message.conversationId, {
+        needsHuman: true,
+        status: 'PENDING_HUMAN',
+      });
+      await recordAiRun(deps.data, {
+        layer: 'tawany',
+        success: false,
+        reason: 'injection_blocked',
+        conversationId: message.conversationId,
+        messageId: message.id,
+      });
+      console.log(JSON.stringify({
+        event: 'tawany_run',
+        messageId: message.id,
+        status: 'handoff',
+        reason: 'prompt_injection',
+      }));
+      return { status: 'handoff', toolCalls: 0, reason: 'prompt_injection' };
     }
 
     let ai: AiClient;
@@ -319,18 +358,3 @@ export const runTawanyHandler = async (
     await deps.data.update('chatMessage', message.id, { agentHandled: true });
   }
 };
-
-export default defineLogicFunction({
-  universalIdentifier: 'cee5b550-44cd-428e-ae99-2a8804586ea9',
-  name: 'tawany-handler',
-  description: 'Roda a Tawany (OpenRouter + tools + guardrails) a cada mensagem inbound; classifica e escreve tags no lead; handoff em qualquer falha.',
-  timeoutSeconds: 120,
-  databaseEventTriggerSettings: {
-    eventName: 'chatMessage.created',
-  },
-  handler: async (event: DatabaseEventPayload<ObjectRecordCreateEvent<ChatMessageRecord>>): Promise<void> => {
-    const message = event.properties.after;
-    const data = createDataApi();
-    await runTawanyHandler(message, { data });
-  },
-});

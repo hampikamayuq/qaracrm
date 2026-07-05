@@ -1833,7 +1833,7 @@ git commit -m "feat: task 6 — Meta webhook with rawBody HMAC, WebhookEvent per
 - Consumes: DataApi from Task 4, Auth from Task 5
 - Produces: `POST /api/tawany/run` (trigger Tawany for a message), `POST /api/tawany/approve` (approve AiSuggestion), `GET /api/tawany/suggestions/:conversationId` (list pending suggestions)
 
-- [ ] **Step 1: Strip defineLogicFunction from Category B files**
+- [x] **Step 1: Strip defineLogicFunction from Category B files**
 
 In `apps/api/src/logic-functions/tawany-handler.ts`, remove lines 323-336 (the `export default defineLogicFunction({...})` block). Keep `runTawany` and `runTawanyHandler` exported.
 
@@ -1841,7 +1841,7 @@ In `apps/api/src/logic-functions/qara-classifier.ts`, find and remove the `defin
 
 In `apps/api/src/logic-functions/lead-scorer.ts`, find and remove the `defineLogicFunction` wrapper. Keep its exported function.
 
-- [ ] **Step 2: Add pre-Tawany guards to runTawanyHandler**
+- [x] **Step 2: Add pre-Tawany guards to runTawanyHandler**
 
 Read `apps/api/src/logic-functions/tawany-handler.ts`. In `runTawanyHandler`, after the existing guard (line 78) but before the AI call, add these pre-Tawany checks:
 
@@ -1870,7 +1870,7 @@ if (optOutPattern.test(message.body)) {
 }
 ```
 
-- [ ] **Step 3: Write prompt-injection guard test (RED)**
+- [x] **Step 3: Write prompt-injection guard test (RED)**
 
 Create `apps/api/src/lib/guards/prompt-injection.test.ts`:
 
@@ -1918,7 +1918,7 @@ describe('detectInjection', () => {
 });
 ```
 
-- [ ] **Step 4: Run test (verify it fails)**
+- [x] **Step 4: Run test (verify it fails)**
 
 ```bash
 cd apps/api && pnpm vitest run src/lib/guards/prompt-injection.test.ts
@@ -1926,7 +1926,7 @@ cd apps/api && pnpm vitest run src/lib/guards/prompt-injection.test.ts
 
 Expected: FAIL — module `./prompt-injection` not found.
 
-- [ ] **Step 5: Implement detectInjection (GREEN)**
+- [x] **Step 5: Implement detectInjection (GREEN)**
 
 Create `apps/api/src/lib/guards/prompt-injection.ts`:
 
@@ -1961,7 +1961,7 @@ cd apps/api && pnpm vitest run src/lib/guards/prompt-injection.test.ts
 
 Expected: all 7 tests PASS.
 
-- [ ] **Step 6: Integrate detectInjection into runTawanyHandler**
+- [x] **Step 6: Integrate detectInjection into runTawanyHandler**
 
 In `apps/api/src/logic-functions/tawany-handler.ts`, add the import at the top:
 
@@ -2629,7 +2629,7 @@ cd apps/api && pnpm tsc --noEmit 2>&1 | head -40
 
 Expected: Category B files should now compile without `defineLogicFunction` errors. May still have some import issues resolved in later tasks.
 
-- [ ] **Step 15: Add Mohs compliance to reply-validator**
+- [x] **Step 15: Add Mohs compliance to reply-validator**
 
 Read `apps/api/src/lib/guards/reply-validator.ts`. Add Mohs detection — the validator must flag text containing "Mohs" (or "câncer de pele") without future-hypothesis markers. A hypothesis marker (e.g., "se for", "pode ser", "talvez seja", "suspeita de") indicates the message is explaining a possibility, not diagnosing. Without those markers, the message is an affirmative statement and must be blocked.
 

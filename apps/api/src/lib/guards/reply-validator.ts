@@ -7,6 +7,9 @@ export type ValidationContext = {
 export type ValidationResult = { ok: true } | { ok: false; reason: string };
 
 const DEFAULT_MAX_LENGTH = 1024;
+const MOHS_OR_SKIN_CANCER_PATTERN = /\bMohs\b|c[aâ]ncer\s+de\s+pele/iu;
+const HYPOTHESIS_MARKERS =
+  /\b(se\s+for|se\s+for\s+mesmo|pode\s+ser|talvez\s+seja|suspeita\s+de|poss[ií]vel|eventual|caso\s+seja|em\s+caso\s+de)\b/iu;
 // Affirmative diagnosis/prescription/promise PATTERNS — not disease names.
 // Blocking words like "dermatite" would make a dermatology bot unable to say
 // "a Dra. Manuela atende dermatite atópica" and hand off every conversation.
@@ -66,6 +69,10 @@ export const validateReply = (text: string, context: ValidationContext): Validat
     if (lower.includes(keyword)) {
       return { ok: false, reason: `sensitive_topic: ${keyword}` };
     }
+  }
+
+  if (MOHS_OR_SKIN_CANCER_PATTERN.test(text) && !HYPOTHESIS_MARKERS.test(text)) {
+    return { ok: false, reason: 'mohs_or_skin_cancer_affirmative_statement' };
   }
 
   return { ok: true };

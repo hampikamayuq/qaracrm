@@ -1,0 +1,41 @@
+# Task 7 TDD — Tawany Guards Slice
+
+Source plan: `docs/superpowers/plans/2026-07-05-qara-crm-standalone.md`, Task 7.
+
+## User Journeys
+
+- As QARA ops, the standalone API can import Tawany, Qara classifier, and lead scorer without `twenty-sdk`.
+- As a patient, sending an opt-out phrase stops AI handling before any LLM call.
+- As QARA ops, prompt-injection attempts are blocked before model exposure and recorded as an AI run failure.
+- As compliance, affirmative Mohs or skin-cancer statements are blocked unless framed as a future hypothesis.
+
+## Evidence
+
+| # | What is guaranteed | Test file or command | Result | Evidence |
+|---|--------------------|----------------------|--------|----------|
+| 1 | RED captured missing prompt-injection guard, missing Mohs guard, and remaining Twenty wrapper in Tawany handler | `pnpm --filter @qara/api exec vitest run src/lib/guards/prompt-injection.test.ts src/lib/guards/reply-validator.test.ts src/logic-functions/tawany-handler.test.ts` | FAIL as expected | Missing `./prompt-injection`, Mohs assertions failed, `twenty-sdk/define` import failed |
+| 2 | Prompt-injection regex blocks common EN/PT override attempts and allows normal patient messages | `src/lib/guards/prompt-injection.test.ts` | PASS | Same green command below |
+| 3 | Tawany opt-out and prompt-injection guards run before any AI call and mark conversation for human handling | `src/logic-functions/tawany-handler.test.ts` | PASS | Same green command below |
+| 4 | Reply validator rejects affirmative Mohs and skin-cancer statements while allowing future-hypothesis wording | `src/lib/guards/reply-validator.test.ts` | PASS | Same green command below |
+| 5 | Wrapper removal did not regress classifier or scorer logic-function tests | `src/logic-functions/qara-classifier.test.ts`, `src/logic-functions/lead-scorer.test.ts` | PASS | `pnpm --filter @qara/api exec vitest run src/logic-functions/qara-classifier.test.ts src/logic-functions/lead-scorer.test.ts` |
+
+Green command:
+
+```bash
+pnpm --filter @qara/api exec vitest run src/lib/guards/prompt-injection.test.ts src/lib/guards/reply-validator.test.ts src/logic-functions/tawany-handler.test.ts
+```
+
+Result: 3 files passed, 36 tests passed.
+
+Additional command:
+
+```bash
+pnpm --filter @qara/api exec vitest run src/logic-functions/qara-classifier.test.ts src/logic-functions/lead-scorer.test.ts
+```
+
+Result: 2 files passed, 10 tests passed.
+
+Known gaps:
+
+- Task 7 still needs circuit breaker, token/input caps, context-window truncation, AiSuggestion routes, approval flow, and Prisma additions.
+- `pnpm --filter @qara/api exec tsc --noEmit` remains blocked until the remaining legacy Twenty app files are migrated or excluded. The failure includes `twenty-sdk` imports, old TSX front components/tests, and NodeNext extension issues outside this slice.
