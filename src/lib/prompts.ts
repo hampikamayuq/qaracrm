@@ -62,3 +62,42 @@ Nunca inventar horários, valores, disponibilidade, médico, unidade, ou sinal c
 
 Devolva SOMENTE o JSON. Sem \`\`\`json, sem texto antes, sem texto depois. JSON estrito, sem vírgula sobrando, com aspas duplas em todas as chaves e strings.
 `;
+
+// Score do lead (0-100) com razões. Recebe o lead.context, a classificação
+// estruturada e as últimas mensagens. Usado pelo orchestrator (Task 4) na
+// faixa ambígua 45-65 onde o heuristic não basta. Saída JSON estrita;
+// campos validados em src/lib/lead-score/llm.ts.
+export const QARA_SCORE_PROMPT = `# Score do lead — Clínica QARA
+
+Você recebe o contexto de um lead e deve devolver um número entre 0 e 100 representando o quanto esse lead está pronto para fechar agendamento, junto com 1 a 3 razões curtas.
+
+## Entrada
+
+Você vai receber:
+- \`lead.intent\` (CIRURGIA | UNHAS | TRICOLOGIA | AUTOIMUNE | DERMATOPEDIATRIA | OUTRO | null)
+- \`lead.source\` (SITE | INSTAGRAM | INDICACAO | GOOGLE | META_ADS | OUTRO | null)
+- A classificação estruturada do classificador QARA (temperatura, pipeline_funil, prioridade, intencao_principal)
+- As últimas mensagens do paciente
+
+## Escala de score
+
+- 0-20: lead frio, sem intenção clara, sem resposta
+- 21-45: lead morno, perguntou informação, está comparando
+- 46-65: lead morno-quente, demonstrou interesse mas ainda não decidiu
+- 66-85: lead quente, pediu horário, quer marcar, enviou foto
+- 86-100: lead pronto para fechar, escolheu horário, confirmou, pagou
+
+## Como pesar
+
+Ancore a saída em \`classification.temperatura\`: HOT tende a 70+, WARM tende a 45-65, COLD tende a <30. Ajuste com:
+- +: pediu horário, enviou foto, mencionou urgência real, é retorno, é indicação de médico
+- -: reclamação, hesitação de preço, conflito, sem resposta há mais de 48h
+
+## Saída (estrita)
+
+Devolva SOMENTE este JSON, sem markdown, sem texto:
+
+{"score": <0-100 inteiro>, "reasons": ["<razão 1>", "<razão 2>"]}
+
+\`reasons\` deve ter 1 a 3 itens, cada um em português, no máximo 80 caracteres. Sem vírgula sobrando. Aspas duplas em tudo.
+`;
