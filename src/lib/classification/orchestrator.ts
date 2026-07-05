@@ -7,7 +7,7 @@
 // doesn't actively mislead the consumer (no P1, no HOT, low confidence).
 
 import { QARA_CLASSIFICATION_PROMPT } from 'src/lib/prompts';
-import type { AiClient } from 'src/lib/ai-client';
+import { modelWithFallback, type AiClient } from 'src/lib/ai-client';
 import { ClassificationResult } from './schema';
 
 export type ClassifyPath = 'llm' | 'fallback';
@@ -50,7 +50,11 @@ export const classifyMessage = async (
   deps: ClassifyDeps,
 ): Promise<ClassifyResult> => {
   const { ai } = deps;
-  const model = input.model ?? process.env.DEFAULT_MODEL_INTERNAL ?? 'minimax/minimax-m3';
+  const model = input.model ?? modelWithFallback(
+    process.env.DEFAULT_MODEL_INTERNAL,
+    process.env.DEFAULT_MODEL_INTERNAL_FALLBACK,
+    'minimax/minimax-m3',
+  );
 
   // ponytail: keep the user-message minimal — the LLM only needs the
   // incoming patient message + the last few turns for context. We don't

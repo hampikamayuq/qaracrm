@@ -2,7 +2,7 @@
 // 45-65 band (Task 4). Pure: takes the same inputs as the heuristic plus
 // an AiClient; never touches Twenty's data API.
 
-import type { AiClient } from 'src/lib/ai-client';
+import { modelWithFallback, type AiClient } from 'src/lib/ai-client';
 import type { ClassificationResult } from 'src/lib/classification/schema';
 import { QARA_SCORE_PROMPT } from 'src/lib/prompts';
 import { heuristicScore, type HeuristicLead, type HeuristicMessage, type HeuristicResult } from './heuristic';
@@ -63,7 +63,11 @@ export const llmScore = async (
   // 'fallback'. Only unusable *content* (bad JSON, missing fields) is
   // handled here via parseScoreJson, which returns null instead of throwing.
   const res = await ai.chat({
-    model: process.env.DEFAULT_MODEL_INTERNAL ?? 'minimax/minimax-m3',
+    model: modelWithFallback(
+      process.env.DEFAULT_MODEL_INTERNAL,
+      process.env.DEFAULT_MODEL_INTERNAL_FALLBACK,
+      'minimax/minimax-m3',
+    ),
     system: QARA_SCORE_PROMPT,
     messages: [{ role: 'user', content: userBlock }],
     responseFormat: { type: 'json_object' },

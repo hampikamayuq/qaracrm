@@ -32,3 +32,20 @@ describe('meta server variables', () => {
     expect(vars.META_VERIFY_TOKEN?.isSecret).toBe(true);
   });
 });
+
+describe('ai server variables', () => {
+  it('declares OpenRouter headers, fallback, and timeout knobs', () => {
+    const vars = applicationConfig.config.serverVariables ?? {};
+    for (const name of [
+      'OPENROUTER_HTTP_REFERER',
+      'OPENROUTER_APP_NAME',
+      'DEFAULT_MODEL_PATIENT_FALLBACK',
+      'DEFAULT_MODEL_INTERNAL_FALLBACK',
+      'AI_TIMEOUT_MS',
+      'AI_LOG_FULL_PROMPTS',
+    ] as const) {
+      expect(vars, `missing ${name}`).toHaveProperty(name);
+      expect(vars[name]?.isRequired ?? false).toBe(false);
+    }
+  });
+});

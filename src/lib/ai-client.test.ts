@@ -55,6 +55,64 @@ describe('ai-client', () => {
     global.fetch = originalFetch;
   });
 
+  it('tries fallback models in order and reports the model used', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 503,
+        text: async () => 'model unavailable',
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          choices: [{ message: { content: 'fallback ok' }, finish_reason: 'stop' }],
+          usage: { prompt_tokens: 3, completion_tokens: 2, total_tokens: 5 },
+        }),
+      });
+    global.fetch = fetchMock as unknown as typeof fetch;
+
+    const client = createAiClient();
+    const result = await client.chat({
+      model: ['minimax/minimax-m3', 'z-ai/glm-5.2'],
+      system: 'sys',
+      messages: [{ role: 'user', content: 'oi' }],
+    });
+
+    expect(result.content).toBe('fallback ok');
+    expect(result.modelUsed).toBe('z-ai/glm-5.2');
+    expect(result.fallbackUsed).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body).model).toBe('minimax/minimax-m3');
+    expect(JSON.parse(fetchMock.mock.calls[1][1].body).model).toBe('z-ai/glm-5.2');
+    global.fetch = originalFetch;
+  });
+
+  it('throws the last OpenRouter error when every model fails', async () => {
+    global.fetch = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 503,
+        text: async () => 'primary down',
+      })
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 429,
+        text: async () => 'fallback exhausted',
+      }) as unknown as typeof fetch;
+
+    const client = createAiClient();
+    await expect(
+      client.chat({
+        model: ['minimax/minimax-m3', 'z-ai/glm-5.2'],
+        system: 'sys',
+        messages: [{ role: 'user', content: 'oi' }],
+      }),
+    ).rejects.toThrow(/429: fallback exhausted/);
+    global.fetch = originalFetch;
+  });
+
   it('passes auth and body correctly', async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,

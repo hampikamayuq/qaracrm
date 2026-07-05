@@ -21,14 +21,42 @@ export default defineApplication({
       description: 'OpenRouter base URL. Defaults to https://openrouter.ai/api/v1.',
       isRequired: false,
     },
+    OPENROUTER_HTTP_REFERER: {
+      description:
+        'Optional OpenRouter HTTP-Referer header. In production, set to the Render Twenty server URL.',
+      isRequired: false,
+    },
+    OPENROUTER_APP_NAME: {
+      description: 'Optional OpenRouter X-Title header. Set to qara-clinic in production.',
+      isRequired: false,
+    },
     DEFAULT_MODEL_PATIENT: {
       description:
         'Default model for tawany-handler (patient-facing). Defaults to minimax/minimax-m3.',
       isRequired: false,
     },
+    DEFAULT_MODEL_PATIENT_FALLBACK: {
+      description:
+        'Fallback model for patient-facing Tawany responses when DEFAULT_MODEL_PATIENT fails.',
+      isRequired: false,
+    },
     DEFAULT_MODEL_INTERNAL: {
       description:
         'Default model for summarize-conversation (internal). Defaults to deepseek/deepseek-chat.',
+      isRequired: false,
+    },
+    DEFAULT_MODEL_INTERNAL_FALLBACK: {
+      description:
+        'Fallback model for internal AI work (classification, scoring, summaries) when DEFAULT_MODEL_INTERNAL fails.',
+      isRequired: false,
+    },
+    AI_TIMEOUT_MS: {
+      description: 'Optional timeout in milliseconds for each AI model attempt.',
+      isRequired: false,
+    },
+    AI_LOG_FULL_PROMPTS: {
+      description:
+        'Optional boolean-like flag. Keep false in production; full prompt logging can include PHI.',
       isRequired: false,
     },
     META_ACCESS_TOKEN: {

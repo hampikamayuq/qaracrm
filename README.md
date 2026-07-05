@@ -20,7 +20,7 @@ Built with the [Twenty SDK](https://www.npmjs.com/package/create-twenty-app)
 | Layouts | `src/page-layouts/` + `src/navigation-menu-items/` | Inbox + Kanban pages reachable from the sidebar |
 | Commands | `src/command-menu-items/` | Cmd+K entries to open Inbox / Kanban |
 | Default role | `src/default-role.ts` | Function role used by Tawany LFs (read/update records, no hard delete) |
-| Server variables | `src/application-config.ts` | `OPENROUTER_API_KEY` (secret, required), `OPENROUTER_BASE_URL`, `DEFAULT_MODEL_PATIENT`, `DEFAULT_MODEL_INTERNAL` |
+| Server variables | `src/application-config.ts` | OpenRouter, Meta, AI fallback/timeout, and audit-log knobs |
 
 ## Getting Started
 
@@ -37,6 +37,19 @@ yarn twenty dev --once          # one-shot sync (CI / smoke)
 Open the workspace, install the app, and the Tawany items appear in the
 left sidebar.
 
+## Render Target
+
+The Twenty server URL can be the Render web service URL. Use the same base URL
+consistently:
+
+- `TWENTY_DEPLOY_URL=https://<render-twenty-service>.onrender.com`
+- Meta webhook: `https://<render-twenty-service>.onrender.com/s/meta/webhook`
+- `OPENROUTER_HTTP_REFERER=https://<render-twenty-service>.onrender.com`
+
+Keep real secrets out of the repo. `.env.example` documents local/deploy names,
+and `docs/superpowers/2026-07-05-qara-render-ops.md` has the activation
+checklist.
+
 ## Useful Commands
 
 - `yarn twenty dev` — build + sync + watch
@@ -45,7 +58,7 @@ left sidebar.
 - `yarn twenty dev:add <entity>` — scaffold a new object / field / LF / view / etc.
 - `yarn typecheck` — TS check via tsgo
 - `yarn lint` — oxlint
-- `yarn test:unit` — Vitest (58 tests)
+- `yarn test:unit` — Vitest unit suite
 - `yarn test` — integration tests
 - `bash scripts/smoke.sh` — typecheck + tests + lint + build (use before opening a PR)
 

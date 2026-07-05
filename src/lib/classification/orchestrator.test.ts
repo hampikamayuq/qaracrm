@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { beforeEach, describe, it, expect, vi } from 'vitest';
 import type { AiClient, ChatResult } from 'src/lib/ai-client';
 import { classifyMessage } from './orchestrator';
 import { QARA_CLASSIFICATION_PROMPT } from 'src/lib/prompts';
@@ -33,6 +33,11 @@ const validJson = JSON.stringify({
 });
 
 describe('classifyMessage', () => {
+  beforeEach(() => {
+    delete process.env.DEFAULT_MODEL_INTERNAL;
+    delete process.env.DEFAULT_MODEL_INTERNAL_FALLBACK;
+  });
+
   it('returns the LLM result (path: llm) when JSON parses and Zod validates', async () => {
     const ai = makeAi(chatResult({ content: validJson }));
     const r = await classifyMessage({ message: 'Quero agendar uma consulta', leadId: UUID }, { ai });
@@ -48,6 +53,15 @@ describe('classifyMessage', () => {
     const call = (ai.chat as ReturnType<typeof vi.fn>).mock.calls[0][0];
     expect(call.system).toBe(QARA_CLASSIFICATION_PROMPT);
     expect(call.responseFormat).toEqual({ type: 'json_object' });
+  });
+
+  it('passes the internal model fallback list to the ai client', async () => {
+    process.env.DEFAULT_MODEL_INTERNAL = 'deepseek/deepseek-chat';
+    process.env.DEFAULT_MODEL_INTERNAL_FALLBACK = 'z-ai/glm-5.2';
+    const ai = makeAi(chatResult({ content: validJson }));
+    await classifyMessage({ message: 'oi', leadId: UUID }, { ai });
+    const call = (ai.chat as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(call.model).toEqual(['deepseek/deepseek-chat', 'z-ai/glm-5.2']);
   });
 
   it('falls back to safe defaults when LLM returns malformed JSON', async () => {

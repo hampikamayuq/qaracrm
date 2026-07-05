@@ -1,14 +1,16 @@
 import { defineLogicFunction, type ObjectRecordCreateEvent } from 'twenty-sdk/define';
 import type { DatabaseEventPayload } from 'twenty-sdk/logic-function';
-import { createAiClient, type AiClient } from 'src/lib/ai-client';
+import { createAiClient, modelWithFallback, type AiClient } from 'src/lib/ai-client';
 import { createDataApi, type DataApi } from 'src/lib/data';
 import { tawanyTools } from 'src/lib/tools';
 import { validateReply } from 'src/lib/guards/reply-validator';
 import { handoff } from 'src/lib/handoff';
+import { recordAiRun } from 'src/lib/ai-run-log';
 import { buildTawanyContext } from 'src/lib/tawany/context';
 import { buildMessages, buildSystemPrompt } from 'src/lib/tawany/prompt-builder';
 import { runQaraClassifier } from './qara-classifier';
 import { runLeadScorer } from 'src/lib/lead-score/orchestrator';
+import { runLeadsNovosFlow } from './leads-novos-flow';
 
 const MAX_ITERATIONS = 6;
 
@@ -29,14 +31,29 @@ export const runTawany = async (
     const messages = buildMessages(tawanyCtx);
 
     for (let turn = 0; turn < MAX_ITERATIONS; turn++) {
+      const startedAt = Date.now();
       const res = await ai.chat({
-        model: process.env.DEFAULT_MODEL_PATIENT ?? 'minimax/minimax-m3',
+        model: modelWithFallback(
+          process.env.DEFAULT_MODEL_PATIENT,
+          process.env.DEFAULT_MODEL_PATIENT_FALLBACK,
+          'minimax/minimax-m3',
+        ),
         system,
         messages,
         tools: tawanyTools.schema,
       });
 
       if (res.finishReason === 'tool_calls') {
+        await recordAiRun(data, {
+          layer: 'tawany',
+          model: res.modelUsed,
+          fallbackUsed: res.fallbackUsed,
+          latencyMs: Date.now() - startedAt,
+          success: true,
+          reason: 'tool_calls',
+          conversationId: params.conversationId,
+          messageId: params.messageId,
+        });
         messages.push({ role: 'assistant', content: res.content, tool_calls: res.toolCalls });
         for (const call of res.toolCalls) {
           if (call.name === 'handoffToHuman') {
@@ -59,6 +76,17 @@ export const runTawany = async (
       const reply = res.content ?? '';
       const guard = validateReply(reply, { knownPrices: tawanyCtx.knownPrices });
       if (!guard.ok) {
+        await recordAiRun(data, {
+          layer: 'tawany',
+          model: res.modelUsed,
+          fallbackUsed: res.fallbackUsed,
+          latencyMs: Date.now() - startedAt,
+          success: false,
+          validationPass: false,
+          reason: `guard_failed: ${guard.reason}`,
+          conversationId: params.conversationId,
+          messageId: params.messageId,
+        });
         await handoff(params.conversationId, `guard_failed: ${guard.reason}`.slice(0, 200), data);
         return { status: 'handoff', content: '', toolCalls: totalToolCalls };
       }
@@ -68,15 +96,56 @@ export const runTawany = async (
         JSON.stringify({ conversationId: params.conversationId, text: reply }),
         data,
       );
+      await recordAiRun(data, {
+        layer: 'tawany',
+        model: res.modelUsed,
+        fallbackUsed: res.fallbackUsed,
+        latencyMs: Date.now() - startedAt,
+        success: true,
+        validationPass: true,
+        reason: 'replied',
+        conversationId: params.conversationId,
+        messageId: params.messageId,
+      });
       return { status: 'replied', content: reply, toolCalls: totalToolCalls };
     }
 
+    await recordAiRun(data, {
+      layer: 'tawany',
+      success: false,
+      reason: 'max_iterations',
+      conversationId: params.conversationId,
+      messageId: params.messageId,
+    });
     await handoff(params.conversationId, 'max_iterations', data);
     return { status: 'handoff', content: '', toolCalls: totalToolCalls };
   } catch (e) {
     // Fase 4 insere o leads-novos-flow aqui como camada 2; Fase 1 vai direto ao humano.
-    await handoff(params.conversationId, `tawany_error: ${(e as Error).message}`.slice(0, 200), deps.data);
-    return { status: 'handoff', content: '', toolCalls: totalToolCalls };
+    const originalError = (e as Error).message;
+    await recordAiRun(deps.data, {
+      layer: 'tawany',
+      success: false,
+      reason: `tawany_error: ${originalError}`,
+      conversationId: params.conversationId,
+      messageId: params.messageId,
+    });
+    try {
+      const fallback = await runLeadsNovosFlow(
+        { messageId: params.messageId, conversationId: params.conversationId, originalError },
+        { data: deps.data },
+      );
+      if (fallback.status === 'replied') {
+        return { status: 'replied', content: fallback.content, toolCalls: totalToolCalls };
+      }
+      return { status: 'handoff', content: '', toolCalls: totalToolCalls };
+    } catch (fallbackError) {
+      await handoff(
+        params.conversationId,
+        `tawany_error: ${originalError}; leads_novos_error: ${(fallbackError as Error).message}`.slice(0, 200),
+        deps.data,
+      );
+      return { status: 'handoff', content: '', toolCalls: totalToolCalls };
+    }
   }
 };
 
@@ -131,6 +200,13 @@ export const runTawanyHandler = async (
       // sem OPENROUTER_API_KEY configurada: comportamento de produção é handoff, não crash
       const h = await handoff(message.conversationId, `config: ${(e as Error).message}`.slice(0, 200), deps.data);
       if (!h.ok) console.error('[tawany-handler] config handoff failed:', h.error);
+      await recordAiRun(deps.data, {
+        layer: 'tawany',
+        success: false,
+        reason: `config: ${(e as Error).message}`,
+        conversationId: message.conversationId,
+        messageId: message.id,
+      });
       console.log(JSON.stringify({ event: 'tawany_run', messageId: message.id, status: 'handoff', reason: 'config' }));
       return { status: 'handoff', toolCalls: 0 };
     }
@@ -156,6 +232,14 @@ export const runTawanyHandler = async (
         );
         if (cls) {
           classification = cls.result;
+          await recordAiRun(deps.data, {
+            layer: 'qara-classifier',
+            model: process.env.DEFAULT_MODEL_INTERNAL,
+            success: true,
+            reason: cls.path,
+            conversationId: message.conversationId,
+            messageId: message.id,
+          });
           console.log(JSON.stringify({
             event: 'qara_classify',
             messageId: message.id,
@@ -167,6 +251,14 @@ export const runTawanyHandler = async (
           }));
         }
       } catch (e) {
+        await recordAiRun(deps.data, {
+          layer: 'qara-classifier',
+          model: process.env.DEFAULT_MODEL_INTERNAL,
+          success: false,
+          reason: (e as Error).message,
+          conversationId: message.conversationId,
+          messageId: message.id,
+        });
         console.error('[tawany-handler] classifier failed (non-fatal):', (e as Error).message);
       }
 
@@ -192,6 +284,14 @@ export const runTawanyHandler = async (
             { ai },
           );
           await deps.data.update('lead', conv.leadId, { score: result.score, scoreReasons: result.reasons });
+          await recordAiRun(deps.data, {
+            layer: 'lead-scorer',
+            model: process.env.DEFAULT_MODEL_INTERNAL,
+            success: true,
+            reason: result.path,
+            conversationId: message.conversationId,
+            messageId: message.id,
+          });
           console.log(JSON.stringify({
             event: 'lead_score',
             messageId: message.id,
@@ -202,6 +302,14 @@ export const runTawanyHandler = async (
           }));
         }
       } catch (e) {
+        await recordAiRun(deps.data, {
+          layer: 'lead-scorer',
+          model: process.env.DEFAULT_MODEL_INTERNAL,
+          success: false,
+          reason: (e as Error).message,
+          conversationId: message.conversationId,
+          messageId: message.id,
+        });
         console.error('[tawany-handler] scorer failed (non-fatal):', (e as Error).message);
       }
     }

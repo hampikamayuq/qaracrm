@@ -1,6 +1,6 @@
 import { defineLogicFunction, type ObjectRecordCreateEvent } from 'twenty-sdk/define';
 import type { DatabaseEventPayload } from 'twenty-sdk/logic-function';
-import { createAiClient } from 'src/lib/ai-client';
+import { createAiClient, modelWithFallback } from 'src/lib/ai-client';
 import { createDataApi, type DataApi } from 'src/lib/data';
 
 export type SummarizeParams = { messageId: string; conversationId: string };
@@ -28,7 +28,11 @@ export const summarizeConversation = async (
       .join('\n');
 
     const result = await createAiClient().chat({
-      model: process.env.DEFAULT_MODEL_INTERNAL ?? 'deepseek/deepseek-chat',
+      model: modelWithFallback(
+        process.env.DEFAULT_MODEL_INTERNAL,
+        process.env.DEFAULT_MODEL_INTERNAL_FALLBACK,
+        'deepseek/deepseek-chat',
+      ),
       system: SYSTEM_PROMPT,
       messages: [{ role: 'user', content: transcript }],
     });

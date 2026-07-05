@@ -16,8 +16,18 @@ vi.mock('src/lib/lead-score/orchestrator', () => ({
   runLeadScorer: vi.fn(),
 }));
 
+vi.mock('src/lib/ai-run-log', () => ({
+  recordAiRun: vi.fn(),
+}));
+
+vi.mock('./leads-novos-flow', () => ({
+  runLeadsNovosFlow: vi.fn(),
+}));
+
 import { runQaraClassifier } from './qara-classifier';
 import { runLeadScorer } from 'src/lib/lead-score/orchestrator';
+import { recordAiRun } from 'src/lib/ai-run-log';
+import { runLeadsNovosFlow } from './leads-novos-flow';
 
 const UUID = '00000000-0000-4000-8000-000000000000';
 const LEAD_ID = 'l1';
@@ -53,8 +63,11 @@ const makeAi = (...results: ChatResult[]): AiClient => {
 
 beforeEach(() => {
   process.env.DEFAULT_MODEL_PATIENT = 'minimax/minimax-m3';
+  delete process.env.DEFAULT_MODEL_PATIENT_FALLBACK;
   vi.mocked(runQaraClassifier).mockReset();
   vi.mocked(runLeadScorer).mockReset();
+  vi.mocked(recordAiRun).mockReset();
+  vi.mocked(runLeadsNovosFlow).mockReset();
 });
 
 describe('runTawany', () => {
@@ -62,11 +75,32 @@ describe('runTawany', () => {
     const data = makeData();
     const r = await runTawany(
       { messageId: 'm1', conversationId: UUID },
-      { ai: makeAi(chatResult({ content: 'Olá Maria!', finishReason: 'stop' })), data },
+      { ai: makeAi(chatResult({ content: 'Olá Maria!', finishReason: 'stop', modelUsed: 'minimax/minimax-m3', fallbackUsed: false })), data },
     );
     expect(r.status).toBe('replied');
     expect(r.content).toBe('Olá Maria!');
     expect(data.create).toHaveBeenCalledWith('chatMessage', expect.objectContaining({ direction: 'OUT', body: 'Olá Maria!' }));
+    expect(recordAiRun).toHaveBeenCalledWith(data, expect.objectContaining({
+      layer: 'tawany',
+      model: 'minimax/minimax-m3',
+      fallbackUsed: false,
+      success: true,
+      validationPass: true,
+      reason: 'replied',
+      conversationId: UUID,
+      messageId: 'm1',
+    }));
+  });
+
+  it('passes the patient model fallback list to the ai client', async () => {
+    process.env.DEFAULT_MODEL_PATIENT_FALLBACK = 'z-ai/glm-5.2';
+    const data = makeData();
+    const ai = makeAi(chatResult({ content: 'Olá Maria!', finishReason: 'stop' }));
+    await runTawany({ messageId: 'm1', conversationId: UUID }, { ai, data });
+    expect((ai.chat as ReturnType<typeof vi.fn>).mock.calls[0][0].model).toEqual([
+      'minimax/minimax-m3',
+      'z-ai/glm-5.2',
+    ]);
   });
 
   it('executes tool calls then replies', async () => {
@@ -113,13 +147,30 @@ describe('runTawany', () => {
       { ai: makeAi(chatResult({ content: 'A consulta custa R$ 999,00.', finishReason: 'stop' })), data },
     );
     expect(r.status).toBe('handoff');
+    expect(recordAiRun).toHaveBeenCalledWith(data, expect.objectContaining({
+      layer: 'tawany',
+      success: false,
+      validationPass: false,
+      reason: expect.stringContaining('guard_failed'),
+      conversationId: UUID,
+      messageId: 'm1',
+    }));
   });
 
-  it('hands off on ai-client error', async () => {
+  it('tries leads-novos-flow before human handoff on ai-client error', async () => {
     const data = makeData();
     const ai = { chat: vi.fn().mockRejectedValue(new Error('OpenRouter timeout')) } as unknown as AiClient;
+    vi.mocked(runLeadsNovosFlow).mockResolvedValue({
+      status: 'replied',
+      rule: 'greeting',
+      content: 'Oi! Sou a Tawany.',
+    });
     const r = await runTawany({ messageId: 'm1', conversationId: UUID }, { ai, data });
-    expect(r.status).toBe('handoff');
+    expect(r.status).toBe('replied');
+    expect(vi.mocked(runLeadsNovosFlow)).toHaveBeenCalledWith(
+      { messageId: 'm1', conversationId: UUID, originalError: 'OpenRouter timeout' },
+      { data },
+    );
   });
 
   it('hands off after MAX_ITERATIONS tool turns', async () => {
@@ -258,6 +309,20 @@ describe('runTawanyHandler', () => {
       score: 95,
       scoreReasons: ['temperatura: HOT', 'intencao: agendar', 'prioridade: P1'],
     });
+    expect(recordAiRun).toHaveBeenCalledWith(data, expect.objectContaining({
+      layer: 'qara-classifier',
+      success: true,
+      reason: 'llm',
+      conversationId: UUID,
+      messageId: 'm1',
+    }));
+    expect(recordAiRun).toHaveBeenCalledWith(data, expect.objectContaining({
+      layer: 'lead-scorer',
+      success: true,
+      reason: 'heuristic',
+      conversationId: UUID,
+      messageId: 'm1',
+    }));
   });
 
   it('runs scorer with null classification when the classifier returns null', async () => {
