@@ -2448,7 +2448,7 @@ ALTER TABLE "AiSuggestion" ADD COLUMN "originalBody" TEXT;
 CREATE INDEX "AiSuggestion_humanEdited_idx" ON "AiSuggestion"("humanEdited");
 ```
 
-- [ ] **Step 12: Write tawany routes (with A4 human edit capture)**
+- [x] **Step 12: Write tawany routes (with A4 human edit capture)**
 
 Create `apps/api/src/routes/tawany-routes.ts`:
 
@@ -2596,7 +2596,7 @@ router.post('/reject', authMiddleware, async (req: Request, res: Response) => {
 export default router;
 ```
 
-- [ ] **Step 13: Write tawany routes test (with A4 edit-capture test)**
+- [x] **Step 13: Write tawany routes test (with A4 edit-capture test)**
 
 Create `apps/api/src/routes/tawany-routes.test.ts`:
 
@@ -2621,7 +2621,7 @@ describe('Tawany Routes', () => {
 });
 ```
 
-- [ ] **Step 14: Verify compilation**
+- [x] **Step 14: Verify compilation**
 
 ```bash
 cd apps/api && pnpm tsc --noEmit 2>&1 | head -40
@@ -2645,7 +2645,7 @@ if (mohsPattern.test(text) && !hypothesisMarkers.test(text)) {
 
 Add this check after the sensitive topics check (section 3), before the final `return { ok: true }`.
 
-- [ ] **Step 16: Commit**
+- [x] **Step 16: Commit**
 
 ```bash
 git add apps/api/src/logic-functions/tawany-handler.ts \

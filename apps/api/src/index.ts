@@ -2,6 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import authRoutes from './routes/auth-routes';
 import metaWebhookRoutes from './routes/meta-webhook-routes';
+import tawanyRoutes from './routes/tawany-routes';
 
 const app = express();
 const PORT = parseInt(process.env.PORT ?? '3001', 10);
@@ -20,6 +21,7 @@ app.use(cors());
 // Routes
 app.use('/api/auth', authRoutes);
 app.use('/api/webhooks/meta', metaWebhookRoutes);
+app.use('/api/tawany', tawanyRoutes);
 
 // Health check
 app.get('/api/health', (_req, res) => {
