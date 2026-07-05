@@ -6,15 +6,20 @@ import tawanyRoutes from './routes/tawany-routes';
 import operationsRoutes from './routes/operations-routes';
 import inboxRoutes from './routes/inbox-routes';
 import appointmentRoutes from './routes/appointment-routes';
+import lgpdRoutes from './routes/lgpd-routes';
 import { prisma } from './lib/deps';
 import { createPrismaDataApi } from './lib/prisma-data-api';
 import { startScheduler } from './lib/scheduler';
+import { assertProductionConfig, requestLogger, securityHeaders } from './lib/production';
 
+assertProductionConfig();
 const app = express();
 
+app.use(securityHeaders);
+app.use(requestLogger);
 app.use(
   cors({
-    origin: process.env.CORS_ORIGIN ?? 'http://localhost:3000',
+    origin: process.env.CORS_DOMAIN ?? process.env.CORS_ORIGIN ?? 'http://localhost:3000',
     credentials: true,
   }),
 );
@@ -36,6 +41,7 @@ app.use('/api/tawany', tawanyRoutes);
 app.use('/api/operations', operationsRoutes);
 app.use('/api/inbox', inboxRoutes);
 app.use('/api/appointments', appointmentRoutes);
+app.use('/api/lgpd', lgpdRoutes);
 
 startScheduler(createPrismaDataApi(prisma));
 
