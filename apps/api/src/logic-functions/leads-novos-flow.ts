@@ -1,6 +1,4 @@
-import { defineLogicFunction } from 'twenty-sdk/define';
-import { LEADS_NOVOS_FLOW_LOGIC_FUNCTION_UNIVERSAL_IDENTIFIER } from 'src/constants/universal-identifiers';
-import { createDataApi, type DataApi } from 'src/lib/data';
+import type { DataApi } from 'src/lib/data';
 import { handoff } from 'src/lib/handoff';
 import { matchLeadsNovosRule } from 'src/lib/leads-novos/matcher';
 import { createActivity } from 'src/lib/tools/createActivity';
@@ -62,12 +60,3 @@ export const runLeadsNovosFlow = async (
     );
   }
 };
-
-export default defineLogicFunction({
-  universalIdentifier: LEADS_NOVOS_FLOW_LOGIC_FUNCTION_UNIVERSAL_IDENTIFIER,
-  name: 'leads-novos-flow',
-  description:
-    'Fallback deterministico da Tawany: responde regras administrativas seguras e envia para humano em no-match/risco/erro.',
-  timeoutSeconds: 30,
-  handler: async (input: LeadsNovosFlowInput) => runLeadsNovosFlow(input, { data: createDataApi() }),
-});

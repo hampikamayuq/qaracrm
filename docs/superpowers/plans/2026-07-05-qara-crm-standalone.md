@@ -2682,11 +2682,11 @@ git commit -m "feat: task 7 — tawany handler with pre-Tawany guards, prompt-in
 - Consumes: DataApi from Task 4, AI client
 - Produces: `POST /api/operations/follow-up` (trigger follow-up for leads without recent activity), `POST /api/operations/classify` (classify a message manually)
 
-- [ ] **Step 1: Strip defineLogicFunction from leads-novos-flow.ts**
+- [x] **Step 1: Strip defineLogicFunction from leads-novos-flow.ts**
 
 Read `apps/api/src/logic-functions/leads-novos-flow.ts`. Remove lines 66-73 (the `export default defineLogicFunction({...})` block). Keep `runLeadsNovosFlow` exported.
 
-- [ ] **Step 2: Write operations routes**
+- [x] **Step 2: Write operations routes**
 
 Create `apps/api/src/routes/operations-routes.ts`:
 
@@ -2771,7 +2771,7 @@ router.post('/classify', authMiddleware, async (req: Request, res: Response) => 
 export default router;
 ```
 
-- [ ] **Step 3: Write operations routes test**
+- [x] **Step 3: Write operations routes test**
 
 Create `apps/api/src/routes/operations-routes.test.ts`:
 
@@ -2786,7 +2786,7 @@ describe('Operations Routes', () => {
 });
 ```
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add apps/api/src/logic-functions/leads-novos-flow.ts apps/api/src/routes/operations-routes.ts apps/api/src/routes/operations-routes.test.ts apps/api/src/lib/tools/sendWhatsAppTemplate.ts
