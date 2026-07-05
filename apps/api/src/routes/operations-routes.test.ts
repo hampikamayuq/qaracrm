@@ -106,6 +106,29 @@ describe('Operations routes', () => {
     });
   });
 
+  it('lists pipeline stages with their leads', async () => {
+    mocks.data.list
+      .mockResolvedValueOnce([{ id: 'stage-1', name: 'Novo' }])
+      .mockResolvedValueOnce([{ id: 'lead-1', name: 'Maria', score: 80, tags: ['temp:quente'] }]);
+    const { pipelineRoute } = await import('./operations-routes');
+    const response = res();
+
+    await pipelineRoute(req({}), response);
+
+    expect(mocks.data.list).toHaveBeenNthCalledWith(1, 'pipelineStage', {
+      orderBy: { order: 'ASC' },
+      select: { id: true, name: true },
+    });
+    expect(mocks.data.list).toHaveBeenNthCalledWith(2, 'lead', {
+      filter: { stageId: { eq: 'stage-1' } },
+      select: { id: true, name: true, score: true, tags: true },
+    });
+    expect(response.json).toHaveBeenCalledWith({
+      success: true,
+      data: [{ id: 'stage-1', name: 'Novo', leads: [{ id: 'lead-1', name: 'Maria', score: 80, tags: ['temp:quente'] }] }],
+    });
+  });
+
   it('exports an express router', async () => {
     const mod = await import('./operations-routes');
     expect(mod.default).toBeDefined();

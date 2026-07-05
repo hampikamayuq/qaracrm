@@ -65,7 +65,29 @@ export const classifyRoute = async (req: Request, res: Response): Promise<void> 
   }
 };
 
+export const pipelineRoute = async (_req: Request, res: Response): Promise<void> => {
+  try {
+    const stages = await data.list('pipelineStage', {
+      orderBy: { order: 'ASC' },
+      select: { id: true, name: true },
+    });
+    const result = await Promise.all(stages.map(async (stage) => {
+      const id = typeof stage.id === 'string' ? stage.id : '';
+      const leads = await data.list('lead', {
+        filter: { stageId: { eq: id } },
+        select: { id: true, name: true, score: true, tags: true },
+      });
+      return { ...stage, leads };
+    }));
+
+    res.json({ success: true, data: result });
+  } catch {
+    jsonError(res, 500, 'Failed to load pipeline');
+  }
+};
+
 router.post('/follow-up', authMiddleware, followUpRoute);
 router.post('/classify', authMiddleware, classifyRoute);
+router.get('/pipeline', authMiddleware, pipelineRoute);
 
 export default router;
