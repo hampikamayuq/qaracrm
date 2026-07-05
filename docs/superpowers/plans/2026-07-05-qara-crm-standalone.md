@@ -2227,7 +2227,7 @@ cd apps/api && pnpm vitest run src/lib/ai-client.test.ts
 
 Expected: 3 tests PASS.
 
-- [ ] **Step 9: Add context-window truncation with recency (A5)**
+- [x] **Step 9: Add context-window truncation with recency (A5)**
 
 The current Tawany prompt assembly sends the full message history to the LLM. A long conversation (50+ messages) blows the input cap (12k chars) AND makes the LLM forget recent context because of lost-in-the-middle bias. Fix: keep the last N messages and cap total chars. The system prompt and the current user message are always preserved.
 

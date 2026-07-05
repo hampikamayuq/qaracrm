@@ -4,8 +4,8 @@ import type { DataApi } from 'src/lib/data';
 import type { AiClient, ChatResult } from 'src/lib/ai-client';
 
 vi.mock('src/lib/tawany/prompt-builder', () => ({
-  buildSystemPrompt: () => 'system',
-  buildMessages: () => [{ role: 'user', content: 'oi' }],
+  buildSystemPrompt: vi.fn(() => 'system'),
+  buildMessages: vi.fn(() => [{ role: 'user', content: 'oi' }]),
 }));
 
 vi.mock('./qara-classifier', () => ({
@@ -27,6 +27,7 @@ vi.mock('./leads-novos-flow', () => ({
 import { runQaraClassifier } from './qara-classifier';
 import { runLeadScorer } from 'src/lib/lead-score/orchestrator';
 import { recordAiRun } from 'src/lib/ai-run-log';
+import { buildMessages } from 'src/lib/tawany/prompt-builder';
 import { runLeadsNovosFlow } from './leads-novos-flow';
 
 const UUID = '00000000-0000-4000-8000-000000000000';
@@ -68,6 +69,7 @@ beforeEach(() => {
   vi.mocked(runLeadScorer).mockReset();
   vi.mocked(recordAiRun).mockReset();
   vi.mocked(runLeadsNovosFlow).mockReset();
+  vi.mocked(buildMessages).mockReturnValue([{ role: 'user', content: 'oi' }]);
 });
 
 describe('runTawany', () => {
@@ -101,6 +103,25 @@ describe('runTawany', () => {
       'minimax/minimax-m3',
       'z-ai/glm-5.2',
     ]);
+  });
+
+  it('sends only the configured recent context window to the ai client', async () => {
+    process.env.AI_MAX_CONTEXT_MESSAGES = '2';
+    vi.mocked(buildMessages).mockReturnValue([
+      { role: 'user', content: 'msg 1' },
+      { role: 'assistant', content: 'msg 2' },
+      { role: 'user', content: 'msg 3' },
+      { role: 'assistant', content: 'msg 4' },
+    ]);
+    const data = makeData();
+    const ai = makeAi(chatResult({ content: 'Olá Maria!', finishReason: 'stop' }));
+    try {
+      await runTawany({ messageId: 'm1', conversationId: UUID }, { ai, data });
+      const sentMessages = (ai.chat as ReturnType<typeof vi.fn>).mock.calls[0][0].messages;
+      expect(sentMessages.map((message: { content: string | null }) => message.content)).toEqual(['msg 3', 'msg 4']);
+    } finally {
+      delete process.env.AI_MAX_CONTEXT_MESSAGES;
+    }
   });
 
   it('executes tool calls then replies', async () => {

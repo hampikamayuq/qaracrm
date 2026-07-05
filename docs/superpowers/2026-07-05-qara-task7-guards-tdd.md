@@ -10,6 +10,7 @@ Source plan: `docs/superpowers/plans/2026-07-05-qara-crm-standalone.md`, Task 7.
 - As compliance, affirmative Mohs or skin-cancer statements are blocked unless framed as a future hypothesis.
 - As QARA ops, repeated Meta Graph API failures open a circuit and short-circuit later sends without another outbound `fetch`.
 - As QARA ops, every OpenRouter request carries a bounded `max_tokens` value and long input content is truncated before leaving the process.
+- As QARA ops, Tawany sends only a bounded recent message window to the model while preserving the newest context.
 
 ## Evidence
 
@@ -25,6 +26,9 @@ Source plan: `docs/superpowers/plans/2026-07-05-qara-crm-standalone.md`, Task 7.
 | 8 | `sendWhatsApp` wraps Meta sends and stops calling `fetch` after the breaker opens | `src/lib/tools/tools.test.ts` | PASS | Same circuit green command |
 | 9 | RED captured missing `max_tokens` and missing truncation in OpenRouter request body | `pnpm --filter @qara/api exec vitest run src/lib/ai-client.test.ts` | FAIL as expected | 3 cap tests failed |
 | 10 | `ai-client` sends env/default `max_tokens` and truncates oversized input content | `src/lib/ai-client.test.ts` | PASS | `pnpm --filter @qara/api exec vitest run src/lib/ai-client.test.ts` |
+| 11 | RED captured missing context-window helper | `pnpm --filter @qara/api exec vitest run src/lib/ai/context-window.test.ts` | FAIL as expected | Missing `./context-window` |
+| 12 | Context-window keeps system + newest messages, drops older middle, and respects char budget | `src/lib/ai/context-window.test.ts` | PASS | `pnpm --filter @qara/api exec vitest run src/lib/ai/context-window.test.ts src/logic-functions/tawany-handler.test.ts` |
+| 13 | Tawany handler sends the truncated recent window to `ai.chat` | `src/logic-functions/tawany-handler.test.ts` | PASS | Same context-window green command |
 
 Green command:
 
@@ -58,7 +62,15 @@ pnpm --filter @qara/api exec vitest run src/lib/ai-client.test.ts
 
 Result: 1 file passed, 11 tests passed.
 
+Context-window command:
+
+```bash
+pnpm --filter @qara/api exec vitest run src/lib/ai/context-window.test.ts src/logic-functions/tawany-handler.test.ts
+```
+
+Result: 2 files passed, 22 tests passed.
+
 Known gaps:
 
-- Task 7 still needs context-window truncation, AiSuggestion routes, approval flow, and Prisma additions.
+- Task 7 still needs AiSuggestion creation, routes, approval flow, and Prisma additions.
 - `pnpm --filter @qara/api exec tsc --noEmit` remains blocked until the remaining legacy Twenty app files are migrated or excluded. The failure includes `twenty-sdk` imports, old TSX front components/tests, and NodeNext extension issues outside this slice.

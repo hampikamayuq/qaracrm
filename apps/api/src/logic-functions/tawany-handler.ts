@@ -5,6 +5,7 @@ import { validateReply } from 'src/lib/guards/reply-validator';
 import { detectInjection } from 'src/lib/guards/prompt-injection';
 import { handoff } from 'src/lib/handoff';
 import { recordAiRun } from 'src/lib/ai-run-log';
+import { truncateToContextWindow } from 'src/lib/ai/context-window';
 import { buildTawanyContext } from 'src/lib/tawany/context';
 import { buildMessages, buildSystemPrompt } from 'src/lib/tawany/prompt-builder';
 import { runQaraClassifier } from './qara-classifier';
@@ -13,6 +14,16 @@ import { runLeadsNovosFlow } from './leads-novos-flow';
 
 const MAX_ITERATIONS = 6;
 const OPT_OUT_PATTERN = /\b(sair|parar|cancelar|n[aã]o quero mais|n[aã]o enviar|remover|descadastrar)\b/iu;
+const parsePositiveInt = (value: string | undefined, fallback: number): number => {
+  if (!value) return fallback;
+  const parsed = Number.parseInt(value.replaceAll('_', ''), 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+};
+
+const contextWindowOptions = () => ({
+  maxMessages: parsePositiveInt(process.env.AI_MAX_CONTEXT_MESSAGES, 20),
+  maxTotalChars: parsePositiveInt(process.env.AI_MAX_CONTEXT_CHARS, 10_000),
+});
 
 export type TawanyHandlerParams = { messageId: string; conversationId: string };
 export type TawanyDeps = { ai: AiClient; data: DataApi };
@@ -32,6 +43,14 @@ export const runTawany = async (
 
     for (let turn = 0; turn < MAX_ITERATIONS; turn++) {
       const startedAt = Date.now();
+      const contextWindow = truncateToContextWindow(messages, contextWindowOptions());
+      if (contextWindow.truncated) {
+        console.log(JSON.stringify({
+          event: 'tawany_context_truncated',
+          messageId: params.messageId,
+          droppedCount: contextWindow.droppedCount,
+        }));
+      }
       const res = await ai.chat({
         model: modelWithFallback(
           process.env.DEFAULT_MODEL_PATIENT,
@@ -39,7 +58,7 @@ export const runTawany = async (
           'minimax/minimax-m3',
         ),
         system,
-        messages,
+        messages: contextWindow.messages,
         tools: tawanyTools.schema,
       });
 
