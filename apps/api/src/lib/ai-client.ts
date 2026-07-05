@@ -22,6 +22,8 @@ export type ChatParams = {
   messages: ChatMessage[];
   tools?: ToolSpec[];
   responseFormat?: { type: 'json_object' | 'json_schema'; json_schema?: unknown };
+  maxOutputTokens?: number;
+  maxInputChars?: number;
 };
 
 export type ChatResult = {
@@ -64,6 +66,26 @@ type OpenRouterResponse = {
   usage?: { prompt_tokens: number; completion_tokens: number; total_tokens: number };
 };
 
+const DEFAULT_MAX_OUTPUT_TOKENS = 600;
+const DEFAULT_MAX_INPUT_CHARS = 12_000;
+const TRUNCATION_MARKER = '\n[...truncated, message exceeded cap]';
+
+const parsePositiveInt = (value: string | undefined, fallback: number): number => {
+  if (!value) return fallback;
+  const parsed = Number.parseInt(value.replaceAll('_', ''), 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+};
+
+const truncateText = (text: string | null, maxChars: number): string | null => {
+  if (text === null || text.length <= maxChars) return text;
+  return `${text.slice(0, maxChars)}${TRUNCATION_MARKER}`;
+};
+
+const truncateMessage = (message: ChatMessage, maxChars: number): ChatMessage => ({
+  ...message,
+  content: truncateText(message.content, maxChars),
+});
+
 export const createAiClient = (overrides?: {
   apiKey?: string;
   baseUrl?: string;
@@ -74,6 +96,14 @@ export const createAiClient = (overrides?: {
     overrides?.baseUrl ?? process.env.OPENROUTER_BASE_URL ?? 'https://openrouter.ai/api/v1';
   const timeoutMs =
     overrides?.timeoutMs ?? Number.parseInt(process.env.AI_TIMEOUT_MS ?? '', 10);
+  const defaultMaxOutputTokens = parsePositiveInt(
+    process.env.AI_MAX_OUTPUT_TOKENS,
+    DEFAULT_MAX_OUTPUT_TOKENS,
+  );
+  const defaultMaxInputChars = parsePositiveInt(
+    process.env.AI_MAX_INPUT_CHARS,
+    DEFAULT_MAX_INPUT_CHARS,
+  );
 
   if (!apiKey) {
     throw new Error('OPENROUTER_API_KEY is required');
@@ -99,9 +129,13 @@ export const createAiClient = (overrides?: {
       let lastError: Error | null = null;
 
       for (const [index, model] of models.entries()) {
+        const maxInputChars = params.maxInputChars ?? defaultMaxInputChars;
+        const safeSystem = truncateText(params.system, maxInputChars);
+        const safeMessages = params.messages.map((message) => truncateMessage(message, maxInputChars));
         const body: Record<string, unknown> = {
           model,
-          messages: [{ role: 'system', content: params.system }, ...params.messages.map(toWire)],
+          messages: [{ role: 'system', content: safeSystem }, ...safeMessages.map(toWire)],
+          max_tokens: params.maxOutputTokens ?? defaultMaxOutputTokens,
         };
         if (params.tools) body.tools = params.tools;
         if (params.responseFormat) body.response_format = params.responseFormat;

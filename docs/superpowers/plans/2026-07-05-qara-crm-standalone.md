@@ -2123,7 +2123,7 @@ export const sendWhatsApp = {
 };
 ```
 
-- [ ] **Step 8: Add token caps to ai-client (TDD)**
+- [x] **Step 8: Add token caps to ai-client (TDD)**
 
 `ai-client.ts` was copied as Category A from Twenty with no usage cap. Without a cap, a malicious or runaway prompt can blow the OpenRouter bill. Add `max_tokens` on the request and a hard input-character cap (truncate with a marker) before any LLM call. The prompt cap is the load-bearing one — `max_tokens` is already the OpenRouter per-request limit, this is just a no-duplicate config knob.
 

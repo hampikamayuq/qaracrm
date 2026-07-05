@@ -224,4 +224,85 @@ describe('ai-client', () => {
     expect(body.response_format).toEqual({ type: 'json_object' });
     global.fetch = originalFetch;
   });
+
+  it('passes max_tokens from env to OpenRouter request', async () => {
+    process.env.AI_MAX_OUTPUT_TOKENS = '250';
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        choices: [{ message: { content: 'ok' }, finish_reason: 'stop' }],
+      }),
+    });
+    global.fetch = fetchMock as unknown as typeof fetch;
+
+    try {
+      const client = createAiClient();
+      await client.chat({
+        model: 'minimax/minimax-m3',
+        system: 'sys',
+        messages: [{ role: 'user', content: 'q' }],
+      });
+
+      const [, init] = fetchMock.mock.calls[0];
+      expect(JSON.parse(init.body).max_tokens).toBe(250);
+    } finally {
+      delete process.env.AI_MAX_OUTPUT_TOKENS;
+      global.fetch = originalFetch;
+    }
+  });
+
+  it('uses default max_tokens when env is unset', async () => {
+    delete process.env.AI_MAX_OUTPUT_TOKENS;
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        choices: [{ message: { content: 'ok' }, finish_reason: 'stop' }],
+      }),
+    });
+    global.fetch = fetchMock as unknown as typeof fetch;
+
+    try {
+      const client = createAiClient();
+      await client.chat({
+        model: 'minimax/minimax-m3',
+        system: 'sys',
+        messages: [{ role: 'user', content: 'q' }],
+      });
+
+      const [, init] = fetchMock.mock.calls[0];
+      expect(JSON.parse(init.body).max_tokens).toBe(600);
+    } finally {
+      global.fetch = originalFetch;
+    }
+  });
+
+  it('truncates long input before sending to OpenRouter', async () => {
+    process.env.AI_MAX_INPUT_CHARS = '20';
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        choices: [{ message: { content: 'ok' }, finish_reason: 'stop' }],
+      }),
+    });
+    global.fetch = fetchMock as unknown as typeof fetch;
+
+    try {
+      const client = createAiClient();
+      await client.chat({
+        model: 'minimax/minimax-m3',
+        system: 'sys',
+        messages: [{ role: 'user', content: 'x'.repeat(200) }],
+      });
+
+      const [, init] = fetchMock.mock.calls[0];
+      const body = JSON.parse(init.body);
+      const content = body.messages[1].content;
+      expect(content).toContain('truncated');
+      expect(content.startsWith('x'.repeat(20))).toBe(true);
+      expect(content.length).toBeLessThan(80);
+    } finally {
+      delete process.env.AI_MAX_INPUT_CHARS;
+      global.fetch = originalFetch;
+    }
+  });
 });
