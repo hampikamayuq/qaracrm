@@ -110,11 +110,23 @@ export const runTawany = async (
         return { status: 'handoff', content: '', toolCalls: totalToolCalls };
       }
 
+      const suggestion = await data.create('aiSuggestion', {
+        conversationId: params.conversationId,
+        messageId: params.messageId,
+        model: res.modelUsed,
+        body: reply,
+        riskLevel: 'low',
+        status: 'PENDING',
+        promptVersion: process.env.TAWANY_PROMPT_VERSION ?? 'v1',
+      });
       await tawanyTools.execute(
         'sendWhatsApp',
         JSON.stringify({ conversationId: params.conversationId, text: reply }),
         data,
       );
+      if (typeof suggestion.id === 'string') {
+        await data.update('aiSuggestion', suggestion.id, { status: 'SENT' });
+      }
       await recordAiRun(data, {
         layer: 'tawany',
         model: res.modelUsed,

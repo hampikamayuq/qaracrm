@@ -2367,7 +2367,7 @@ if (win.truncated) {
 const res = await ai.chat({ messages: win.messages });
 ```
 
-- [ ] **Step 10: Add AiSuggestion creation with status enum + promptVersion**
+- [x] **Step 10: Add AiSuggestion creation with status enum + promptVersion**
 
 Read `apps/api/src/logic-functions/tawany-handler.ts`. In `runTawanyHandler`, after the guard passes but before `sendWhatsApp` (line 94), insert:
 
@@ -2406,7 +2406,7 @@ if (riskLevel === 'low') {
 }
 ```
 
-- [ ] **Step 11: Prisma migration — add human-edit fields to AiSuggestion (A4 schema)**
+- [x] **Step 11: Prisma migration — add human-edit fields to AiSuggestion (A4 schema)**
 
 Human edits before approval are training data for future prompt tuning. Without capturing them, we lose the ground-truth signal of what the agent should have said.
 

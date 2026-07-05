@@ -65,6 +65,7 @@ const makeAi = (...results: ChatResult[]): AiClient => {
 beforeEach(() => {
   process.env.DEFAULT_MODEL_PATIENT = 'minimax/minimax-m3';
   delete process.env.DEFAULT_MODEL_PATIENT_FALLBACK;
+  delete process.env.TAWANY_PROMPT_VERSION;
   vi.mocked(runQaraClassifier).mockReset();
   vi.mocked(runLeadScorer).mockReset();
   vi.mocked(recordAiRun).mockReset();
@@ -92,6 +93,29 @@ describe('runTawany', () => {
       conversationId: UUID,
       messageId: 'm1',
     }));
+  });
+
+  it('creates an AiSuggestion and marks it SENT for a valid low-risk reply', async () => {
+    process.env.TAWANY_PROMPT_VERSION = 'test-v2';
+    const data = makeData();
+    (data.create as ReturnType<typeof vi.fn>).mockImplementation(async (obj: string) =>
+      obj === 'aiSuggestion' ? { id: 's1' } : { id: 'm1' },
+    );
+    const r = await runTawany(
+      { messageId: 'm1', conversationId: UUID },
+      { ai: makeAi(chatResult({ content: 'Olá Maria!', finishReason: 'stop', modelUsed: 'minimax/minimax-m3' })), data },
+    );
+    expect(r.status).toBe('replied');
+    expect(data.create).toHaveBeenCalledWith('aiSuggestion', {
+      conversationId: UUID,
+      messageId: 'm1',
+      model: 'minimax/minimax-m3',
+      body: 'Olá Maria!',
+      riskLevel: 'low',
+      status: 'PENDING',
+      promptVersion: 'test-v2',
+    });
+    expect(data.update).toHaveBeenCalledWith('aiSuggestion', 's1', { status: 'SENT' });
   });
 
   it('passes the patient model fallback list to the ai client', async () => {

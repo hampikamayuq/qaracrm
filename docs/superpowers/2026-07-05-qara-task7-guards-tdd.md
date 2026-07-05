@@ -11,6 +11,8 @@ Source plan: `docs/superpowers/plans/2026-07-05-qara-crm-standalone.md`, Task 7.
 - As QARA ops, repeated Meta Graph API failures open a circuit and short-circuit later sends without another outbound `fetch`.
 - As QARA ops, every OpenRouter request carries a bounded `max_tokens` value and long input content is truncated before leaving the process.
 - As QARA ops, Tawany sends only a bounded recent message window to the model while preserving the newest context.
+- As QARA ops, every valid Tawany reply is captured as an `AiSuggestion` with prompt version before sending and is marked `SENT` after successful send.
+- As product/compliance, AiSuggestion stores human-edit metadata for future prompt tuning.
 
 ## Evidence
 
@@ -29,6 +31,9 @@ Source plan: `docs/superpowers/plans/2026-07-05-qara-crm-standalone.md`, Task 7.
 | 11 | RED captured missing context-window helper | `pnpm --filter @qara/api exec vitest run src/lib/ai/context-window.test.ts` | FAIL as expected | Missing `./context-window` |
 | 12 | Context-window keeps system + newest messages, drops older middle, and respects char budget | `src/lib/ai/context-window.test.ts` | PASS | `pnpm --filter @qara/api exec vitest run src/lib/ai/context-window.test.ts src/logic-functions/tawany-handler.test.ts` |
 | 13 | Tawany handler sends the truncated recent window to `ai.chat` | `src/logic-functions/tawany-handler.test.ts` | PASS | Same context-window green command |
+| 14 | RED captured missing AiSuggestion creation before send | `pnpm --filter @qara/api exec vitest run src/logic-functions/tawany-handler.test.ts` | FAIL as expected | Expected `data.create('aiSuggestion', ...)`, received only `chatMessage` |
+| 15 | Tawany creates AiSuggestion with `promptVersion`, sends, then marks it `SENT` | `src/logic-functions/tawany-handler.test.ts` | PASS | `pnpm --filter @qara/api exec vitest run src/logic-functions/tawany-handler.test.ts` |
+| 16 | Prisma schema accepts `humanEdited`, `originalBody`, and `updatedAt` additions | `pnpm --filter @qara/api exec prisma validate` | PASS | Schema valid |
 
 Green command:
 
@@ -70,7 +75,16 @@ pnpm --filter @qara/api exec vitest run src/lib/ai/context-window.test.ts src/lo
 
 Result: 2 files passed, 22 tests passed.
 
+AiSuggestion handler/schema commands:
+
+```bash
+pnpm --filter @qara/api exec vitest run src/logic-functions/tawany-handler.test.ts
+pnpm --filter @qara/api exec prisma validate
+```
+
+Result: handler passed 20 tests; Prisma schema valid.
+
 Known gaps:
 
-- Task 7 still needs AiSuggestion creation, routes, approval flow, and Prisma additions.
+- Task 7 still needs Tawany routes and approval/reject flow.
 - `pnpm --filter @qara/api exec tsc --noEmit` remains blocked until the remaining legacy Twenty app files are migrated or excluded. The failure includes `twenty-sdk` imports, old TSX front components/tests, and NodeNext extension issues outside this slice.

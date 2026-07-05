@@ -135,9 +135,13 @@ model AiSuggestion {
   approvedById   String?
   approvedBy     User?        @relation(fields: [approvedById], references: [id])
   decidedAt      DateTime?
+  humanEdited    Boolean      @default(false)
+  originalBody   String?
   createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
 
   @@index([conversationId, status, createdAt])
+  @@index([humanEdited])
 }
 
 model Task {
