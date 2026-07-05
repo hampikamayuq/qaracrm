@@ -3437,15 +3437,15 @@ git commit -m "feat: task 10 — inbox UI, pipeline kanban UI, inbox list with s
 **Files:**
 - Create: `apps/api/src/lib/debounce.ts`
 - Create: `apps/api/src/lib/debounce.test.ts`
-- Modify: `apps/api/src/routes/meta-webhook-routes.ts` (call debounce before Tawany)
+- Modify: `apps/api/src/logic-functions/meta-webhook.ts` (gate inbound messages before any Tawany run)
 
 **Interfaces:**
 - Consumes: Task 3 (Prisma models), Task 6 (Meta webhook routes)
-- Produces: `debounceMessage(conversationId: string, messageId: string, data: DataApi): Promise<DebounceResult>` with status `'process' | 'skip' | 'optout'`
+- Produces: `createDebounce().check(conversationId, messageId, text)` with status `'process' | 'skip' | 'optout'`
 
 **Description:** In-process debounce prevents Tawany from firing on every message during rapid-fire conversations. A `Map<string, NodeJS.Timeout>` holds pending messages keyed by `conversationId`. When a new message arrives, the previous timeout is cleared and restarted. The default window is 20 seconds (`TAWANY_DEBOUNCE_MS`). Opt-out detection runs BEFORE any AI call — if the message matches the opt-out regex, the conversation is marked as opted out and a confirmation message is sent immediately.
 
-- [ ] **Step 1: Write debounce test**
+- [x] **Step 1: Write debounce test**
 
 Create `apps/api/src/lib/debounce.test.ts`:
 
@@ -3509,7 +3509,7 @@ describe('createDebounce', () => {
 });
 ```
 
-- [ ] **Step 2: Run debounce tests (verify they fail)**
+- [x] **Step 2: Run debounce tests (verify they fail)**
 
 ```bash
 cd apps/api && pnpm vitest run src/lib/debounce.test.ts
@@ -3517,7 +3517,7 @@ cd apps/api && pnpm vitest run src/lib/debounce.test.ts
 
 Expected: FAIL — module not found.
 
-- [ ] **Step 3: Implement createDebounce**
+- [x] **Step 3: Implement createDebounce**
 
 Create `apps/api/src/lib/debounce.ts`:
 
@@ -3559,7 +3559,7 @@ export function createDebounce() {
 }
 ```
 
-- [ ] **Step 4: Run debounce tests**
+- [x] **Step 4: Run debounce tests**
 
 ```bash
 cd apps/api && pnpm vitest run src/lib/debounce.test.ts
@@ -3567,9 +3567,9 @@ cd apps/api && pnpm vitest run src/lib/debounce.test.ts
 
 Expected: all 6 tests PASS.
 
-- [ ] **Step 5: Integrate debounce into meta-webhook-routes**
+- [x] **Step 5: Integrate debounce into meta webhook ingest**
 
-In `apps/api/src/routes/meta-webhook-routes.ts`, add debounce BEFORE the Tawany handler call:
+In `apps/api/src/logic-functions/meta-webhook.ts`, add debounce after finding/creating the conversation and before any later Tawany run can process the created message:
 
 ```typescript
 import { createDebounce } from '../lib/debounce';
@@ -3609,13 +3609,13 @@ if (debounce.isOptOut(messageBody)) {
 }
 ```
 
-- [ ] **Step 6: Add TAWANY_DEBOUNCE_MS to .env.example**
+- [x] **Step 6: Add TAWANY_DEBOUNCE_MS to .env.example**
 
 ```env
 TAWANY_DEBOUNCE_MS=20000
 ```
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add apps/api/src/lib/debounce.ts apps/api/src/lib/debounce.test.ts apps/api/src/routes/meta-webhook-routes.ts apps/api/.env.example

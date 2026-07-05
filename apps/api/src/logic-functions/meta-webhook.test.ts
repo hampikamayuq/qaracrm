@@ -1,8 +1,18 @@
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { DataApi } from '../lib/data';
 import { handleMetaWebhook } from './meta-webhook';
 
 // Auth + HMAC now handled by meta-webhook-routes.ts — this file tests only event processing.
+
+const mocks = vi.hoisted(() => ({
+  sendWhatsApp: {
+    execute: vi.fn().mockResolvedValue(JSON.stringify({ ok: true, sent: false })),
+  },
+}));
+
+vi.mock('../lib/tools/sendWhatsApp', () => ({
+  sendWhatsApp: mocks.sendWhatsApp,
+}));
 
 const api = (over: Partial<DataApi> = {}): DataApi => ({
   get: vi.fn().mockResolvedValue(null),
@@ -35,7 +45,16 @@ const waBody = {
   ],
 };
 
+const processDebounce = () => ({
+  check: vi.fn().mockReturnValue({ status: 'process' }),
+  isOptOut: vi.fn().mockReturnValue(false),
+});
+
 describe('handleMetaWebhook — inbound messages', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
   it('creates conversation + IN message for a new sender', async () => {
     const list = vi.fn().mockResolvedValue([]); // no dup, no existing conversation
     const create = vi
@@ -43,7 +62,7 @@ describe('handleMetaWebhook — inbound messages', () => {
       .mockResolvedValueOnce({ id: 'conv-1' }) // conversation
       .mockResolvedValueOnce({ id: 'msg-1' }); // chatMessage
     const update = vi.fn().mockResolvedValue({ id: 'conv-1' });
-    await handleMetaWebhook(waBody, api({ list, create, update }));
+    await handleMetaWebhook(waBody, api({ list, create, update }), processDebounce());
 
     expect(create).toHaveBeenNthCalledWith(
       1,
@@ -77,7 +96,7 @@ describe('handleMetaWebhook — inbound messages', () => {
       .mockResolvedValueOnce([]) // dedup: no message with this externalId
       .mockResolvedValueOnce([{ id: 'conv-9' }]); // conversation found
     const create = vi.fn().mockResolvedValue({ id: 'msg-2' });
-    await handleMetaWebhook(waBody, api({ list, create }));
+    await handleMetaWebhook(waBody, api({ list, create }), processDebounce());
     expect(create).toHaveBeenCalledTimes(1);
     expect(create).toHaveBeenCalledWith(
       'chatMessage',
@@ -88,8 +107,58 @@ describe('handleMetaWebhook — inbound messages', () => {
   it('skips duplicate messages (Meta retry)', async () => {
     const list = vi.fn().mockResolvedValueOnce([{ id: 'already' }]);
     const create = vi.fn();
-    await handleMetaWebhook(waBody, api({ list, create }));
+    await handleMetaWebhook(waBody, api({ list, create }), processDebounce());
     expect(create).not.toHaveBeenCalled();
+  });
+
+  it('persists rapid duplicate-window messages as already handled', async () => {
+    const list = vi
+      .fn()
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ id: 'conv-9', leadId: 'lead-1' }]);
+    const create = vi.fn().mockResolvedValue({ id: 'msg-2' });
+
+    await handleMetaWebhook(waBody, api({ list, create }), {
+      check: vi.fn().mockReturnValue({ status: 'skip' }),
+      isOptOut: vi.fn().mockReturnValue(false),
+    });
+
+    expect(create).toHaveBeenCalledWith(
+      'chatMessage',
+      expect.objectContaining({ conversationId: 'conv-9', agentHandled: true }),
+    );
+    expect(mocks.sendWhatsApp.execute).not.toHaveBeenCalled();
+  });
+
+  it('marks opt-out leads and sends the confirmation without logging the body', async () => {
+    const list = vi
+      .fn()
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ id: 'conv-9', leadId: 'lead-1' }]);
+    const create = vi.fn().mockResolvedValue({ id: 'msg-2' });
+    const update = vi.fn().mockResolvedValue({ id: 'updated' });
+
+    await handleMetaWebhook(waBody, api({ list, create, update }), {
+      check: vi.fn().mockReturnValue({ status: 'optout' }),
+      isOptOut: vi.fn().mockReturnValue(true),
+    });
+
+    expect(create).toHaveBeenCalledWith(
+      'chatMessage',
+      expect.objectContaining({ conversationId: 'conv-9', agentHandled: true }),
+    );
+    expect(update).toHaveBeenCalledWith('lead', 'lead-1', {
+      optedOut: true,
+      optedOutAt: expect.any(Date),
+    });
+    expect(update).toHaveBeenCalledWith('conversation', 'conv-9', expect.objectContaining({
+      needsHuman: true,
+      status: 'PENDING_HUMAN',
+    }));
+    expect(mocks.sendWhatsApp.execute).toHaveBeenCalledWith(
+      expect.objectContaining({ conversationId: 'conv-9' }),
+      expect.any(Object),
+    );
   });
 });
 
@@ -112,13 +181,13 @@ describe('handleMetaWebhook — statuses', () => {
   it('updates deliveryStatus of the matching outbound message', async () => {
     const list = vi.fn().mockResolvedValue([{ id: 'msg-out-1' }]);
     const update = vi.fn().mockResolvedValue({ id: 'msg-out-1' });
-    await handleMetaWebhook(statusBody, api({ list, update }));
+    await handleMetaWebhook(statusBody, api({ list, update }), processDebounce());
     expect(update).toHaveBeenCalledWith('chatMessage', 'msg-out-1', { deliveryStatus: 'READ' });
   });
 
   it('ignores statuses for unknown messages', async () => {
     const update = vi.fn();
-    await handleMetaWebhook(statusBody, api({ update }));
+    await handleMetaWebhook(statusBody, api({ update }), processDebounce());
     expect(update).not.toHaveBeenCalled();
   });
 });
