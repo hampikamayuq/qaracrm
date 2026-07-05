@@ -36,7 +36,7 @@
 - Opt-out detection: regex processed BEFORE any AI, sets `lead.optedOut=true` and `optedOutAt`
 - HSM templates: WhatsApp Cloud API pre-approved templates for messages outside 24h window (`qara_followup_v1`)
 - Shadow mode forwards raw bytes to Twenty via `fetch` (TWENTY_FORWARD_URL), no Twenty SDK
-- In-process scheduler: `node-cron` at `0 10 * * *` (follow-up) and `0 9 * * *` (D-1 reminder), gated by `ENABLE_SCHEDULER=true`
+- In-process scheduler: native `setInterval` tick, gated by `ENABLE_SCHEDULER=true`; jobs are idempotent by status flags
 - Rate limiting: `express-rate-limit` on login route (15 min, max 10 attempts)
 - Production: helmet, pino-http, CORS production domain, JWT_SECRET >= 32 bytes, pg_dump backups
 - LGPD: documented base legal, retention, deletion flow; consent recording on first contact
@@ -3635,11 +3635,11 @@ git commit -m "feat: task 13 — message debounce (20s window) + opt-out detecti
 
 **Interfaces:**
 - Consumes: Task 3 (Prisma models), Task 4 (DataApi), Task 6 (WhatsApp send)
-- Produces: `startScheduler(data: DataApi): void` — starts cron jobs, gated by `ENABLE_SCHEDULER=true`
+- Produces: `startScheduler(data: DataApi): SchedulerHandle | undefined` — starts interval jobs, gated by `ENABLE_SCHEDULER=true`
 
-**Description:** In-process cron using `node-cron`. Two jobs: (1) follow-up at 10:00 AM daily — finds conversations with no activity in 48h (still within 24h WhatsApp window) and sends pre-approved HSM template; (2) D-1 reminder at 9:00 AM daily — finds appointments for the next day in clinic timezone (`America/Sao_Paulo`) and sends reminder. Appointments are stored in UTC; "tomorrow" is calculated relative to clinic timezone. The scheduler is gated by `ENABLE_SCHEDULER=true` so it doesn't fire in dev/test.
+**Description:** In-process scheduler using native `setInterval`, without new runtime dependency. Two jobs run on each tick when `ENABLE_SCHEDULER=true`: (1) follow-up — finds conversations with no activity in 48h and sends pre-approved HSM template, then moves them to `PENDING_PATIENT`; (2) D-1 reminder — finds confirmed appointments for the next day in clinic timezone (`America/Sao_Paulo`), sends reminder, then marks `reminderD1Sent=true`. Appointments are stored in UTC; "tomorrow" is calculated relative to clinic timezone. Exact 9:00/10:00 wall-clock cron can be added later if operations require strict send windows.
 
-- [ ] **Step 1: Write scheduler test**
+- [x] **Step 1: Write scheduler test**
 
 Create `apps/api/src/lib/scheduler.test.ts`:
 
@@ -3669,7 +3669,7 @@ describe('scheduler', () => {
 });
 ```
 
-- [ ] **Step 2: Run scheduler tests (verify they fail)**
+- [x] **Step 2: Run scheduler tests (verify they fail)**
 
 ```bash
 cd apps/api && pnpm vitest run src/lib/scheduler.test.ts
@@ -3677,7 +3677,7 @@ cd apps/api && pnpm vitest run src/lib/scheduler.test.ts
 
 Expected: FAIL — module not found.
 
-- [ ] **Step 3: Implement scheduler**
+- [x] **Step 3: Implement scheduler**
 
 Create `apps/api/src/lib/scheduler.ts`:
 
@@ -3752,7 +3752,7 @@ export function startScheduler(data: DataApi) {
 }
 ```
 
-- [ ] **Step 4: Create HSM template messages**
+- [x] **Step 4: Create HSM template messages**
 
 Create `apps/api/src/lib/templates/hsm-messages.ts`:
 
@@ -3770,7 +3770,7 @@ export const HSM_D1_REMINDER = (name: string) =>
   'Qualquer dúvida, estamos à disposição!';
 ```
 
-- [ ] **Step 5: Create appointment routes**
+- [x] **Step 5: Create appointment routes**
 
 Create `apps/api/src/routes/appointment-routes.ts`:
 
@@ -3804,7 +3804,7 @@ export function createAppointmentRoutes(data: DataApi): Router {
 }
 ```
 
-- [ ] **Step 6: Register scheduler in app.ts**
+- [x] **Step 6: Register scheduler in app.ts**
 
 In `apps/api/src/app.ts`, after middleware setup:
 
@@ -3817,20 +3817,17 @@ if (process.env.NODE_ENV !== 'test') {
 }
 ```
 
-- [ ] **Step 7: Add ENABLE_SCHEDULER to .env.example**
+- [x] **Step 7: Add ENABLE_SCHEDULER to .env.example**
 
 ```env
 ENABLE_SCHEDULER=false
 ```
 
-- [ ] **Step 8: Install node-cron**
+- [x] **Step 8: Skip node-cron install**
 
-```bash
-cd apps/api && pnpm add node-cron
-cd apps/api && pnpm add -D @types/node-cron
-```
+No package was added. The scheduler uses native `setInterval` to keep this phase dependency-free.
 
-- [ ] **Step 9: Run scheduler tests**
+- [x] **Step 9: Run scheduler tests**
 
 ```bash
 cd apps/api && pnpm vitest run src/lib/scheduler.test.ts
@@ -3838,11 +3835,11 @@ cd apps/api && pnpm vitest run src/lib/scheduler.test.ts
 
 Expected: 2 tests PASS.
 
-- [ ] **Step 10: Commit**
+- [x] **Step 10: Commit**
 
 ```bash
-git add apps/api/src/lib/scheduler.ts apps/api/src/lib/scheduler.test.ts apps/api/src/lib/templates/hsm-messages.ts apps/api/src/routes/appointment-routes.ts apps/api/src/app.ts apps/api/.env.example apps/api/package.json apps/api/pnpm-lock.yaml
-git commit -m "feat: task 14 — scheduler (follow-up + D-1 reminder) with node-cron, HSM templates"
+git add apps/api/src/lib/scheduler.ts apps/api/src/lib/scheduler.test.ts apps/api/src/lib/templates/hsm-messages.ts apps/api/src/routes/appointment-routes.ts apps/api/src/routes/appointment-routes.test.ts apps/api/src/app.ts apps/api/src/app.test.ts apps/api/.env.example
+git commit -m "feat: task 14 scheduler appointments"
 ```
 
 ---

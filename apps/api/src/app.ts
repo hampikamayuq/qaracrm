@@ -5,6 +5,10 @@ import metaWebhookRoutes from './routes/meta-webhook-routes';
 import tawanyRoutes from './routes/tawany-routes';
 import operationsRoutes from './routes/operations-routes';
 import inboxRoutes from './routes/inbox-routes';
+import appointmentRoutes from './routes/appointment-routes';
+import { prisma } from './lib/deps';
+import { createPrismaDataApi } from './lib/prisma-data-api';
+import { startScheduler } from './lib/scheduler';
 
 const app = express();
 
@@ -31,6 +35,9 @@ app.use('/api/webhooks/meta', metaWebhookRoutes);
 app.use('/api/tawany', tawanyRoutes);
 app.use('/api/operations', operationsRoutes);
 app.use('/api/inbox', inboxRoutes);
+app.use('/api/appointments', appointmentRoutes);
+
+startScheduler(createPrismaDataApi(prisma));
 
 app.get('/api/health', (_req, res) => {
   res.json({ success: true, data: { status: 'ok' } });
