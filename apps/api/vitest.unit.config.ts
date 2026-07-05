@@ -10,6 +10,7 @@ export default defineConfig({
   ],
   test: {
     include: ['src/**/*.test.ts', 'src/**/*.test.tsx'],
+    exclude: ['src/**/*.integration.test.ts', '**/node_modules/**', '**/dist/**'],
     environment: 'jsdom',
     setupFiles: ['./vitest.setup.ts'],
   },

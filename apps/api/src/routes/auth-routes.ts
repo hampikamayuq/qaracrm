@@ -16,7 +16,7 @@ const loginLimiter = rateLimit({
   legacyHeaders: false,
 });
 
-router.post('/login', loginLimiter, async (req: Request, res: Response) => {
+export const loginRoute = async (req: Request, res: Response): Promise<void> => {
   try {
     const { email, password } = req.body;
     if (!email || !password) {
@@ -53,7 +53,9 @@ router.post('/login', loginLimiter, async (req: Request, res: Response) => {
   } catch (e) {
     res.status(500).json({ success: false, error: (e as Error).message });
   }
-});
+};
+
+router.post('/login', loginLimiter, loginRoute);
 
 router.post('/logout', authMiddleware, async (req: Request, res: Response) => {
   try {
