@@ -6,7 +6,8 @@
     "dev": "next dev --port 3000",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "test:routes": "node scripts/check-routes.mjs"
   },
   "dependencies": {
     "@qara/shared": "workspace:*",
