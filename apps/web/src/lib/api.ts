@@ -47,6 +47,11 @@ export const api = {
     if (token) headers.set('Authorization', `Bearer ${token}`);
 
     const res = await fetch(`${BASE_URL}${path}`, { ...options, headers });
+    if (res.status === 401 && typeof window !== 'undefined') {
+      sessionStorage.removeItem('auth_token');
+      localStorage.removeItem('auth_token');
+      if (window.location.pathname !== '/login') window.location.href = '/login';
+    }
     return res.json() as Promise<ApiResponse<T>>;
   },
 
