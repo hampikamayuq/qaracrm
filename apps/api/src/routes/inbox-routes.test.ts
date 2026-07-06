@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
     conversation: {
       findMany: vi.fn(),
       count: vi.fn(),
+      findUnique: vi.fn(),
     },
   },
 }));
@@ -66,17 +67,28 @@ describe('Inbox routes', () => {
         id: true,
         status: true,
         needsHuman: true,
+        channel: true,
+        lastMessageAt: true,
         updatedAt: true,
-        lead: { select: { id: true, name: true } },
+        lead: {
+          select: {
+            id: true,
+            name: true,
+            phone: true,
+            score: true,
+            tags: true,
+            temperature: true,
+          },
+        },
         messages: {
           take: 1,
           orderBy: { sentAt: 'desc' },
-          select: { body: true, sentAt: true },
+          select: { id: true, body: true, sentAt: true, direction: true },
         },
         aiSuggestions: {
           where: { status: 'PENDING' },
           take: 1,
-          select: { id: true, body: true, riskLevel: true },
+          select: { id: true, body: true, riskLevel: true, status: true },
         },
       },
     });
@@ -113,5 +125,59 @@ describe('Inbox routes', () => {
   it('exports an express router', async () => {
     const mod = await import('./inbox-routes');
     expect(mod.default).toBeDefined();
+  });
+
+  it('loads a conversation detail with messages, lead sidebar data, tasks, and pending suggestions', async () => {
+    mocks.prisma.conversation.findUnique.mockResolvedValue({
+      id: 'c1',
+      status: 'OPEN',
+      needsHuman: false,
+      channel: 'WHATSAPP',
+      lastMessageAt: new Date('2026-07-05T12:00:00.000Z'),
+      updatedAt: new Date('2026-07-05T12:00:00.000Z'),
+      lead: {
+        id: 'l1',
+        name: 'Maria Silva',
+        phone: '+5511999999999',
+        email: 'maria@example.com',
+        source: 'Instagram',
+        intent: 'consulta cabelo',
+        score: 83,
+        temperature: 'HOT',
+        tags: ['tricologia'],
+        nextAction: 'Retornar com horarios',
+        stage: { id: 's1', name: 'Qualificado' },
+      },
+      patient: null,
+      messages: [
+        { id: 'm1', direction: 'IN', body: 'Quero consulta', sentAt: new Date('2026-07-05T11:59:00.000Z'), agentHandled: false },
+      ],
+      tasks: [
+        { id: 't1', title: 'Ligar para Maria', status: 'OPEN', priority: 'HIGH', dueAt: new Date('2026-07-06T12:00:00.000Z') },
+      ],
+      aiSuggestions: [
+        { id: 'a1', body: 'Claro, posso ajudar.', riskLevel: 'low', status: 'PENDING', createdAt: new Date('2026-07-05T12:00:00.000Z') },
+      ],
+    });
+    const { getInboxDetailRoute } = await import('./inbox-routes');
+    const response = res();
+
+    await getInboxDetailRoute(req({ params: { id: 'c1' } }), response);
+
+    expect(mocks.prisma.conversation.findUnique).toHaveBeenCalledWith({
+      where: { id: 'c1' },
+      select: expect.objectContaining({
+        messages: expect.objectContaining({ orderBy: { sentAt: 'asc' } }),
+        lead: expect.objectContaining({
+          select: expect.objectContaining({ phone: true, email: true, stage: expect.any(Object) }),
+        }),
+        tasks: expect.objectContaining({ where: { status: { not: 'DONE' } } }),
+        aiSuggestions: expect.objectContaining({ where: { status: 'PENDING' } }),
+      }),
+    });
+    expect(response.json).toHaveBeenCalledWith({
+      success: true,
+      data: expect.objectContaining({ id: 'c1', lead: expect.objectContaining({ phone: '+5511999999999' }) }),
+    });
   });
 });

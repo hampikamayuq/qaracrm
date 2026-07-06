@@ -6,10 +6,19 @@ export type Conversation = {
   id: string;
   status: string;
   needsHuman: boolean;
+  channel?: string | null;
+  lastMessageAt?: string | null;
   updatedAt: string;
-  lead?: { id: string; name: string };
-  messages?: Array<{ body: string; sentAt: string }>;
-  aiSuggestions?: Array<{ id: string; body: string; riskLevel: string | null }>;
+  lead?: {
+    id: string;
+    name: string;
+    phone?: string | null;
+    score?: number;
+    tags?: string[];
+    temperature?: string | null;
+  };
+  messages?: Array<{ id?: string; body: string; sentAt: string; direction?: string }>;
+  aiSuggestions?: Array<{ id: string; body: string; riskLevel: string | null; status?: string }>;
 };
 
 export type Lead = {
@@ -23,6 +32,47 @@ export type PipelineStage = {
   id: string;
   name: string;
   leads: Lead[];
+};
+
+export type ConversationDetail = Conversation & {
+  classification?: unknown;
+  lead: NonNullable<Conversation['lead']> & {
+    email?: string | null;
+    source?: string | null;
+    intent?: string | null;
+    nextAction?: string | null;
+    stage?: { id: string; name: string } | null;
+  };
+  patient?: {
+    id: string;
+    name: string;
+    phone?: string | null;
+    email?: string | null;
+    preferredChannel?: string | null;
+    notesAdministrative?: string | null;
+  } | null;
+  messages: Array<{
+    id: string;
+    direction: string;
+    body: string;
+    mediaUrl?: string | null;
+    agentHandled: boolean;
+    sentAt: string;
+  }>;
+  tasks: Array<{
+    id: string;
+    title: string;
+    status: string;
+    priority: string;
+    dueAt?: string | null;
+  }>;
+  aiSuggestions: Array<{
+    id: string;
+    body: string;
+    riskLevel: string | null;
+    status?: string;
+    createdAt?: string;
+  }>;
 };
 
 const getToken = (): string | null => {
@@ -76,6 +126,11 @@ export const api = {
   } = {}): Promise<{ items: Conversation[]; total: number; page: number }> {
     const res = await this.get<{ items: Conversation[]; total: number; page: number }>(`/inbox/list${qs(opts)}`);
     return res.data ?? { items: [], total: 0, page: 1 };
+  },
+
+  async getConversation(id: string): Promise<ConversationDetail | null> {
+    const res = await this.get<ConversationDetail>(`/inbox/${id}`);
+    return res.data ?? null;
   },
 
   async getPipeline(): Promise<PipelineStage[]> {

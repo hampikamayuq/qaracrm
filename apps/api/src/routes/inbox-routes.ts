@@ -47,17 +47,28 @@ export const listInboxRoute = async (req: Request, res: Response): Promise<void>
           id: true,
           status: true,
           needsHuman: true,
+          channel: true,
+          lastMessageAt: true,
           updatedAt: true,
-          lead: { select: { id: true, name: true } },
+          lead: {
+            select: {
+              id: true,
+              name: true,
+              phone: true,
+              score: true,
+              tags: true,
+              temperature: true,
+            },
+          },
           messages: {
             take: 1,
             orderBy: { sentAt: 'desc' },
-            select: { body: true, sentAt: true },
+            select: { id: true, body: true, sentAt: true, direction: true },
           },
           aiSuggestions: {
             where: { status: 'PENDING' },
             take: 1,
-            select: { id: true, body: true, riskLevel: true },
+            select: { id: true, body: true, riskLevel: true, status: true },
           },
         },
       }),
@@ -70,6 +81,99 @@ export const listInboxRoute = async (req: Request, res: Response): Promise<void>
   }
 };
 
+export const getInboxDetailRoute = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const id = req.params.id;
+    if (typeof id !== 'string' || id.length === 0) {
+      jsonError(res, 400, 'conversation id required');
+      return;
+    }
+
+    const item = await prisma.conversation.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        status: true,
+        needsHuman: true,
+        channel: true,
+        lastMessageAt: true,
+        updatedAt: true,
+        classification: true,
+        lead: {
+          select: {
+            id: true,
+            name: true,
+            phone: true,
+            email: true,
+            source: true,
+            intent: true,
+            score: true,
+            tags: true,
+            temperature: true,
+            nextAction: true,
+            stage: { select: { id: true, name: true } },
+          },
+        },
+        patient: {
+          select: {
+            id: true,
+            name: true,
+            phone: true,
+            email: true,
+            preferredChannel: true,
+            notesAdministrative: true,
+          },
+        },
+        messages: {
+          take: 100,
+          orderBy: { sentAt: 'asc' },
+          select: {
+            id: true,
+            direction: true,
+            body: true,
+            mediaUrl: true,
+            agentHandled: true,
+            sentAt: true,
+          },
+        },
+        tasks: {
+          where: { status: { not: 'DONE' } },
+          orderBy: { dueAt: 'asc' },
+          take: 8,
+          select: {
+            id: true,
+            title: true,
+            status: true,
+            priority: true,
+            dueAt: true,
+          },
+        },
+        aiSuggestions: {
+          where: { status: 'PENDING' },
+          orderBy: { createdAt: 'desc' },
+          select: {
+            id: true,
+            body: true,
+            riskLevel: true,
+            status: true,
+            createdAt: true,
+          },
+        },
+      },
+    });
+
+    if (!item) {
+      jsonError(res, 404, 'Conversation not found');
+      return;
+    }
+
+    res.json({ success: true, data: item });
+  } catch {
+    jsonError(res, 500, 'Failed to load conversation');
+  }
+};
+
 router.get('/list', authMiddleware, listInboxRoute);
+router.get('/:id', authMiddleware, getInboxDetailRoute);
 
 export default router;
