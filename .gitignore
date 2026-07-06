@@ -7,3 +7,6 @@ dist/
 .env.*.local
 .turbo
 .vercel
+.obsidian/
+.twenty/
+/2026-*.md
