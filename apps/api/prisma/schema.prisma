@@ -116,6 +116,7 @@ model Conversation {
   channel       String?
   lastMessageAt DateTime?
   classification Json?
+  handoffReason String?
   assignedToId  String?
   assignedTo    User?          @relation(fields: [assignedToId], references: [id])
   messages      ChatMessage[]
@@ -138,6 +139,8 @@ model ChatMessage {
   direction      String       // "IN" | "OUT"
   body           String
   mediaUrl       String?
+  messageType    String?      // TEXT | BUTTON | LIST | IMAGE | DOCUMENT | TEMPLATE
+  deliveryStatus String?      // PENDING | SENT | delivered | read | failed
   agentHandled   Boolean      @default(false)
   sentAt         DateTime     @default(now())
   createdAt      DateTime     @default(now())

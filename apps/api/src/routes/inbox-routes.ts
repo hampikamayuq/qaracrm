@@ -2,9 +2,18 @@ import { Router } from 'express';
 import type { Request, Response } from 'express';
 import type { Prisma } from '@prisma/client';
 import { prisma } from '../lib/deps';
+import { createPrismaDataApi } from '../lib/prisma-data-api';
 import { authMiddleware } from '../middleware/auth-middleware';
+import { sendWhatsApp } from '../lib/tools/sendWhatsApp';
 
 const router = Router();
+const data = createPrismaDataApi(prisma);
+
+const paramStr = (value: unknown): string => (typeof value === 'string' ? value : '');
+
+const CONVERSATION_STATUSES = new Set([
+  'OPEN', 'PENDING_PATIENT', 'PENDING_HUMAN', 'NEEDS_HUMAN', 'RESOLVED', 'CLOSED',
+]);
 
 const jsonError = (res: Response, status: number, error: string): void => {
   res.status(status).json({ success: false, error });
@@ -173,7 +182,118 @@ export const getInboxDetailRoute = async (req: Request, res: Response): Promise<
   }
 };
 
+export const replyRoute = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const id = paramStr(req.params.id);
+    const text = req.body?.text;
+    if (typeof text !== 'string' || text.trim().length === 0) {
+      jsonError(res, 400, 'text required');
+      return;
+    }
+    const conversation = await prisma.conversation.findUnique({ where: { id }, select: { id: true } });
+    if (!conversation) {
+      jsonError(res, 404, 'Conversation not found');
+      return;
+    }
+    const result = JSON.parse(await sendWhatsApp.execute({ conversationId: id, text: text.trim() }, data));
+    res.json({ success: true, data: result });
+  } catch (error) {
+    jsonError(res, 500, (error as Error).message);
+  }
+};
+
+export const handoffRoute = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const result = await prisma.conversation.updateMany({
+      where: { id: paramStr(req.params.id) },
+      data: { needsHuman: true, status: 'PENDING_HUMAN', handoffReason: 'manual_handoff' },
+    });
+    if (result.count === 0) {
+      jsonError(res, 404, 'Conversation not found');
+      return;
+    }
+    res.json({ success: true, data: { needsHuman: true, status: 'PENDING_HUMAN' } });
+  } catch (error) {
+    jsonError(res, 500, (error as Error).message);
+  }
+};
+
+export const setStatusRoute = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const status = req.body?.status;
+    if (typeof status !== 'string' || !CONVERSATION_STATUSES.has(status)) {
+      jsonError(res, 400, `status must be one of: ${[...CONVERSATION_STATUSES].join(', ')}`);
+      return;
+    }
+    const closing = status === 'RESOLVED' || status === 'CLOSED';
+    const result = await prisma.conversation.updateMany({
+      where: { id: paramStr(req.params.id) },
+      data: { status, ...(closing ? { needsHuman: false } : {}) },
+    });
+    if (result.count === 0) {
+      jsonError(res, 404, 'Conversation not found');
+      return;
+    }
+    res.json({ success: true, data: { status } });
+  } catch (error) {
+    jsonError(res, 500, (error as Error).message);
+  }
+};
+
+const leadTagsOf = async (conversationId: string): Promise<{ leadId: string; tags: string[] } | null> => {
+  const conversation = await prisma.conversation.findUnique({
+    where: { id: conversationId },
+    select: { lead: { select: { id: true, tags: true } } },
+  });
+  if (!conversation?.lead) return null;
+  const tags = Array.isArray(conversation.lead.tags)
+    ? conversation.lead.tags.filter((t): t is string => typeof t === 'string')
+    : [];
+  return { leadId: conversation.lead.id, tags };
+};
+
+export const addTagRoute = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const tag = typeof req.body?.tag === 'string' ? req.body.tag.trim() : '';
+    if (!tag) {
+      jsonError(res, 400, 'tag required');
+      return;
+    }
+    const lead = await leadTagsOf(paramStr(req.params.id));
+    if (!lead) {
+      jsonError(res, 404, 'Conversation or lead not found');
+      return;
+    }
+    const tags = lead.tags.includes(tag) ? lead.tags : [...lead.tags, tag];
+    await prisma.lead.update({ where: { id: lead.leadId }, data: { tags } });
+    res.json({ success: true, data: { tags } });
+  } catch (error) {
+    jsonError(res, 500, (error as Error).message);
+  }
+};
+
+export const removeTagRoute = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const tag = decodeURIComponent(paramStr(req.params.tag));
+    const lead = await leadTagsOf(paramStr(req.params.id));
+    if (!lead) {
+      jsonError(res, 404, 'Conversation or lead not found');
+      return;
+    }
+    const tags = lead.tags.filter((existing) => existing !== tag);
+    await prisma.lead.update({ where: { id: lead.leadId }, data: { tags } });
+    res.json({ success: true, data: { tags } });
+  } catch (error) {
+    jsonError(res, 500, (error as Error).message);
+  }
+};
+
 router.get('/list', authMiddleware, listInboxRoute);
 router.get('/:id', authMiddleware, getInboxDetailRoute);
+router.post('/:id/reply', authMiddleware, replyRoute);
+router.post('/:id/handoff', authMiddleware, handoffRoute);
+router.patch('/:id/status', authMiddleware, setStatusRoute);
+router.post('/:id/tags', authMiddleware, addTagRoute);
+router.delete('/:id/tags/:tag', authMiddleware, removeTagRoute);
 
 export default router;

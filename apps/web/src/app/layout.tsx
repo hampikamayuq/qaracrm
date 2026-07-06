@@ -27,6 +27,7 @@ const primaryNav = [
   { href: '/calendar', label: 'Agenda', icon: CalendarDays },
   { href: '/quotes', label: 'Orcamentos', icon: FileText },
   { href: '/tasks', label: 'Tarefas', icon: ListTodo },
+  { href: '/bots', label: 'Bots', icon: Bot },
   { href: '/reports', label: 'Relatorios', icon: BarChart3 },
 ];
 

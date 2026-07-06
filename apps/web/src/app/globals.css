@@ -732,3 +732,26 @@ textarea {
     min-height: calc(100vh - 96px);
   }
 }
+
+.inline-form {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+.inline-form .input { flex: 1; min-width: 0; }
+
+.chip-removable {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.chip-removable button {
+  display: inline-flex;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  padding: 0;
+  color: inherit;
+  opacity: 0.6;
+}
+.chip-removable button:hover { opacity: 1; }

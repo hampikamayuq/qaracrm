@@ -1,4 +1,5 @@
 import { type DataApi } from '../lib/data';
+import { runBotsForInbound } from '../lib/bots/runner';
 import { defaultDebounce, type Debouncer } from '../lib/debounce';
 import { parseMetaEvent, type MetaInboundMessage, type MetaStatusUpdate } from '../lib/meta-parse';
 import { sendWhatsApp } from '../lib/tools/sendWhatsApp';
@@ -98,7 +99,16 @@ export const handleMetaWebhook = async (
   for (const status of statuses) await applyStatus(status, data);
   for (const msg of messages) {
     const processed = await ingestMessage(msg, data, debounce);
-    if (processed) processedMessages.push(processed);
+    if (!processed) continue;
+    // Bots determinísticos têm precedência sobre a Tawany: se um fluxo
+    // importado casa, ele responde e a mensagem não segue para a IA.
+    let botHandled = false;
+    try {
+      botHandled = (await runBotsForInbound({ conversationId: processed.conversationId, text: msg.text }, data)) !== null;
+    } catch (err) {
+      console.error('[meta-webhook] bot runner failed (non-fatal):', (err as Error).message);
+    }
+    if (!botHandled) processedMessages.push(processed);
   }
 
   console.log(

@@ -21,6 +21,9 @@ const MODEL_MAP: Record<string, keyof PrismaClient> = {
   knowledgeArticle: 'knowledgeArticle',
   webhookEvent: 'webhookEvent',
   appointment: 'appointment',
+  bot: 'bot',
+  tag: 'tag',
+  quickReply: 'quickReply',
 };
 
 export const createPrismaDataApi = (prisma: PrismaClient): DataApi => ({

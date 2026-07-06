@@ -34,7 +34,17 @@ export type PipelineStage = {
   leads: Lead[];
 };
 
-export type ConversationDetail = Conversation & {
+export type BotSummary = {
+  id: string;
+  name: string;
+  trigger: string;
+  active: boolean;
+  rules: number;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type ConversationDetail = Omit<Conversation, 'messages' | 'aiSuggestions' | 'lead'> & {
   classification?: unknown;
   lead: NonNullable<Conversation['lead']> & {
     email?: string | null;
@@ -131,6 +141,57 @@ export const api = {
   async getConversation(id: string): Promise<ConversationDetail | null> {
     const res = await this.get<ConversationDetail>(`/inbox/${id}`);
     return res.data ?? null;
+  },
+
+  sendReply(conversationId: string, text: string): Promise<ApiResponse<{ ok: boolean; sent: boolean }>> {
+    return this.post(`/inbox/${conversationId}/reply`, { text });
+  },
+
+  runTawany(messageId: string): Promise<ApiResponse<unknown>> {
+    return this.post('/tawany/run', { messageId });
+  },
+
+  handoff(conversationId: string): Promise<ApiResponse<{ needsHuman: boolean }>> {
+    return this.post(`/inbox/${conversationId}/handoff`, {});
+  },
+
+  setConversationStatus(conversationId: string, status: string): Promise<ApiResponse<{ status: string }>> {
+    return this.fetch(`/inbox/${conversationId}/status`, { method: 'PATCH', body: JSON.stringify({ status }) });
+  },
+
+  addTag(conversationId: string, tag: string): Promise<ApiResponse<{ tags: string[] }>> {
+    return this.post(`/inbox/${conversationId}/tags`, { tag });
+  },
+
+  removeTag(conversationId: string, tag: string): Promise<ApiResponse<{ tags: string[] }>> {
+    return this.fetch(`/inbox/${conversationId}/tags/${encodeURIComponent(tag)}`, { method: 'DELETE' });
+  },
+
+  createTask(input: {
+    title: string;
+    conversationId?: string;
+    leadId?: string;
+    priority?: string;
+    dueAt?: string;
+  }): Promise<ApiResponse<{ id: string }>> {
+    return this.post('/tasks', input);
+  },
+
+  async getBots(): Promise<BotSummary[]> {
+    const res = await this.get<BotSummary[]>('/bots');
+    return res.data ?? [];
+  },
+
+  toggleBot(id: string, active: boolean): Promise<ApiResponse<{ active: boolean }>> {
+    return this.fetch(`/bots/${id}`, { method: 'PATCH', body: JSON.stringify({ active }) });
+  },
+
+  importBot(flow: unknown, source: string): Promise<ApiResponse<{ id: string; name: string; rules: number; replaced: boolean }>> {
+    return this.post('/bots/import', { flow, source });
+  },
+
+  testBot(text: string): Promise<ApiResponse<{ matched: boolean; botName?: string; responses: string[] }>> {
+    return this.post('/bots/test', { text });
   },
 
   async getPipeline(): Promise<PipelineStage[]> {

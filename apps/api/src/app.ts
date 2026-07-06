@@ -7,6 +7,8 @@ import operationsRoutes from './routes/operations-routes.js';
 import inboxRoutes from './routes/inbox-routes.js';
 import appointmentRoutes from './routes/appointment-routes.js';
 import lgpdRoutes from './routes/lgpd-routes.js';
+import botRoutes from './routes/bot-routes.js';
+import taskRoutes from './routes/task-routes.js';
 import { prisma } from './lib/deps.js';
 import { createPrismaDataApi } from './lib/prisma-data-api.js';
 import { startScheduler } from './lib/scheduler.js';
@@ -42,6 +44,8 @@ app.use('/api/operations', operationsRoutes);
 app.use('/api/inbox', inboxRoutes);
 app.use('/api/appointments', appointmentRoutes);
 app.use('/api/lgpd', lgpdRoutes);
+app.use('/api/bots', botRoutes);
+app.use('/api/tasks', taskRoutes);
 
 startScheduler(createPrismaDataApi(prisma));
 

@@ -7,11 +7,19 @@ const mocks = vi.hoisted(() => ({
       findMany: vi.fn(),
       count: vi.fn(),
       findUnique: vi.fn(),
+      updateMany: vi.fn(),
     },
+    lead: {
+      update: vi.fn(),
+    },
+  },
+  sendWhatsApp: {
+    execute: vi.fn(),
   },
 }));
 
 vi.mock('../lib/deps', () => ({ prisma: mocks.prisma }));
+vi.mock('../lib/tools/sendWhatsApp', () => ({ sendWhatsApp: mocks.sendWhatsApp }));
 vi.mock('../middleware/auth-middleware', () => ({
   authMiddleware: vi.fn((_req, _res, next) => next()),
 }));
@@ -178,6 +186,91 @@ describe('Inbox routes', () => {
     expect(response.json).toHaveBeenCalledWith({
       success: true,
       data: expect.objectContaining({ id: 'c1', lead: expect.objectContaining({ phone: '+5511999999999' }) }),
+    });
+  });
+});
+
+describe('Inbox phase-3 actions', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('reply requires text and sends via WhatsApp tool', async () => {
+    const { replyRoute } = await import('./inbox-routes');
+    const bad = res();
+    await replyRoute(req({ params: { id: 'c1' }, body: {} }), bad);
+    expect(bad.status).toHaveBeenCalledWith(400);
+
+    mocks.prisma.conversation.findUnique.mockResolvedValue({ id: 'c1' });
+    mocks.sendWhatsApp.execute.mockResolvedValue(JSON.stringify({ ok: true, sent: true, messageId: 'm1' }));
+    const ok = res();
+    await replyRoute(req({ params: { id: 'c1' }, body: { text: '  Oi, tudo bem? ' } }), ok);
+
+    expect(mocks.sendWhatsApp.execute).toHaveBeenCalledWith(
+      { conversationId: 'c1', text: 'Oi, tudo bem?' },
+      expect.anything(),
+    );
+    expect(ok.json).toHaveBeenCalledWith({ success: true, data: { ok: true, sent: true, messageId: 'm1' } });
+  });
+
+  it('handoff flags conversation for human', async () => {
+    mocks.prisma.conversation.updateMany.mockResolvedValue({ count: 1 });
+    const { handoffRoute } = await import('./inbox-routes');
+    const response = res();
+    await handoffRoute(req({ params: { id: 'c1' }, body: {} }), response);
+
+    expect(mocks.prisma.conversation.updateMany).toHaveBeenCalledWith({
+      where: { id: 'c1' },
+      data: { needsHuman: true, status: 'PENDING_HUMAN', handoffReason: 'manual_handoff' },
+    });
+    expect(response.json).toHaveBeenCalledWith({
+      success: true,
+      data: { needsHuman: true, status: 'PENDING_HUMAN' },
+    });
+  });
+
+  it('status change rejects unknown statuses and clears needsHuman on resolve', async () => {
+    const { setStatusRoute } = await import('./inbox-routes');
+    const bad = res();
+    await setStatusRoute(req({ params: { id: 'c1' }, body: { status: 'WHATEVER' } }), bad);
+    expect(bad.status).toHaveBeenCalledWith(400);
+
+    mocks.prisma.conversation.updateMany.mockResolvedValue({ count: 1 });
+    const ok = res();
+    await setStatusRoute(req({ params: { id: 'c1' }, body: { status: 'RESOLVED' } }), ok);
+    expect(mocks.prisma.conversation.updateMany).toHaveBeenCalledWith({
+      where: { id: 'c1' },
+      data: { status: 'RESOLVED', needsHuman: false },
+    });
+  });
+
+  it('addTag merges into lead tags without duplicating', async () => {
+    mocks.prisma.conversation.findUnique.mockResolvedValue({
+      lead: { id: 'l1', tags: ['unha'] },
+    });
+    mocks.prisma.lead.update.mockResolvedValue({});
+    const { addTagRoute } = await import('./inbox-routes');
+    const response = res();
+    await addTagRoute(req({ params: { id: 'c1' }, body: { tag: 'lead quente' } }), response);
+
+    expect(mocks.prisma.lead.update).toHaveBeenCalledWith({
+      where: { id: 'l1' },
+      data: { tags: ['unha', 'lead quente'] },
+    });
+  });
+
+  it('removeTag filters lead tags', async () => {
+    mocks.prisma.conversation.findUnique.mockResolvedValue({
+      lead: { id: 'l1', tags: ['unha', 'lead quente'] },
+    });
+    mocks.prisma.lead.update.mockResolvedValue({});
+    const { removeTagRoute } = await import('./inbox-routes');
+    const response = res();
+    await removeTagRoute(req({ params: { id: 'c1', tag: 'lead%20quente' } }), response);
+
+    expect(mocks.prisma.lead.update).toHaveBeenCalledWith({
+      where: { id: 'l1' },
+      data: { tags: ['unha'] },
     });
   });
 });

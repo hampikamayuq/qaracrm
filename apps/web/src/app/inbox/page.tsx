@@ -1,7 +1,7 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { AlertTriangle, Bot, Check, MessageSquareText, Search, Send, UserRound, X } from 'lucide-react';
+import { useCallback, useEffect, useState } from 'react';
+import { AlertTriangle, Bot, Check, CheckCheck, MessageSquareText, Plus, Search, Send, UserRound, X } from 'lucide-react';
 import { api, type Conversation, type ConversationDetail } from '@/lib/api';
 
 type StatusFilter = 'OPEN' | 'ALL' | 'HUMAN';
@@ -28,6 +28,21 @@ export default function InboxPage() {
   const [status, setStatus] = useState<StatusFilter>('OPEN');
   const [loading, setLoading] = useState(false);
   const [detailLoading, setDetailLoading] = useState(false);
+  const [reply, setReply] = useState('');
+  const [sending, setSending] = useState(false);
+  const [suggesting, setSuggesting] = useState(false);
+  const [newTag, setNewTag] = useState('');
+  const [newTask, setNewTask] = useState('');
+  const [feedback, setFeedback] = useState('');
+
+  const reloadDetail = useCallback(async (id: string) => {
+    setDetailLoading(true);
+    try {
+      setSelected(await api.getConversation(id));
+    } finally {
+      setDetailLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -54,36 +69,111 @@ export default function InboxPage() {
       setSelected(null);
       return;
     }
-
     window.history.replaceState(null, '', `/inbox?conversationId=${selectedId}`);
-    setDetailLoading(true);
-    api.getConversation(selectedId).then(setSelected).finally(() => setDetailLoading(false));
-  }, [selectedId]);
+    setReply('');
+    setFeedback('');
+    void reloadDetail(selectedId);
+  }, [selectedId, reloadDetail]);
+
+  const flash = (message: string) => {
+    setFeedback(message);
+    window.setTimeout(() => setFeedback(''), 4000);
+  };
+
+  const sendManualReply = async () => {
+    if (!selected || !reply.trim()) return;
+    setSending(true);
+    try {
+      const res = await api.sendReply(selected.id, reply.trim());
+      if (!res.success) {
+        flash(res.error ?? 'Falha ao enviar');
+        return;
+      }
+      setReply('');
+      await reloadDetail(selected.id);
+    } finally {
+      setSending(false);
+    }
+  };
+
+  const generateSuggestion = async () => {
+    if (!selected) return;
+    const lastInbound = [...selected.messages].reverse().find((message) => message.direction === 'IN');
+    if (!lastInbound) {
+      flash('Sem mensagem do paciente para responder.');
+      return;
+    }
+    setSuggesting(true);
+    try {
+      const res = await api.runTawany(lastInbound.id);
+      if (!res.success) {
+        flash(res.error ?? 'Tawany indisponível');
+        return;
+      }
+      await reloadDetail(selected.id);
+      flash('Sugestão gerada.');
+    } finally {
+      setSuggesting(false);
+    }
+  };
 
   const approve = async (conversationId: string, suggestionId: string, original: string) => {
     const textarea = document.getElementById(`suggestion-${suggestionId}`) as HTMLTextAreaElement | null;
     const body = textarea?.value.trim();
-    await api.approveSuggestion(suggestionId, body && body !== original ? body : undefined);
-    setConversations((items) => items.map((item) => (
-      item.id === conversationId
-        ? { ...item, aiSuggestions: item.aiSuggestions?.filter((suggestion) => suggestion.id !== suggestionId) }
-        : item
-    )));
-    setSelected((item) => item?.id === conversationId
-      ? { ...item, aiSuggestions: item.aiSuggestions.filter((suggestion) => suggestion.id !== suggestionId) }
-      : item);
+    const res = await api.approveSuggestion(suggestionId, body && body !== original ? body : undefined);
+    if (!res.success) {
+      flash(res.error ?? 'Falha ao aprovar');
+      return;
+    }
+    await reloadDetail(conversationId);
   };
 
   const reject = async (conversationId: string, suggestionId: string) => {
-    await api.rejectSuggestion(suggestionId);
-    setConversations((items) => items.map((item) => (
-      item.id === conversationId
-        ? { ...item, aiSuggestions: item.aiSuggestions?.filter((suggestion) => suggestion.id !== suggestionId) }
-        : item
-    )));
-    setSelected((item) => item?.id === conversationId
-      ? { ...item, aiSuggestions: item.aiSuggestions.filter((suggestion) => suggestion.id !== suggestionId) }
-      : item);
+    const res = await api.rejectSuggestion(suggestionId);
+    if (!res.success) {
+      flash(res.error ?? 'Falha ao descartar');
+      return;
+    }
+    await reloadDetail(conversationId);
+  };
+
+  const markHuman = async () => {
+    if (!selected) return;
+    await api.handoff(selected.id);
+    await reloadDetail(selected.id);
+    flash('Conversa marcada para atendimento humano.');
+  };
+
+  const resolve = async () => {
+    if (!selected) return;
+    await api.setConversationStatus(selected.id, 'RESOLVED');
+    await reloadDetail(selected.id);
+    flash('Conversa resolvida.');
+  };
+
+  const addTag = async () => {
+    if (!selected || !newTag.trim()) return;
+    const res = await api.addTag(selected.id, newTag.trim());
+    if (res.success) {
+      setNewTag('');
+      await reloadDetail(selected.id);
+    }
+  };
+
+  const removeTag = async (tag: string) => {
+    if (!selected) return;
+    await api.removeTag(selected.id, tag);
+    await reloadDetail(selected.id);
+  };
+
+  const createTask = async () => {
+    if (!selected || !newTask.trim()) return;
+    const res = await api.createTask({ title: newTask.trim(), conversationId: selected.id });
+    if (res.success) {
+      setNewTask('');
+      await reloadDetail(selected.id);
+      flash('Tarefa criada.');
+    }
   };
 
   return (
@@ -170,19 +260,26 @@ export default function InboxPage() {
                 {selected.messages.map((message) => (
                   <article className={`message-bubble ${message.direction === 'OUT' ? 'message-out' : 'message-in'}`} key={message.id}>
                     <div>{message.body}</div>
-                    <small>{message.direction === 'OUT' ? 'Clinica' : 'Paciente'} · {formatDate(message.sentAt)}</small>
+                    <small>{message.direction === 'OUT' ? (message.agentHandled ? 'Clinica (auto)' : 'Clinica') : 'Paciente'} · {formatDate(message.sentAt)}</small>
                   </article>
                 ))}
               </div>
 
+              {feedback ? <div className="card muted">{feedback}</div> : null}
+
               <div className="composer">
-                <textarea className="textarea" disabled placeholder="Resposta manual entra na Fase 3" title="Endpoint de envio manual sera criado na Fase 3" />
+                <textarea
+                  className="textarea"
+                  placeholder="Escreva uma resposta manual..."
+                  value={reply}
+                  onChange={(event) => setReply(event.target.value)}
+                />
                 <div className="suggestion-actions">
-                  <button className="btn" disabled title="Endpoint de envio manual sera criado na Fase 3" type="button">
-                    <Send size={16} />Enviar WhatsApp
+                  <button className="btn btn-primary" disabled={sending || !reply.trim()} type="button" onClick={sendManualReply}>
+                    <Send size={16} />{sending ? 'Enviando...' : 'Enviar WhatsApp'}
                   </button>
-                  <button className="btn" disabled title="Endpoint de sugestao manual sera criado na Fase 3" type="button">
-                    <Bot size={16} />Gerar sugestao Tawany
+                  <button className="btn" disabled={suggesting} type="button" onClick={generateSuggestion}>
+                    <Bot size={16} />{suggesting ? 'Gerando...' : 'Gerar sugestao Tawany'}
                   </button>
                 </div>
               </div>
@@ -233,7 +330,22 @@ export default function InboxPage() {
                 <h3>Tags</h3>
                 <div className="chips">
                   {(selected.lead.tags ?? []).length === 0 ? <span className="muted">Sem tags</span> : null}
-                  {(selected.lead.tags ?? []).map((tag) => <span className="chip" key={tag}>{tag}</span>)}
+                  {(selected.lead.tags ?? []).map((tag) => (
+                    <span className="chip chip-removable" key={tag}>
+                      {tag}
+                      <button aria-label={`Remover tag ${tag}`} type="button" onClick={() => removeTag(tag)}><X size={12} /></button>
+                    </span>
+                  ))}
+                </div>
+                <div className="inline-form">
+                  <input
+                    className="input"
+                    placeholder="Nova tag"
+                    value={newTag}
+                    onChange={(event) => setNewTag(event.target.value)}
+                    onKeyDown={(event) => event.key === 'Enter' && addTag()}
+                  />
+                  <button className="btn" type="button" onClick={addTag}><Plus size={14} /></button>
                 </div>
               </div>
               <div className="panel-block">
@@ -245,10 +357,20 @@ export default function InboxPage() {
                     <span>{task.priority} · {task.dueAt ? formatDate(task.dueAt) : 'Sem prazo'}</span>
                   </div>
                 ))}
+                <div className="inline-form">
+                  <input
+                    className="input"
+                    placeholder="Nova tarefa"
+                    value={newTask}
+                    onChange={(event) => setNewTask(event.target.value)}
+                    onKeyDown={(event) => event.key === 'Enter' && createTask()}
+                  />
+                  <button className="btn" type="button" onClick={createTask}><Plus size={14} /></button>
+                </div>
               </div>
               <div className="suggestion-actions">
-                <button className="btn" disabled title="Endpoint de handoff sera criado na Fase 3" type="button">Marcar humano</button>
-                <button className="btn" disabled title="Endpoint de status sera criado na Fase 3" type="button">Resolver</button>
+                <button className="btn" type="button" onClick={markHuman}><AlertTriangle size={15} />Marcar humano</button>
+                <button className="btn" type="button" onClick={resolve}><CheckCheck size={15} />Resolver</button>
               </div>
             </>
           )}
