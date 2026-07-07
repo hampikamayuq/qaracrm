@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { AlertTriangle, Bot, Check, CheckCheck, MessageSquareText, Plus, Search, Send, UserRound, X } from 'lucide-react';
+import { AlertTriangle, Bot, Check, CheckCheck, MessageSquareText, Plus, Search, Send, UserRound, X, ToggleLeft, ToggleRight, FlaskConical } from 'lucide-react';
 import { api, type Conversation, type ConversationDetail } from '@/lib/api';
 
 type StatusFilter = 'OPEN' | 'ALL' | 'HUMAN';
@@ -34,6 +34,7 @@ export default function InboxPage() {
   const [newTag, setNewTag] = useState('');
   const [newTask, setNewTask] = useState('');
   const [feedback, setFeedback] = useState('');
+  const [testMode, setTestMode] = useState(false);
 
   const reloadDetail = useCallback(async (id: string) => {
     setDetailLoading(true);
@@ -105,13 +106,13 @@ export default function InboxPage() {
     }
     setSuggesting(true);
     try {
-      const res = await api.runTawany(lastInbound.id);
+      const res = await api.runTawany(lastInbound.id, testMode);
       if (!res.success) {
         flash(res.error ?? 'Tawany indisponível');
         return;
       }
       await reloadDetail(selected.id);
-      flash('Sugestão gerada.');
+      flash(testMode ? 'Sugestão gerada (modo teste - não enviado)' : 'Sugestão gerada.');
     } finally {
       setSuggesting(false);
     }
@@ -193,6 +194,14 @@ export default function InboxPage() {
               onChange={(event) => setSearch(event.target.value)}
             />
           </div>
+          <button
+            type="button"
+            className={`btn ${testMode ? 'btn-active' : ''}`}
+            onClick={() => setTestMode(!testMode)}
+            title={testMode ? 'Modo teste ativo - Tawany não envia mensagens reais' : 'Ativar modo teste'}
+          >
+            <FlaskConical size={16} />{testMode ? ' Testando' : ' Testar'}
+          </button>
           {(['OPEN', 'HUMAN', 'ALL'] as StatusFilter[]).map((filter) => (
             <button
               className={`btn ${status === filter ? 'btn-active' : ''}`}

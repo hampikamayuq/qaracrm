@@ -17,6 +17,7 @@ const jsonError = (res: Response, status: number, error: string): void => {
 export const runTawanyRoute = async (req: Request, res: Response): Promise<void> => {
   try {
     const messageId = req.body?.messageId;
+    const testMode = req.body?.testMode === true;
     if (typeof messageId !== 'string' || messageId.length === 0) {
       jsonError(res, 400, 'messageId required');
       return;
@@ -30,7 +31,7 @@ export const runTawanyRoute = async (req: Request, res: Response): Promise<void>
 
     const result = await runTawanyHandler(
       message as { id: string; conversationId: string; direction: 'IN' | 'OUT'; body: string; agentHandled?: boolean },
-      { ai: createAiClient(), data },
+      { ai: createAiClient(), data, testMode },
     );
     res.json({ success: true, data: result });
   } catch (error) {

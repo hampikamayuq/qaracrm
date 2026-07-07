@@ -17,7 +17,7 @@ export type TawanyTool = {
   name: string;
   description: string;
   parameters: z.ZodTypeAny;
-  execute: (args: never, ctx: DataApi) => Promise<string>;
+  execute: (args: never, ctx: DataApi & { testMode?: boolean }) => Promise<string>;
 };
 
 export const ALL_TOOLS: TawanyTool[] = [

@@ -26,14 +26,14 @@ const contextWindowOptions = () => ({
 });
 
 export type TawanyHandlerParams = { messageId: string; conversationId: string };
-export type TawanyDeps = { ai: AiClient; data: DataApi };
+export type TawanyDeps = { ai: AiClient; data: DataApi; testMode?: boolean };
 export type TawanyResult = { status: 'replied' | 'handoff'; content: string; toolCalls: number };
 
 export const runTawany = async (
   params: TawanyHandlerParams,
   deps: TawanyDeps,
 ): Promise<TawanyResult> => {
-  const { ai, data } = deps;
+  const { ai, data, testMode } = deps;
   let totalToolCalls = 0;
 
   try {
@@ -119,13 +119,15 @@ export const runTawany = async (
         status: 'PENDING',
         promptVersion: process.env.TAWANY_PROMPT_VERSION ?? 'v1',
       });
-      await tawanyTools.execute(
-        'sendWhatsApp',
-        JSON.stringify({ conversationId: params.conversationId, text: reply }),
-        data,
-      );
+      if (!deps.testMode) {
+        await tawanyTools.execute(
+          'sendWhatsApp',
+          JSON.stringify({ conversationId: params.conversationId, text: reply }),
+          data,
+        );
+      }
       if (typeof suggestion.id === 'string') {
-        await data.update('aiSuggestion', suggestion.id, { status: 'SENT' });
+        await data.update('aiSuggestion', suggestion.id, { status: deps.testMode ? 'TEST_SENT' : 'SENT' });
       }
       await recordAiRun(data, {
         layer: 'tawany',
@@ -197,7 +199,7 @@ export type TawanyHandlerRunResult =
 // cria ai; roda Tawany; roda classificador. Falha do classificador é logada, não fatal.
 export const runTawanyHandler = async (
   message: ChatMessageRecord,
-  deps: { ai?: AiClient; data: DataApi },
+  deps: { ai?: AiClient; data: DataApi; testMode?: boolean },
 ): Promise<TawanyHandlerRunResult> => {
   if (message.direction !== 'IN' || message.agentHandled) {
     return { status: 'skipped', reason: 'not_inbound_or_already_handled' };
@@ -283,7 +285,7 @@ export const runTawanyHandler = async (
 
     const r = await runTawany(
       { messageId: message.id, conversationId: message.conversationId },
-      { ai, data: deps.data },
+      { ai, data: deps.data, testMode: deps.testMode },
     );
     console.log(JSON.stringify({ event: 'tawany_run', messageId: message.id, status: r.status, toolCalls: r.toolCalls }));
 

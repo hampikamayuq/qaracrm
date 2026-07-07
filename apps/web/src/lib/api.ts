@@ -28,10 +28,48 @@ export type Lead = {
   tags?: string[];
 };
 
+export type PipelineLead = {
+  id: string;
+  name: { firstName: string; lastName: string } | null;
+  stage: string;
+  score: number;
+  whatsapp: { primaryPhoneNumber: string | null } | null;
+  email: { primaryEmail: string | null } | null;
+  source: string | null;
+  intent: string | null;
+  tags: string[];
+  temperature: string | null;
+  pipeline: string | null;
+  notes: string | null;
+  lastFollowUpAt: string | null;
+  nextFollowUpAt: string | null;
+};
+
+export type Pipeline = {
+  id: string;
+  name: string;
+  slug: string;
+  order: number;
+  color: string;
+};
+
 export type PipelineStage = {
   id: string;
   name: string;
   leads: Lead[];
+};
+
+export type Tag = {
+  value: string;
+  label: string;
+  color: string;
+  category: string;
+};
+
+export type ContextualTags = {
+  alerta: string[];
+  pipeline: string[];
+  origem: string[];
 };
 
 export type BotSummary = {
@@ -147,8 +185,8 @@ export const api = {
     return this.post(`/inbox/${conversationId}/reply`, { text });
   },
 
-  runTawany(messageId: string): Promise<ApiResponse<unknown>> {
-    return this.post('/tawany/run', { messageId });
+  runTawany(messageId: string, testMode?: boolean): Promise<ApiResponse<unknown>> {
+    return this.post('/tawany/run', { messageId, testMode });
   },
 
   handoff(conversationId: string): Promise<ApiResponse<{ needsHuman: boolean }>> {
@@ -205,5 +243,55 @@ export const api = {
 
   rejectSuggestion(suggestionId: string): Promise<ApiResponse<{ rejected: boolean }>> {
     return this.post('/tawany/reject', { suggestionId });
+  },
+
+  async getPipelines(): Promise<Pipeline[]> {
+    const res = await this.get<Pipeline[]>('/pipeline/pipelines');
+    return res.data ?? [];
+  },
+
+  async getPipelineLeads(pipeline?: string): Promise<PipelineLead[]> {
+    const params = pipeline && pipeline !== 'all' ? `?pipeline=${pipeline}` : '';
+    const res = await this.get<PipelineLead[]>(`/pipeline/leads${params}`);
+    return res.data ?? [];
+  },
+
+  moveLead(leadId: string, stage: string, pipeline?: string): Promise<ApiResponse<{ stage: string; pipeline?: string }>> {
+    return this.fetch(`/pipeline/leads/${leadId}/move`, {
+      method: 'PATCH',
+      body: JSON.stringify({ stage, pipeline }),
+    });
+  },
+
+  updateLeadPipeline(leadId: string, pipeline: string): Promise<ApiResponse<{ pipeline: string }>> {
+    return this.fetch(`/pipeline/leads/${leadId}/pipeline`, {
+      method: 'PATCH',
+      body: JSON.stringify({ pipeline }),
+    });
+  },
+
+  async getCanonicalTags(): Promise<Tag[]> {
+    const res = await this.get<Tag[]>('/tags/canonical');
+    return res.data ?? [];
+  },
+
+  async getContextualTags(): Promise<ContextualTags> {
+    const res = await this.get<ContextualTags>('/tags/contextual');
+    return res.data ?? { alerta: [], pipeline: [], origem: [] };
+  },
+
+  addLeadTag(leadId: string, tag: string): Promise<ApiResponse<{ tags: string[]; added: boolean }>> {
+    return this.post(`/tags/leads/${leadId}/tags`, { tag });
+  },
+
+  removeLeadTag(leadId: string, tag: string): Promise<ApiResponse<{ tags: string[]; removed: boolean }>> {
+    return this.fetch(`/tags/leads/${leadId}/tags/${encodeURIComponent(tag)}`, { method: 'DELETE' });
+  },
+
+  replaceLeadTags(leadId: string, tags: string[]): Promise<ApiResponse<{ tags: string[] }>> {
+    return this.fetch(`/tags/leads/${leadId}/tags`, {
+      method: 'PUT',
+      body: JSON.stringify({ tags }),
+    });
   },
 };

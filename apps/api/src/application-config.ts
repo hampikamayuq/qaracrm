@@ -4,12 +4,20 @@ import {
   APP_DESCRIPTION,
   APP_DISPLAY_NAME,
   APPLICATION_UNIVERSAL_IDENTIFIER,
+  DEFAULT_ROLE_UNIVERSAL_IDENTIFIER,
 } from 'src/constants/universal-identifiers';
+
+import { adminRole } from 'src/roles/admin.role';
+import { receptionRole } from 'src/roles/reception.role';
+import { doctorRole } from 'src/roles/doctor.role';
+import { financeRole } from 'src/roles/finance.role';
 
 export default defineApplication({
   universalIdentifier: APPLICATION_UNIVERSAL_IDENTIFIER,
   displayName: APP_DISPLAY_NAME,
   description: APP_DESCRIPTION,
+  defaultRoleUniversalIdentifier: DEFAULT_ROLE_UNIVERSAL_IDENTIFIER,
+  roles: [adminRole, receptionRole, doctorRole, financeRole],
   serverVariables: {
     OPENROUTER_API_KEY: {
       description:
@@ -81,6 +89,11 @@ export default defineApplication({
     },
     META_GRAPH_BASE_URL: {
       description: 'Graph API base URL. Defaults to https://graph.facebook.com/v20.0.',
+      isRequired: false,
+    },
+    LEAD_WEBHOOK_SECRET: {
+      description: 'Secret para validar o webhook universal /s/webhook/lead (header X-Webhook-Secret).',
+      isSecret: true,
       isRequired: false,
     },
   },

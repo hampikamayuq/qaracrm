@@ -8,8 +8,6 @@ export const metaGraphBreaker = new CircuitBreaker('meta-graph', {
   cooldownMs: 30_000,
 });
 
-// Fase 2: envio real via Meta Cloud API quando configurado; sem config
-// (dev/test) mantém o comportamento Fase 1 de apenas registrar no CRM.
 export const sendWhatsApp = {
   name: 'sendWhatsApp',
   description: 'Envia mensagem WhatsApp para uma conversa via Meta Cloud API.',
@@ -17,7 +15,7 @@ export const sendWhatsApp = {
     conversationId: z.string().uuid(),
     text: z.string().min(1).max(1024),
   }),
-  execute: async (args: { conversationId: string; text: string }, ctx: DataApi): Promise<string> => {
+  execute: async (args: { conversationId: string; text: string }, ctx: DataApi & { testMode?: boolean }): Promise<string> => {
     const conv = await ctx.get('conversation', args.conversationId, {
       id: true,
       channel: true,
@@ -26,8 +24,10 @@ export const sendWhatsApp = {
     if (!conv) return JSON.stringify({ ok: false, error: 'conversation_not_found' });
 
     const to = typeof conv.externalId === 'string' ? conv.externalId : '';
-    const canSend = isMetaSendConfigured() && conv.channel === 'WHATSAPP' && to.length > 0;
-    // Erro do sendViaMeta propaga: o tawany-handler converte em handoff.
+    
+    // In test mode, never send to Meta - just record in CRM
+    const isTestMode = ctx.testMode === true;
+    const canSend = !isTestMode && isMetaSendConfigured() && conv.channel === 'WHATSAPP' && to.length > 0;
     const wamid = canSend
       ? await metaGraphBreaker.execute(() => sendViaMeta(to, args.text))
       : null;
@@ -38,12 +38,11 @@ export const sendWhatsApp = {
       sentAt: new Date().toISOString(),
       conversationId: args.conversationId,
       messageType: 'TEXT',
-      deliveryStatus: wamid ? 'SENT' : 'PENDING',
+      deliveryStatus: wamid ? 'SENT' : (isTestMode ? 'TEST_MODE' : 'PENDING'),
       agentHandled: true,
       ...(wamid ? { externalId: wamid } : {}),
     });
     await ctx.update('conversation', args.conversationId, { lastMessageAt: new Date().toISOString() });
-    // No console.log of message body — outbound text is patient PHI.
-    return JSON.stringify({ ok: true, sent: Boolean(wamid), messageId: message.id });
+    return JSON.stringify({ ok: true, sent: Boolean(wamid), messageId: message.id, testMode: isTestMode });
   },
 };

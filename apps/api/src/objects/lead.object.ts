@@ -140,6 +140,14 @@ export default defineObject({
       name: 'nextFollowUpAt',
       label: 'Próximo Follow-up',
       icon: 'IconCalendarPlus',
+    },
+    {
+      universalIdentifier: 'e3f4a5b6-c7d8-9e0f-a1b2-c3d4e5f6a7b8',
+      type: FieldType.NUMBER,
+      name: 'position',
+      label: 'Posição',
+      icon: 'IconSort',
+      defaultValue: 0,
     }
   ],
 });
