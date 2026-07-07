@@ -256,6 +256,7 @@ export const runTawanyHandler = async (
       await deps.data.update('conversation', message.conversationId, {
         needsHuman: true,
         status: 'PENDING_HUMAN',
+        handoffReason: 'opt_out_detected',
       });
       console.log(JSON.stringify({
         event: 'tawany_run',
@@ -271,6 +272,7 @@ export const runTawanyHandler = async (
       await deps.data.update('conversation', message.conversationId, {
         needsHuman: true,
         status: 'PENDING_HUMAN',
+        handoffReason: 'prompt_injection',
       });
       await recordAiRun(deps.data, {
         layer: 'tawany',

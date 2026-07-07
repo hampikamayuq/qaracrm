@@ -2993,3 +2993,189 @@ a.chip {
     flex-wrap: wrap;
   }
 }
+
+/* ---------------- fase 8: estado da conversa, feedback e knowledge ---------------- */
+
+.thread-head-state {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+/* 👍/👎 discretos na bolha da Tawany: aparecem no hover (e no focus, por a11y) */
+.msg-feedback {
+  display: inline-flex;
+  gap: 2px;
+  margin-left: 4px;
+  opacity: 0;
+  transition: opacity var(--dur-1) var(--ease);
+}
+
+.message-bubble:hover .msg-feedback,
+.msg-feedback:focus-within,
+.msg-feedback:has(.fb-active) {
+  opacity: 1;
+}
+
+.fb-btn {
+  align-items: center;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--r-sm);
+  color: var(--ai-strong);
+  cursor: pointer;
+  display: inline-flex;
+  justify-content: center;
+  opacity: 0.65;
+  padding: 2px 4px;
+  transition: opacity var(--dur-1) var(--ease), background var(--dur-1) var(--ease);
+}
+
+.fb-btn:hover {
+  background: rgba(109, 40, 217, 0.1);
+  opacity: 1;
+}
+
+.fb-btn.fb-active {
+  background: var(--ai);
+  border-color: var(--ai-strong);
+  color: #fff;
+  opacity: 1;
+}
+
+.fb-form {
+  border-top: 1px dashed var(--ai-border);
+  display: grid;
+  gap: 8px;
+  margin-top: 8px;
+  padding-top: 8px;
+}
+
+.fb-form .textarea {
+  min-height: 48px;
+}
+
+/* /settings/knowledge — seções editáveis */
+.knowledge-list {
+  display: grid;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.knowledge-section {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-xs);
+}
+
+.knowledge-section[open] {
+  box-shadow: var(--shadow-sm);
+}
+
+.knowledge-section > summary {
+  align-items: center;
+  cursor: pointer;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: space-between;
+  list-style: none;
+  padding: 12px 16px;
+  user-select: none;
+}
+
+.knowledge-section > summary::-webkit-details-marker {
+  display: none;
+}
+
+.knowledge-summary-title {
+  align-items: center;
+  color: var(--text);
+  display: inline-flex;
+  font-weight: 600;
+  gap: 8px;
+}
+
+.knowledge-summary-title svg {
+  color: var(--ai);
+}
+
+.knowledge-summary-meta {
+  align-items: center;
+  display: inline-flex;
+  gap: 8px;
+}
+
+.knowledge-updated {
+  align-items: center;
+  display: inline-flex;
+  font-variant-numeric: tabular-nums;
+  gap: 4px;
+}
+
+.knowledge-editor {
+  border-top: 1px solid var(--border);
+  display: grid;
+  gap: 10px;
+  padding: 12px 16px 14px;
+}
+
+.textarea-mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12.5px;
+  line-height: 1.55;
+  min-height: 260px;
+}
+
+/* /settings/ai — modo, fila de revisão e exemplos */
+.ai-mode-row {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  margin: 14px 0 18px;
+}
+
+.ai-mode-card {
+  align-items: flex-start;
+  display: grid;
+  gap: 6px;
+  justify-items: start;
+}
+
+.review-card {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.review-q {
+  align-items: baseline;
+  color: var(--text-2);
+  display: flex;
+  gap: 6px;
+}
+
+.review-a {
+  background: var(--ai-soft);
+  border: 1px solid var(--ai-border);
+  border-radius: var(--r-sm);
+  color: var(--ai-strong);
+  padding: 8px 10px;
+}
+
+.review-note {
+  background: var(--warning-soft);
+  border: 1px solid var(--warning-border);
+  border-radius: var(--r-sm);
+  color: var(--warning);
+  padding: 8px 10px;
+}
+
+.example-form {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+}

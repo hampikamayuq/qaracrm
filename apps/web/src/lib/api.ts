@@ -2,10 +2,15 @@ const BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000/api';
 
 export type ApiResponse<T> = { success: boolean; data?: T; error?: string };
 
+// Estado derivado de quem conduz a conversa (badge do inbox)
+export type AgentState = 'tawany_ativa' | 'aguardando_humano' | 'humano_assumiu';
+
 export type Conversation = {
   id: string;
   status: string;
   needsHuman: boolean;
+  agentState?: AgentState;
+  handoffReason?: string | null;
   channel?: string | null;
   lastMessageAt?: string | null;
   updatedAt: string;
@@ -204,7 +209,46 @@ export type ConversationDetail = Omit<Conversation, 'messages' | 'aiSuggestions'
     status?: string;
     createdAt?: string;
   }>;
+  // Sugestões já enviadas (SENT/TEST_SENT) — feedback 👍/👎 nas bolhas da Tawany
+  sentSuggestions?: Array<{
+    id: string;
+    body: string;
+    status: string;
+    feedback: 'UP' | 'DOWN' | null;
+  }>;
 };
+
+// ---------------- knowledge vivo & IA ----------------
+
+export type KnowledgeSection = {
+  id: string;
+  slug: string;
+  title: string;
+  content: string;
+  updatedAt: string;
+  updatedById: string | null;
+  updatedByName: string | null;
+};
+
+export type TawanyExample = {
+  id: string;
+  question: string;
+  answer: string;
+  createdAt: string;
+};
+
+export type ReviewQueueItem = {
+  id: string;
+  body: string;
+  feedbackNote: string | null;
+  conversationId: string;
+  messageId: string | null;
+  question: string | null;
+  status: string;
+  createdAt: string;
+};
+
+export type AiSettings = { shadowMode: string; promptVersion: string };
 
 // ---------------- dashboard ----------------
 
@@ -360,6 +404,50 @@ export const api = {
 
   handoff(conversationId: string): Promise<ApiResponse<{ needsHuman: boolean }>> {
     return this.post(`/inbox/${conversationId}/handoff`, {});
+  },
+
+  devolverTawany(conversationId: string): Promise<ApiResponse<{ status: string; needsHuman: boolean; agentState: AgentState }>> {
+    return this.post(`/inbox/${conversationId}/devolver-tawany`, {});
+  },
+
+  // ---------------- feedback 👍/👎 e exemplos few-shot ----------------
+
+  sendSuggestionFeedback(suggestionId: string, feedback: 'UP' | 'DOWN', note?: string): Promise<ApiResponse<{ feedback: string }>> {
+    return this.post(`/tawany/suggestions/${suggestionId}/feedback`, note ? { feedback, note } : { feedback });
+  },
+
+  async getReviewQueue(): Promise<ReviewQueueItem[]> {
+    const res = await this.get<ReviewQueueItem[]>('/tawany/review-queue');
+    return res.data ?? [];
+  },
+
+  async getExamples(): Promise<TawanyExample[]> {
+    const res = await this.get<TawanyExample[]>('/tawany/examples');
+    return res.data ?? [];
+  },
+
+  createExample(question: string, answer: string): Promise<ApiResponse<TawanyExample>> {
+    return this.post('/tawany/examples', { question, answer });
+  },
+
+  deleteExample(id: string): Promise<ApiResponse<{ deleted: boolean }>> {
+    return this.fetch(`/tawany/examples/${id}`, { method: 'DELETE' });
+  },
+
+  // ---------------- knowledge vivo ----------------
+
+  async getKnowledgeSections(): Promise<KnowledgeSection[]> {
+    const res = await this.get<KnowledgeSection[]>('/settings/knowledge');
+    return res.data ?? [];
+  },
+
+  updateKnowledgeSection(slug: string, input: { content: string; title?: string }): Promise<ApiResponse<{ slug: string }>> {
+    return this.fetch(`/settings/knowledge/${encodeURIComponent(slug)}`, { method: 'PUT', body: JSON.stringify(input) });
+  },
+
+  async getAiSettings(): Promise<AiSettings | null> {
+    const res = await this.get<AiSettings>('/settings/ai');
+    return res.data ?? null;
   },
 
   setConversationStatus(conversationId: string, status: string): Promise<ApiResponse<{ status: string }>> {

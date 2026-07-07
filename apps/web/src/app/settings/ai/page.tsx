@@ -1,12 +1,194 @@
-import { PlaceholderPage } from '../../placeholder-page';
+'use client';
+
+import { useCallback, useEffect, useState } from 'react';
+import { Bot, ExternalLink, MessageSquareText, Plus, Sparkles, ThumbsDown, Trash2 } from 'lucide-react';
+import { api, type AiSettings, type ReviewQueueItem, type TawanyExample } from '@/lib/api';
+
+const modeLabel = (mode: string) => (
+  mode === 'autopilot' ? 'Autopilot — envia sozinha'
+    : mode === 'human_approval' ? 'Aprovação humana — sugere e espera aprovação'
+    : 'Shadow — só observa, não envia'
+);
+
+const formatDate = (value: string | null | undefined) => (
+  value ? new Date(value).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' }) : '—'
+);
 
 export default function AiSettingsPage() {
+  const [settings, setSettings] = useState<AiSettings | null>(null);
+  const [queue, setQueue] = useState<ReviewQueueItem[]>([]);
+  const [examples, setExamples] = useState<TawanyExample[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [question, setQuestion] = useState('');
+  const [answer, setAnswer] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [feedback, setFeedback] = useState('');
+
+  const reload = useCallback(async () => {
+    setLoading(true);
+    try {
+      const [ai, reviewQueue, activeExamples] = await Promise.all([
+        api.getAiSettings(),
+        api.getReviewQueue(),
+        api.getExamples(),
+      ]);
+      setSettings(ai);
+      setQueue(reviewQueue);
+      setExamples(activeExamples);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void reload();
+  }, [reload]);
+
+  const flash = (message: string) => {
+    setFeedback(message);
+    window.setTimeout(() => setFeedback(''), 4000);
+  };
+
+  const toExample = (item: ReviewQueueItem) => {
+    setQuestion(item.question ?? '');
+    setAnswer(item.feedbackNote ?? item.body);
+    window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
+  };
+
+  const createExample = async () => {
+    if (!question.trim() || !answer.trim()) {
+      flash('Preencha pergunta e resposta.');
+      return;
+    }
+    setSaving(true);
+    try {
+      const res = await api.createExample(question.trim(), answer.trim());
+      if (!res.success) {
+        flash(res.error ?? 'Falha ao criar exemplo.');
+        return;
+      }
+      setQuestion('');
+      setAnswer('');
+      flash('Exemplo criado. Entra no prompt da Tawany em até 60s.');
+      await reload();
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const removeExample = async (id: string) => {
+    const res = await api.deleteExample(id);
+    if (res.success) await reload();
+  };
+
   return (
-    <PlaceholderPage
-      eyebrow="IA"
-      title="Configuracoes de IA"
-      description="Controle de modelos, modo human approval e regras para quando a Tawany deve pedir revisao humana."
-      items={['Modo shadow, aprovacao humana ou autopilot', 'Modelos principal e fallback', 'Politicas de risco']}
-    />
+    <main className="page">
+      <div className="toolbar">
+        <div>
+          <h1 className="title-large">Tawany — qualidade das respostas</h1>
+          <div className="muted">Fila de revisão dos 👎, exemplos aprovados e modo de operação atual.</div>
+        </div>
+      </div>
+
+      {feedback ? <div className="flash" role="status">{feedback}</div> : null}
+
+      <div className="ai-mode-row">
+        <div className="card ai-mode-card">
+          <span className="chip chip-ai"><Bot size={13} />Modo</span>
+          <strong>{settings ? modeLabel(settings.shadowMode) : '—'}</strong>
+          <span className="faint">SHADOW_MODE={settings?.shadowMode ?? '?'} · definido no ambiente da API</span>
+        </div>
+        <div className="card ai-mode-card">
+          <span className="chip"><Sparkles size={13} />Prompt</span>
+          <strong>Versão {settings?.promptVersion ?? '—'}</strong>
+          <span className="faint">TAWANY_PROMPT_VERSION · registrada em cada sugestão</span>
+        </div>
+      </div>
+
+      <section aria-labelledby="review-queue-title">
+        <h2 className="section-title" id="review-queue-title">
+          <ThumbsDown size={15} /> Fila de revisão ({queue.length})
+        </h2>
+        {loading ? <div className="card muted">Carregando…</div> : null}
+        {!loading && queue.length === 0 ? (
+          <div className="card muted">Nenhuma resposta marcada com 👎. Bom sinal.</div>
+        ) : null}
+        {queue.map((item) => (
+          <article className="card review-card" key={item.id}>
+            {item.question ? (
+              <div className="review-q"><MessageSquareText size={13} /> Paciente: {item.question}</div>
+            ) : null}
+            <div className="review-a">Tawany: {item.body}</div>
+            {item.feedbackNote ? (
+              <div className="review-note">Deveria ter respondido: {item.feedbackNote}</div>
+            ) : null}
+            <div className="suggestion-actions">
+              <button className="btn btn-primary" type="button" onClick={() => toExample(item)}>
+                <Plus size={14} />Transformar em exemplo
+              </button>
+              <a className="btn" href={`/inbox?conversationId=${item.conversationId}`}>
+                <ExternalLink size={14} />Abrir conversa
+              </a>
+              <span className="faint">{formatDate(item.createdAt)}</span>
+            </div>
+          </article>
+        ))}
+      </section>
+
+      <section aria-labelledby="examples-title">
+        <h2 className="section-title" id="examples-title">
+          <Sparkles size={15} /> Exemplos aprovados ({examples.length})
+        </h2>
+        <div className="muted">
+          Injetados no prompt como &quot;Exemplos de boas respostas&quot; (máx. 10, mais recentes primeiro).
+        </div>
+
+        <div className="card example-form">
+          <label className="field">
+            <span>Pergunta do paciente</span>
+            <textarea
+              className="textarea"
+              value={question}
+              onChange={(event) => setQuestion(event.target.value)}
+              rows={2}
+              placeholder="Ex.: Vocês atendem convênio?"
+            />
+          </label>
+          <label className="field">
+            <span>Resposta ideal da Tawany</span>
+            <textarea
+              className="textarea"
+              value={answer}
+              onChange={(event) => setAnswer(event.target.value)}
+              rows={3}
+              placeholder="Ex.: A QARA atende só particular, mas emitimos nota fiscal para reembolso."
+            />
+          </label>
+          <div className="suggestion-actions">
+            <button className="btn btn-primary" disabled={saving} type="button" onClick={createExample}>
+              <Plus size={14} />{saving ? 'Salvando…' : 'Adicionar exemplo'}
+            </button>
+          </div>
+        </div>
+
+        {examples.map((example) => (
+          <article className="card review-card" key={example.id}>
+            <div className="review-q"><MessageSquareText size={13} /> Paciente: {example.question}</div>
+            <div className="review-a">Tawany: {example.answer}</div>
+            <div className="suggestion-actions">
+              <button
+                className="btn btn-danger"
+                type="button"
+                aria-label={`Excluir exemplo: ${example.question}`}
+                onClick={() => removeExample(example.id)}
+              >
+                <Trash2 size={14} />Excluir
+              </button>
+              <span className="faint">{formatDate(example.createdAt)}</span>
+            </div>
+          </article>
+        ))}
+      </section>
+    </main>
   );
 }

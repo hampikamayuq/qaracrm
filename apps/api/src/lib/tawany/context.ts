@@ -1,4 +1,5 @@
 import type { DataApi } from 'src/lib/data';
+import { loadKnowledgeContext, type KnowledgeSectionRow, type TawanyExampleRow } from './knowledge';
 
 export type RecentMessage = { id: string; direction: 'IN' | 'OUT'; body: string; sentAt: string };
 export type LeadSummary = {
@@ -19,6 +20,10 @@ export type TawanyContext = {
   // tawany-handler quando o histórico excede a janela verbatim).
   summary: string | null;
   knownPrices: number[]; // centavos, dos Services ativos — alimenta validateReply
+  // Knowledge vivo (/settings/knowledge) + exemplos few-shot aprovados, ambos do
+  // cache de 60s. Vazios → prompt-builder cai no QARA_KNOWLEDGE_PROMPT hardcoded.
+  knowledgeSections: KnowledgeSectionRow[];
+  examples: TawanyExampleRow[];
 };
 
 export const N_RECENT = 10;
@@ -78,11 +83,15 @@ export const buildTawanyContext = async (
     .map((s) => s.priceCents)
     .filter((v): v is number => typeof v === 'number');
 
+  const knowledge = await loadKnowledgeContext(ctx);
+
   return {
     conversationId,
     lead,
     recentMessages: messages.reverse(),
     summary: typeof conv.summary === 'string' && conv.summary.length > 0 ? conv.summary : null,
     knownPrices,
+    knowledgeSections: knowledge.sections,
+    examples: knowledge.examples,
   };
 };

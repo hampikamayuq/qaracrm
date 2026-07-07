@@ -380,6 +380,7 @@ describe('runTawanyHandler', () => {
     expect(data.update).toHaveBeenCalledWith('conversation', UUID, {
       needsHuman: true,
       status: 'PENDING_HUMAN',
+      handoffReason: 'opt_out_detected',
     });
     expect(vi.mocked(runQaraClassifier)).not.toHaveBeenCalled();
   });
@@ -396,6 +397,7 @@ describe('runTawanyHandler', () => {
     expect(data.update).toHaveBeenCalledWith('conversation', UUID, {
       needsHuman: true,
       status: 'PENDING_HUMAN',
+      handoffReason: 'prompt_injection',
     });
     expect(recordAiRun).toHaveBeenCalledWith(data, expect.objectContaining({
       layer: 'tawany',

@@ -1,8 +1,8 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { AlertTriangle, Bot, Check, CheckCheck, FlaskConical, MessageSquareText, Plus, Search, Send, Sparkles, X } from 'lucide-react';
-import { api, type Conversation, type ConversationDetail } from '@/lib/api';
+import { AlertTriangle, Bot, Check, CheckCheck, FlaskConical, MessageSquareText, Plus, Search, Send, Sparkles, ThumbsDown, ThumbsUp, Undo2, X } from 'lucide-react';
+import { api, type AgentState, type Conversation, type ConversationDetail } from '@/lib/api';
 
 type StatusFilter = 'OPEN' | 'ALL' | 'HUMAN';
 
@@ -61,6 +61,33 @@ const avatarStyle = (name: string | null | undefined) => {
 
 const firstMessage = (conversation: Conversation) => conversation.messages?.[0]?.body ?? 'Sem mensagens';
 
+// Fallback local caso a API ainda não devolva agentState
+const agentStateOf = (conversation: { status: string; needsHuman: boolean; agentState?: AgentState }): AgentState =>
+  conversation.agentState
+    ?? (conversation.needsHuman ? 'aguardando_humano' : conversation.status === 'OPEN' ? 'tawany_ativa' : 'humano_assumiu');
+
+// Motivos técnicos do handoff traduzidos para a equipe
+const handoffReasonLabel = (reason: string | null | undefined): string => {
+  if (!reason) return 'motivo não registrado';
+  if (reason.startsWith('guard_failed')) {
+    if (reason.includes('price_not_in_kb')) return 'bloqueado: preço fora da tabela';
+    if (reason.includes('sensitive_topic')) return 'bloqueado: tema sensível';
+    if (reason.includes('length_exceeds')) return 'bloqueado: resposta longa demais';
+    if (reason.includes('schedule_promise')) return 'bloqueado: prometeu horário sem agenda';
+    if (reason.includes('outcome_promise')) return 'bloqueado: prometeu resultado';
+    if (reason.includes('mohs') || reason.includes('skin_cancer')) return 'bloqueado: afirmação clínica sensível';
+    return 'bloqueado pelo validador';
+  }
+  if (reason === 'opt_out_detected') return 'paciente pediu para parar';
+  if (reason.includes('injection')) return 'mensagem suspeita';
+  if (reason === 'manual_handoff') return 'marcado manualmente';
+  if (reason === 'max_iterations') return 'Tawany não conseguiu concluir';
+  if (reason.startsWith('tool_error')) return 'erro em ferramenta interna';
+  if (reason.startsWith('config')) return 'configuração de IA ausente';
+  if (reason.startsWith('tawany_error')) return 'erro interno da Tawany';
+  return reason;
+};
+
 export default function InboxPage() {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [selectedId, setSelectedId] = useState('');
@@ -76,6 +103,8 @@ export default function InboxPage() {
   const [newTask, setNewTask] = useState('');
   const [feedback, setFeedback] = useState('');
   const [testMode, setTestMode] = useState(false);
+  const [downvoteId, setDownvoteId] = useState<string | null>(null);
+  const [downvoteNote, setDownvoteNote] = useState('');
 
   const reloadDetail = useCallback(async (id: string) => {
     setDetailLoading(true);
@@ -184,6 +213,30 @@ export default function InboxPage() {
     await api.handoff(selected.id);
     await reloadDetail(selected.id);
     flash('Conversa marcada para atendimento humano.');
+  };
+
+  const devolverTawany = async () => {
+    if (!selected) return;
+    const res = await api.devolverTawany(selected.id);
+    if (!res.success) {
+      flash(res.error ?? 'Falha ao devolver para a Tawany.');
+      return;
+    }
+    await reloadDetail(selected.id);
+    flash('Conversa devolvida para a Tawany.');
+  };
+
+  const sendBubbleFeedback = async (suggestionId: string, value: 'UP' | 'DOWN', note?: string) => {
+    if (!selected) return;
+    const res = await api.sendSuggestionFeedback(suggestionId, value, note);
+    if (!res.success) {
+      flash(res.error ?? 'Falha ao registrar feedback.');
+      return;
+    }
+    setDownvoteId(null);
+    setDownvoteNote('');
+    await reloadDetail(selected.id);
+    flash(value === 'UP' ? 'Feedback registrado. 👍' : 'Feedback registrado — resposta entrou na fila de revisão.');
   };
 
   const resolve = async () => {
@@ -337,7 +390,22 @@ export default function InboxPage() {
                     <div className="muted">{selected.channel ?? 'Canal não informado'} · {statusLabel(selected.status)}</div>
                   </div>
                 </div>
-                {selected.needsHuman ? <span className="chip chip-danger"><AlertTriangle size={13} />Precisa humano</span> : null}
+                <div className="thread-head-state">
+                  {agentStateOf(selected) === 'tawany_ativa' ? (
+                    <span className="chip chip-ai"><Bot size={13} />Tawany ativa</span>
+                  ) : agentStateOf(selected) === 'aguardando_humano' ? (
+                    <span className="chip chip-warning" title={selected.handoffReason ?? undefined}>
+                      <AlertTriangle size={13} />Aguardando humano — {handoffReasonLabel(selected.handoffReason)}
+                    </span>
+                  ) : (
+                    <span className="chip">Humano assumiu</span>
+                  )}
+                  {agentStateOf(selected) !== 'tawany_ativa' ? (
+                    <button className="btn" type="button" onClick={devolverTawany}>
+                      <Undo2 size={14} />Devolver para a Tawany
+                    </button>
+                  ) : null}
+                </div>
               </header>
 
               <div className="message-thread">
@@ -345,13 +413,61 @@ export default function InboxPage() {
                 {selected.messages.map((message) => {
                   const isOut = message.direction === 'OUT';
                   const bubbleClass = isOut ? (message.agentHandled ? 'message-ai' : 'message-out') : 'message-in';
+                  // ponytail: casa a bolha com a sugestão SENT pelo body; se a equipe
+                  // editar antes de enviar, o feedback fica indisponível para essa msg.
+                  const sug = isOut && message.agentHandled
+                    ? selected.sentSuggestions?.find((s) => s.body === message.body)
+                    : undefined;
                   return (
                     <article className={`message-bubble ${bubbleClass}`} key={message.id}>
                       <div>{message.body}</div>
                       <footer className="msg-meta">
                         {isOut && message.agentHandled ? <Bot size={12} /> : null}
                         {isOut ? (message.agentHandled ? 'Tawany' : 'Clínica') : 'Paciente'} · {formatDate(message.sentAt)}
+                        {sug ? (
+                          <span className="msg-feedback">
+                            <button
+                              type="button"
+                              className={sug.feedback === 'UP' ? 'fb-btn fb-active' : 'fb-btn'}
+                              title="Boa resposta"
+                              aria-label="Marcar como boa resposta"
+                              onClick={() => sendBubbleFeedback(sug.id, 'UP')}
+                            >
+                              <ThumbsUp size={12} />
+                            </button>
+                            <button
+                              type="button"
+                              className={sug.feedback === 'DOWN' ? 'fb-btn fb-active' : 'fb-btn'}
+                              title="Resposta ruim"
+                              aria-label="Marcar como resposta ruim"
+                              onClick={() => { setDownvoteId(sug.id); setDownvoteNote(''); }}
+                            >
+                              <ThumbsDown size={12} />
+                            </button>
+                          </span>
+                        ) : null}
                       </footer>
+                      {sug && downvoteId === sug.id ? (
+                        <div className="fb-form">
+                          <textarea
+                            className="textarea"
+                            placeholder="O que a Tawany deveria ter respondido? (opcional)"
+                            value={downvoteNote}
+                            onChange={(event) => setDownvoteNote(event.target.value)}
+                            rows={2}
+                          />
+                          <div className="suggestion-actions">
+                            <button
+                              className="btn btn-danger"
+                              type="button"
+                              onClick={() => sendBubbleFeedback(sug.id, 'DOWN', downvoteNote.trim() || undefined)}
+                            >
+                              <ThumbsDown size={13} />Enviar feedback
+                            </button>
+                            <button className="btn" type="button" onClick={() => setDownvoteId(null)}>Cancelar</button>
+                          </div>
+                        </div>
+                      ) : null}
                     </article>
                   );
                 })}

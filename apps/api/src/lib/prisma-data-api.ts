@@ -19,6 +19,8 @@ const MODEL_MAP: Record<string, keyof PrismaClient> = {
   pipelineStage: 'pipelineStage',
   aiRunLog: 'aiRunLog',
   knowledgeArticle: 'knowledgeArticle',
+  knowledgeSection: 'knowledgeSection',
+  tawanyExample: 'tawanyExample',
   webhookEvent: 'webhookEvent',
   appointment: 'appointment',
   bot: 'bot',
