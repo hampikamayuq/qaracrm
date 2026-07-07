@@ -1,7 +1,5 @@
-import { defineLogicFunction, type ObjectRecordCreateEvent } from 'twenty-sdk/define';
-import type { DatabaseEventPayload } from 'twenty-sdk/logic-function';
 import { createAiClient, modelWithFallback } from 'src/lib/ai-client';
-import { createDataApi, type DataApi } from 'src/lib/data';
+import type { DataApi } from 'src/lib/data';
 
 export type SummarizeParams = { messageId: string; conversationId: string };
 export type SummarizeResult = { ok: true; tokens: number } | { ok: false; error: string };
@@ -49,22 +47,5 @@ export const summarizeConversation = async (
   }
 };
 
-type ChatMessageRecord = { id: string; conversationId: string; direction: 'IN' | 'OUT' };
-
-export default defineLogicFunction({
-  universalIdentifier: '9b8403ff-2944-4c15-9a68-bc51e390328f',
-  name: 'summarize-conversation',
-  description: 'Recomputa conversation.summary após cada mensagem inbound (roda em paralelo ao tawany-handler).',
-  timeoutSeconds: 60,
-  databaseEventTriggerSettings: {
-    eventName: 'chatMessage.created',
-  },
-  handler: async (event: DatabaseEventPayload<ObjectRecordCreateEvent<ChatMessageRecord>>): Promise<void> => {
-    const message = event.properties.after;
-    if (message.direction !== 'IN') return; // sem filtro no trigger — gate aqui
-    await summarizeConversation(
-      { messageId: message.id, conversationId: message.conversationId },
-      createDataApi(),
-    );
-  },
-});
+// ponytail: o wrapper defineLogicFunction (trigger Twenty) foi removido — este
+// runtime é Express e o gatilho agora é o tawany-handler pós-processamento.

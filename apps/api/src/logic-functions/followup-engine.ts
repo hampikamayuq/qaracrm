@@ -1,6 +1,4 @@
-import { defineLogicFunction } from 'twenty-sdk/define';
-import { createDataApi, type DataApi } from 'src/lib/data';
-import { FOLLOWUP_ENGINE_LOGIC_FUNCTION_UNIVERSAL_IDENTIFIER } from 'src/constants/universal-identifiers';
+import type { DataApi } from 'src/lib/data';
 import { categorizeTask, daysSince, type TaskCategory } from 'src/lib/followup/categorize';
 
 const FOLLOWUP_THRESHOLD_DAYS = 3;
@@ -35,7 +33,7 @@ export type FollowupResult = {
 
 export const runFollowupEngine = async (
   now: Date,
-  data: DataApi = createDataApi(),
+  data: DataApi,
 ): Promise<FollowupResult> => {
   const result: FollowupResult = { leadsScanned: 0, tasksCreated: 0, tasksRecategorized: 0, errors: 0 };
 
@@ -88,14 +86,5 @@ export const runFollowupEngine = async (
   return result;
 };
 
-export default defineLogicFunction({
-  universalIdentifier: FOLLOWUP_ENGINE_LOGIC_FUNCTION_UNIVERSAL_IDENTIFIER,
-  name: 'followup-engine',
-  description: 'Daily 8am: creates follow-up tasks for leads without contact >=3 days, and re-buckets existing pending tasks by dueAt.',
-  timeoutSeconds: 180,
-  cronTriggerSettings: { pattern: '0 8 * * *' },
-  handler: async () => {
-    const r = await runFollowupEngine(new Date());
-    console.log(JSON.stringify({ event: 'followup_run', ...r }));
-  },
-});
+// ponytail: o wrapper defineLogicFunction (cron Twenty) foi removido — o
+// agendamento agora é o setInterval de src/server.ts (FOLLOWUP_INTERVAL_MS).

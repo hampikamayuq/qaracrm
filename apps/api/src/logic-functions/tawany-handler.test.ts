@@ -24,11 +24,16 @@ vi.mock('./leads-novos-flow', () => ({
   runLeadsNovosFlow: vi.fn(),
 }));
 
+vi.mock('./summarize-conversation', () => ({
+  summarizeConversation: vi.fn(),
+}));
+
 import { runQaraClassifier } from './qara-classifier';
 import { runLeadScorer } from 'src/lib/lead-score/orchestrator';
 import { recordAiRun } from 'src/lib/ai-run-log';
 import { buildMessages } from 'src/lib/tawany/prompt-builder';
 import { runLeadsNovosFlow } from './leads-novos-flow';
+import { summarizeConversation } from './summarize-conversation';
 
 const UUID = '00000000-0000-4000-8000-000000000000';
 const LEAD_ID = 'l1';
@@ -70,6 +75,7 @@ beforeEach(() => {
   vi.mocked(runLeadScorer).mockReset();
   vi.mocked(recordAiRun).mockReset();
   vi.mocked(runLeadsNovosFlow).mockReset();
+  vi.mocked(summarizeConversation).mockReset();
   vi.mocked(buildMessages).mockReturnValue([{ role: 'user', content: 'oi' }]);
 });
 
@@ -135,7 +141,7 @@ describe('runTawany', () => {
     expect(data.create).not.toHaveBeenCalledWith('chatMessage', expect.objectContaining({ direction: 'OUT' }));
   });
 
-  it('never auto-sends in testMode even when autopilot is configured', async () => {
+  it('never auto-sends in testMode even when autopilot is configured (marca TEST_SENT)', async () => {
     process.env.SHADOW_MODE = 'autopilot';
     const data = makeData();
     (data.create as ReturnType<typeof vi.fn>).mockImplementation(async (obj: string) =>
@@ -146,8 +152,56 @@ describe('runTawany', () => {
       { ai: makeAi(chatResult({ content: 'Olá Maria!', finishReason: 'stop' })), data, testMode: true },
     );
     expect(r.status).toBe('replied');
+    expect(data.create).not.toHaveBeenCalledWith('chatMessage', expect.objectContaining({ direction: 'OUT' }));
+    expect(data.update).toHaveBeenCalledWith('aiSuggestion', 's1', { status: 'TEST_SENT' });
+    expect(data.update).not.toHaveBeenCalledWith('aiSuggestion', 's1', { status: 'SENT' });
+    delete process.env.SHADOW_MODE;
+  });
+
+  it('sendMode explícito tem precedência sobre SHADOW_MODE', async () => {
+    delete process.env.SHADOW_MODE; // env em 'shadow', mas sendMode manda
+    const data = makeData();
+    (data.create as ReturnType<typeof vi.fn>).mockImplementation(async (obj: string) =>
+      obj === 'aiSuggestion' ? { id: 's1' } : { id: 'm-out' },
+    );
+    const r = await runTawany(
+      { messageId: 'm1', conversationId: UUID },
+      { ai: makeAi(chatResult({ content: 'Olá Maria!', finishReason: 'stop' })), data, sendMode: 'send' },
+    );
+    expect(r.status).toBe('replied');
+    expect(data.create).toHaveBeenCalledWith('chatMessage', expect.objectContaining({ direction: 'OUT', body: 'Olá Maria!' }));
+    expect(data.update).toHaveBeenCalledWith('aiSuggestion', 's1', { status: 'SENT' });
+  });
+
+  it("sendMode 'suggest_only' cria a sugestão PENDING e não envia nem atualiza status", async () => {
+    process.env.SHADOW_MODE = 'autopilot'; // mesmo em autopilot, suggest_only não envia
+    const data = makeData();
+    (data.create as ReturnType<typeof vi.fn>).mockImplementation(async (obj: string) =>
+      obj === 'aiSuggestion' ? { id: 's1' } : { id: 'm1' },
+    );
+    const r = await runTawany(
+      { messageId: 'm1', conversationId: UUID },
+      { ai: makeAi(chatResult({ content: 'Olá Maria!', finishReason: 'stop' })), data, sendMode: 'suggest_only' },
+    );
+    expect(r.status).toBe('replied');
+    expect(data.create).toHaveBeenCalledWith('aiSuggestion', expect.objectContaining({ status: 'PENDING' }));
+    expect(data.create).not.toHaveBeenCalledWith('chatMessage', expect.objectContaining({ direction: 'OUT' }));
     expect(data.update).not.toHaveBeenCalledWith('aiSuggestion', 's1', expect.anything());
     delete process.env.SHADOW_MODE;
+  });
+
+  it("sendMode 'test' cria a sugestão, marca TEST_SENT e nunca envia", async () => {
+    const data = makeData();
+    (data.create as ReturnType<typeof vi.fn>).mockImplementation(async (obj: string) =>
+      obj === 'aiSuggestion' ? { id: 's1' } : { id: 'm1' },
+    );
+    const r = await runTawany(
+      { messageId: 'm1', conversationId: UUID },
+      { ai: makeAi(chatResult({ content: 'Olá Maria!', finishReason: 'stop' })), data, sendMode: 'test' },
+    );
+    expect(r.status).toBe('replied');
+    expect(data.create).not.toHaveBeenCalledWith('chatMessage', expect.objectContaining({ direction: 'OUT' }));
+    expect(data.update).toHaveBeenCalledWith('aiSuggestion', 's1', { status: 'TEST_SENT' });
   });
 
   it('passes the patient model fallback list to the ai client', async () => {
@@ -475,5 +529,69 @@ describe('runTawanyHandler', () => {
     );
     expect(r.status).toBe('replied');
     expect(data.update).toHaveBeenCalledWith('chatMessage', 'm1', { agentHandled: true });
+  });
+
+  it('gera o summary quando o histórico excede a janela verbatim do contexto', async () => {
+    const data = makeData();
+    (data.list as ReturnType<typeof vi.fn>).mockImplementation(async (obj: string) =>
+      obj === 'chatMessage'
+        ? Array.from({ length: 11 }, (_, i) => ({ id: `m${i}`, direction: 'IN', body: 'oi', sentAt: '2026-07-04T10:00:00Z' }))
+        : [{ priceCents: 55000 }],
+    );
+    vi.mocked(runQaraClassifier).mockResolvedValue(null);
+    vi.mocked(summarizeConversation).mockResolvedValue({ ok: true, tokens: 42 });
+    const r = await runTawanyHandler(
+      { id: 'm1', conversationId: UUID, direction: 'IN', body: 'oi' },
+      { ai: makeAi(chatResult({ content: 'Olá!', finishReason: 'stop' })), data },
+    );
+    expect(r.status).toBe('replied');
+    expect(vi.mocked(summarizeConversation)).toHaveBeenCalledWith(
+      { messageId: 'm1', conversationId: UUID },
+      data,
+    );
+  });
+
+  it('não gera summary quando o histórico cabe na janela verbatim', async () => {
+    const data = makeData(); // list retorna 1 mensagem
+    vi.mocked(runQaraClassifier).mockResolvedValue(null);
+    const r = await runTawanyHandler(
+      { id: 'm1', conversationId: UUID, direction: 'IN', body: 'oi' },
+      { ai: makeAi(chatResult({ content: 'Olá!', finishReason: 'stop' })), data },
+    );
+    expect(r.status).toBe('replied');
+    expect(vi.mocked(summarizeConversation)).not.toHaveBeenCalled();
+  });
+
+  it('falha do summarize não quebra o run (non-fatal)', async () => {
+    const data = makeData();
+    (data.list as ReturnType<typeof vi.fn>).mockImplementation(async (obj: string) =>
+      obj === 'chatMessage'
+        ? Array.from({ length: 11 }, (_, i) => ({ id: `m${i}`, direction: 'IN', body: 'oi', sentAt: '2026-07-04T10:00:00Z' }))
+        : [{ priceCents: 55000 }],
+    );
+    vi.mocked(runQaraClassifier).mockResolvedValue(null);
+    vi.mocked(summarizeConversation).mockRejectedValue(new Error('summary boom'));
+    const r = await runTawanyHandler(
+      { id: 'm1', conversationId: UUID, direction: 'IN', body: 'oi' },
+      { ai: makeAi(chatResult({ content: 'Olá!', finishReason: 'stop' })), data },
+    );
+    expect(r.status).toBe('replied');
+    expect(data.update).toHaveBeenCalledWith('chatMessage', 'm1', { agentHandled: true });
+  });
+
+  it('repassa sendMode ao runTawany (suggest_only não envia nem marca status)', async () => {
+    const data = makeData();
+    (data.create as ReturnType<typeof vi.fn>).mockImplementation(async (obj: string) =>
+      obj === 'aiSuggestion' ? { id: 's1' } : { id: 'm1' },
+    );
+    vi.mocked(runQaraClassifier).mockResolvedValue(null);
+    const r = await runTawanyHandler(
+      { id: 'm1', conversationId: UUID, direction: 'IN', body: 'oi' },
+      { ai: makeAi(chatResult({ content: 'Olá!', finishReason: 'stop' })), data, sendMode: 'suggest_only' },
+    );
+    expect(r.status).toBe('replied');
+    expect(data.create).toHaveBeenCalledWith('aiSuggestion', expect.objectContaining({ status: 'PENDING' }));
+    expect(data.create).not.toHaveBeenCalledWith('chatMessage', expect.objectContaining({ direction: 'OUT' }));
+    expect(data.update).not.toHaveBeenCalledWith('aiSuggestion', 's1', expect.anything());
   });
 });

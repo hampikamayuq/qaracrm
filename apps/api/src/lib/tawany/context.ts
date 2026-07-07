@@ -14,15 +14,14 @@ export type LeadSummary = {
 export type TawanyContext = {
   conversationId: string;
   lead: LeadSummary;
-  recentMessages: RecentMessage[]; // últimas 3 verbatim, mais antiga primeiro
-  // ponytail: resumo pré-computado ainda não existe no runtime real — o
-  // logic-function que o gerava era um trigger Twenty, nunca chamado pelo
-  // webhook Express. Fica null até summarize-conversation ser plugado aqui.
+  recentMessages: RecentMessage[]; // últimas N_RECENT verbatim, mais antiga primeiro
+  // Resumo pré-computado por summarize-conversation (rodado pós-Tawany no
+  // tawany-handler quando o histórico excede a janela verbatim).
   summary: string | null;
   knownPrices: number[]; // centavos, dos Services ativos — alimenta validateReply
 };
 
-const N_RECENT = 3;
+export const N_RECENT = 10;
 
 export const buildTawanyContext = async (
   conversationId: string,
@@ -31,7 +30,8 @@ export const buildTawanyContext = async (
   const conv = (await ctx.get('conversation', conversationId, {
     id: true,
     leadId: true,
-  })) as { leadId?: string | null } | null;
+    summary: true,
+  })) as { leadId?: string | null; summary?: string | null } | null;
   if (!conv) throw new Error(`Conversation not found: ${conversationId}`);
 
   let lead: LeadSummary = null;
@@ -82,7 +82,7 @@ export const buildTawanyContext = async (
     conversationId,
     lead,
     recentMessages: messages.reverse(),
-    summary: null,
+    summary: typeof conv.summary === 'string' && conv.summary.length > 0 ? conv.summary : null,
     knownPrices,
   };
 };

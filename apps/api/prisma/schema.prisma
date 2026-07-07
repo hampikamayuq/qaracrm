@@ -116,6 +116,8 @@ model Conversation {
   channel       String?
   lastMessageAt DateTime?
   classification Json?
+  summary       String?
+  summaryUpdatedAt DateTime?
   handoffReason String?
   assignedToId  String?
   assignedTo    User?          @relation(fields: [assignedToId], references: [id])
