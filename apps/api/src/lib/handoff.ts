@@ -13,8 +13,14 @@ export const handoff = async (
       handoffReason: reason,
       status: 'NEEDS_HUMAN',
     });
-    const note = await ctx.create('note', { title: `Tawany → handoff: ${reason}`.slice(0, 240) });
-    await ctx.create('noteTarget', { noteId: note.id, targetConversationId: conversationId });
+    await ctx.create('activity', {
+      targetType: 'conversation',
+      targetId: conversationId,
+      conversationId,
+      type: 'HANDOFF',
+      title: 'Tawany → handoff',
+      body: reason.slice(0, 240),
+    });
     return { ok: true };
   } catch (e) {
     console.error(`[handoff] failed for ${conversationId}:`, e);

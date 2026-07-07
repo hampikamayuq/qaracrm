@@ -29,8 +29,12 @@ export const updateLead = {
       result = await ctx.update('lead', args.leadId, fieldUpdates);
     }
     if (notes) {
-      const note = await ctx.create('note', { title: notes.slice(0, 240) });
-      await ctx.create('noteTarget', { noteId: note.id, targetLeadId: args.leadId });
+      await ctx.create('activity', {
+        targetType: 'lead',
+        targetId: args.leadId,
+        type: 'NOTE',
+        body: notes,
+      });
     }
     return JSON.stringify({ ok: true, ...result });
   },

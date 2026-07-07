@@ -31,8 +31,9 @@ describe('runLeadsNovosFlow', () => {
       direction: 'OUT',
       conversationId: UUID,
     }));
-    expect(data.create).toHaveBeenCalledWith('note', expect.objectContaining({
-      title: expect.stringContaining('leads-novos-flow: address'),
+    expect(data.create).toHaveBeenCalledWith('activity', expect.objectContaining({
+      targetType: 'conversation', targetId: UUID, type: 'NOTE',
+      body: expect.stringContaining('leads-novos-flow: address'),
     }));
   });
 

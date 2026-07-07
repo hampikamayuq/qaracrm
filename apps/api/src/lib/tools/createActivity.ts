@@ -1,13 +1,6 @@
 import { z } from 'zod';
 import type { DataApi } from 'src/lib/data';
 
-const TARGET_FK: Record<string, string> = {
-  lead: 'targetLeadId',
-  patient: 'targetPatientId',
-  conversation: 'targetConversationId',
-};
-
-// Timeline "activity" = built-in Note + NoteTarget apontando para o registro.
 export const createActivity = {
   name: 'createActivity',
   description: 'Cria uma nota no timeline de um lead, paciente ou conversa.',
@@ -20,8 +13,12 @@ export const createActivity = {
     args: { targetType: 'lead' | 'patient' | 'conversation'; targetId: string; body: string },
     ctx: DataApi,
   ): Promise<string> => {
-    const note = await ctx.create('note', { title: args.body.slice(0, 240) });
-    await ctx.create('noteTarget', { noteId: note.id, [TARGET_FK[args.targetType]]: args.targetId });
-    return JSON.stringify({ ok: true, noteId: note.id });
+    const activity = await ctx.create('activity', {
+      targetType: args.targetType,
+      targetId: args.targetId,
+      type: 'NOTE',
+      body: args.body,
+    });
+    return JSON.stringify({ ok: true, activityId: activity.id });
   },
 };

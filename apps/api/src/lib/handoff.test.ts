@@ -2,14 +2,20 @@ import { describe, it, expect, vi } from 'vitest';
 import { handoff } from './handoff';
 
 describe('handoff', () => {
-  it('sets needsHuman and logs a timeline note', async () => {
+  it('sets needsHuman and logs a timeline activity', async () => {
     const update = vi.fn().mockResolvedValue({ id: 'c1' });
-    const create = vi.fn().mockResolvedValue({ id: 'n1' });
+    const create = vi.fn().mockResolvedValue({ id: 'a1' });
     const r = await handoff('00000000-0000-4000-8000-000000000001', 'urgencia', { update, create } as never);
     expect(r.ok).toBe(true);
     expect(update).toHaveBeenCalledWith('conversation', '00000000-0000-4000-8000-000000000001',
       expect.objectContaining({ needsHuman: true, handoffReason: 'urgencia', status: 'NEEDS_HUMAN' }));
-    expect(create).toHaveBeenCalledWith('noteTarget', expect.objectContaining({ noteId: 'n1' }));
+    expect(create).toHaveBeenCalledWith('activity', expect.objectContaining({
+      targetType: 'conversation',
+      targetId: '00000000-0000-4000-8000-000000000001',
+      conversationId: '00000000-0000-4000-8000-000000000001',
+      type: 'HANDOFF',
+      body: 'urgencia',
+    }));
   });
 
   it('returns ok:false on error', async () => {

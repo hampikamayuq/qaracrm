@@ -341,7 +341,7 @@ export const runTawanyHandler = async (
         const lead = (await deps.data.get('lead', conv.leadId, { id: true, intent: true, source: true })) as { id?: string; intent?: string | null; source?: string | null } | null;
         if (lead) {
           const messages = (await deps.data.list('chatMessage', {
-            filter: { conversation: { lead: { id: { eq: conv.leadId } } } },
+            filter: { conversationId: { eq: message.conversationId } },
             orderBy: { sentAt: 'DESC' },
             limit: 10,
             select: { body: true, sentAt: true },

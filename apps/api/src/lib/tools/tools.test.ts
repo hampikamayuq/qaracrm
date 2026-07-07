@@ -64,11 +64,12 @@ describe('write tools', () => {
     expect(update).toHaveBeenCalledWith('lead', UUID, { score: 75 });
   });
 
-  it('updateLead turns notes into a timeline note', async () => {
-    const create = vi.fn().mockResolvedValue({ id: 'n1' });
+  it('updateLead turns notes into a timeline activity', async () => {
+    const create = vi.fn().mockResolvedValue({ id: 'a1' });
     await updateLead.execute({ leadId: UUID, updates: { notes: 'quer agendar' } }, api({ create }));
-    expect(create).toHaveBeenCalledWith('note', { title: 'quer agendar' });
-    expect(create).toHaveBeenCalledWith('noteTarget', { noteId: 'n1', targetLeadId: UUID });
+    expect(create).toHaveBeenCalledWith('activity', {
+      targetType: 'lead', targetId: UUID, type: 'NOTE', body: 'quer agendar',
+    });
   });
 
   it('updateConversation updates status', async () => {
@@ -92,10 +93,12 @@ describe('write tools', () => {
     expect(update).not.toHaveBeenCalled();
   });
 
-  it('createActivity creates note + noteTarget with correct FK', async () => {
-    const create = vi.fn().mockResolvedValue({ id: 'n1' });
+  it('createActivity writes a real Activity row for the target', async () => {
+    const create = vi.fn().mockResolvedValue({ id: 'a1' });
     await createActivity.execute({ targetType: 'conversation', targetId: UUID, body: 'Tawany respondeu' }, api({ create }));
-    expect(create).toHaveBeenCalledWith('noteTarget', { noteId: 'n1', targetConversationId: UUID });
+    expect(create).toHaveBeenCalledWith('activity', {
+      targetType: 'conversation', targetId: UUID, type: 'NOTE', body: 'Tawany respondeu',
+    });
   });
 
   it('sendWhatsApp records outbound without sending when Meta is not configured', async () => {
