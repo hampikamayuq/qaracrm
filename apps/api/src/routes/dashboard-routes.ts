@@ -58,7 +58,7 @@ export const getSummaryRoute = async (req: Request, res: Response): Promise<void
         // Mesma semântica do bucket OVERDUE de lib/followup/categorize:
         // task pendente com dueAt antes de hoje.
         prisma.task.count({
-          where: { status: { in: ['TODO', 'pending'] }, dueAt: { lt: todayStart } },
+          where: { status: { in: ['TODO', 'pending', 'OPEN'] }, dueAt: { lt: todayStart } },
         }),
         prisma.lead.count({ where: { createdAt: { gte: start } } }),
         prisma.lead.count({ where: { createdAt: { gte: prevStart, lt: start } } }),

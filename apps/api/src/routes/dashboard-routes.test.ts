@@ -121,7 +121,7 @@ describe('Dashboard routes', () => {
     });
     // followups atrasados = tasks pendentes vencidas antes de hoje
     expect(mocks.prisma.task.count).toHaveBeenCalledWith({
-      where: { status: { in: ['TODO', 'pending'] }, dueAt: { lt: at('2026-07-07T00:00:00Z') } },
+      where: { status: { in: ['TODO', 'pending', 'OPEN'] }, dueAt: { lt: at('2026-07-07T00:00:00Z') } },
     });
   });
 
