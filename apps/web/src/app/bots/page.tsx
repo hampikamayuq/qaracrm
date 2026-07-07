@@ -1,8 +1,93 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { Bot, FlaskConical, Trash2, Upload, Zap } from 'lucide-react';
-import { api, type BotSummary } from '@/lib/api';
+import { Bot, Copy, FlaskConical, History, Pencil, Plus, Trash2, Upload, X, Zap } from 'lucide-react';
+import { api, type BotSummary, type BotVersion } from '@/lib/api';
+import { BotEditor, type EditorBot } from './bot-editor';
+
+// Modal de histórico de versões: quando, quem e "Reverter para esta".
+function HistoryModal({ bot, onClose, onReverted }: {
+  bot: BotSummary;
+  onClose: () => void;
+  onReverted: (message: string) => void;
+}) {
+  const [versions, setVersions] = useState<BotVersion[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [reverting, setReverting] = useState(false);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    let alive = true;
+    api.getBotVersions(bot.id)
+      .then((rows) => { if (alive) setVersions(rows); })
+      .finally(() => { if (alive) setLoading(false); });
+    return () => { alive = false; };
+  }, [bot.id]);
+
+  const revert = async (version: BotVersion) => {
+    const label = version.name ?? bot.name;
+    if (!window.confirm(`Reverter "${bot.name}" para a versão "${label}" de ${new Date(version.at).toLocaleString('pt-BR')}? A versão atual será guardada no histórico.`)) {
+      return;
+    }
+    setReverting(true);
+    setError('');
+    try {
+      const res = await api.revertBot(bot.id, version.id);
+      if (res.success) {
+        onReverted(`Fluxo "${bot.name}" revertido para a versão de ${new Date(version.at).toLocaleString('pt-BR')}.`);
+      } else {
+        setError(res.error ?? 'Falha ao reverter.');
+      }
+    } finally {
+      setReverting(false);
+    }
+  };
+
+  return (
+    <div className="modal-root" role="dialog" aria-modal="true" aria-labelledby="bot-history-title" onClick={onClose}>
+      <div className="modal-backdrop" />
+      <div className="modal" onClick={(e) => e.stopPropagation()}>
+        <header className="modal-head">
+          <h2 id="bot-history-title">Histórico de versões</h2>
+          <span className="muted">{bot.name} — cada salvamento guarda a versão anterior</span>
+        </header>
+
+        {error ? <p className="error">{error}</p> : null}
+        {loading ? <div className="muted">Carregando…</div> : null}
+        {!loading && versions.length === 0 ? (
+          <div className="muted">Nenhuma versão anterior ainda. Edite e salve o fluxo para criar a primeira.</div>
+        ) : null}
+        {!loading && versions.length > 0 ? (
+          <ul className="history-list">
+            {versions.map((version) => (
+              <li key={version.id} className="history-item">
+                <span className="history-move">
+                  {version.name ?? '(sem nome)'} · {version.rules} regra{version.rules === 1 ? '' : 's'}
+                </span>
+                <span className="muted">
+                  {new Date(version.at).toLocaleString('pt-BR')}{version.byName ? ` — por ${version.byName}` : ''}
+                </span>
+                <button
+                  className="btn"
+                  type="button"
+                  disabled={reverting}
+                  style={{ justifySelf: 'start', marginTop: '4px' }}
+                  onClick={() => revert(version)}
+                >
+                  <History size={13} />Reverter para esta
+                </button>
+              </li>
+            ))}
+          </ul>
+        ) : null}
+
+        <div className="modal-actions">
+          <button className="btn" type="button" onClick={onClose}><X size={14} />Fechar</button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 export default function BotsPage() {
   const [bots, setBots] = useState<BotSummary[]>([]);
@@ -11,6 +96,9 @@ export default function BotsPage() {
   const [testText, setTestText] = useState('');
   const [testResult, setTestResult] = useState<{ matched: boolean; botName?: string; responses: string[] } | null>(null);
   const [testing, setTesting] = useState(false);
+  const [editor, setEditor] = useState<EditorBot | null>(null);
+  const [riskTerms, setRiskTerms] = useState<string[]>([]);
+  const [historyBot, setHistoryBot] = useState<BotSummary | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
 
   const reload = async () => {
@@ -22,7 +110,10 @@ export default function BotsPage() {
     }
   };
 
-  useEffect(() => { void reload(); }, []);
+  useEffect(() => {
+    void reload();
+    void api.getBotRiskTerms().then(setRiskTerms);
+  }, []);
 
   const flash = (message: string) => {
     setFeedback(message);
@@ -60,6 +151,25 @@ export default function BotsPage() {
     }
   };
 
+  const openEdit = async (bot: BotSummary) => {
+    const detail = await api.getBot(bot.id);
+    if (!detail) {
+      flash('Não foi possível carregar o fluxo para edição.');
+      return;
+    }
+    setEditor({ id: detail.id, name: detail.name, rules: detail.rules });
+  };
+
+  const duplicate = async (bot: BotSummary) => {
+    const res = await api.duplicateBot(bot.id);
+    if (res.success && res.data) {
+      flash(`Fluxo duplicado como "${res.data.name}" (pausado).`);
+      await reload();
+    } else {
+      flash(res.error ?? 'Falha ao duplicar.');
+    }
+  };
+
   return (
     <main className="page">
       <div className="toolbar">
@@ -79,8 +189,15 @@ export default function BotsPage() {
               event.target.value = '';
             }}
           />
-          <button className="btn btn-primary" type="button" onClick={() => fileInput.current?.click()}>
+          <button className="btn" type="button" onClick={() => fileInput.current?.click()}>
             <Upload size={15} />Importar JSON
+          </button>
+          <button
+            className="btn btn-primary"
+            type="button"
+            onClick={() => setEditor({ id: null, name: '', rules: [] })}
+          >
+            <Plus size={15} />Novo bot
           </button>
         </div>
       </div>
@@ -120,18 +237,29 @@ export default function BotsPage() {
                 <span className="chip">{bot.rules} regras</span>
                 <span className={`chip ${bot.active ? 'chip-ok' : 'chip-warning'}`}>{bot.active ? 'ativo' : 'pausado'}</span>
               </div>
-              <button
-                className="btn btn-danger"
-                type="button"
-                onClick={async () => {
-                  if (window.confirm(`Excluir o fluxo "${bot.name}"?`)) {
-                    await api.fetch(`/bots/${bot.id}`, { method: 'DELETE' });
-                    await reload();
-                  }
-                }}
-              >
-                <Trash2 size={15} />Excluir
-              </button>
+              <div className="toolbar-right">
+                <button className="btn" type="button" onClick={() => openEdit(bot)}>
+                  <Pencil size={14} />Editar
+                </button>
+                <button className="btn" type="button" onClick={() => duplicate(bot)}>
+                  <Copy size={14} />Duplicar
+                </button>
+                <button className="btn" type="button" onClick={() => setHistoryBot(bot)}>
+                  <History size={14} />Histórico
+                </button>
+                <button
+                  className="btn btn-danger"
+                  type="button"
+                  onClick={async () => {
+                    if (window.confirm(`Excluir o fluxo "${bot.name}"?`)) {
+                      await api.fetch(`/bots/${bot.id}`, { method: 'DELETE' });
+                      await reload();
+                    }
+                  }}
+                >
+                  <Trash2 size={15} />Excluir
+                </button>
+              </div>
             </div>
           </article>
         ))}
@@ -167,6 +295,31 @@ export default function BotsPage() {
           )
         ) : null}
       </section>
+
+      {editor ? (
+        <BotEditor
+          bot={editor}
+          riskTerms={riskTerms}
+          onClose={() => setEditor(null)}
+          onSaved={async (message) => {
+            setEditor(null);
+            flash(message);
+            await reload();
+          }}
+        />
+      ) : null}
+
+      {historyBot ? (
+        <HistoryModal
+          bot={historyBot}
+          onClose={() => setHistoryBot(null)}
+          onReverted={async (message) => {
+            setHistoryBot(null);
+            flash(message);
+            await reload();
+          }}
+        />
+      ) : null}
     </main>
   );
 }

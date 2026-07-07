@@ -98,6 +98,36 @@ export type BotSummary = {
   updatedAt: string;
 };
 
+export type BotRuleInput = { terms: string[]; responses: string[] };
+
+export type BotDetail = {
+  id: string;
+  name: string;
+  trigger: string;
+  active: boolean;
+  rules: BotRuleInput[];
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type BotVersion = {
+  id: string;
+  name: string | null;
+  rules: number;
+  byUserId: string | null;
+  byName: string | null;
+  at: string;
+};
+
+export type BotTestResult = {
+  matched: boolean;
+  blockedByRisk?: boolean;
+  botName?: string;
+  ruleIndex?: number;
+  terms?: string[];
+  responses: string[];
+};
+
 export type ConversationDetail = Omit<Conversation, 'messages' | 'aiSuggestions' | 'lead'> & {
   classification?: unknown;
   lead: NonNullable<Conversation['lead']> & {
@@ -288,8 +318,40 @@ export const api = {
     return this.post('/bots/import', { flow, source });
   },
 
-  testBot(text: string): Promise<ApiResponse<{ matched: boolean; botName?: string; responses: string[] }>> {
-    return this.post('/bots/test', { text });
+  // flow inline (opcional) testa o fluxo do editor sem salvar.
+  testBot(text: string, flow?: { rules: BotRuleInput[] }): Promise<ApiResponse<BotTestResult>> {
+    return this.post('/bots/test', flow ? { text, flow } : { text });
+  },
+
+  async getBot(id: string): Promise<BotDetail | null> {
+    const res = await this.get<BotDetail>(`/bots/${id}`);
+    return res.data ?? null;
+  },
+
+  createBot(input: { name: string; rules: BotRuleInput[] }): Promise<ApiResponse<{ id: string; name: string; rules: number }>> {
+    return this.post('/bots', input);
+  },
+
+  updateBot(id: string, input: { name: string; rules: BotRuleInput[] }): Promise<ApiResponse<{ id: string; name: string; rules: number }>> {
+    return this.fetch(`/bots/${id}`, { method: 'PUT', body: JSON.stringify(input) });
+  },
+
+  duplicateBot(id: string): Promise<ApiResponse<{ id: string; name: string; active: boolean }>> {
+    return this.post(`/bots/${id}/duplicate`, {});
+  },
+
+  async getBotVersions(id: string): Promise<BotVersion[]> {
+    const res = await this.get<BotVersion[]>(`/bots/${id}/versions`);
+    return res.data ?? [];
+  },
+
+  revertBot(id: string, versionId: string): Promise<ApiResponse<{ id: string; name: string; rules: number }>> {
+    return this.post(`/bots/${id}/revert`, { versionId });
+  },
+
+  async getBotRiskTerms(): Promise<string[]> {
+    const res = await this.get<string[]>('/bots/risk-terms');
+    return res.data ?? [];
   },
 
   async getPipeline(): Promise<PipelineStage[]> {
