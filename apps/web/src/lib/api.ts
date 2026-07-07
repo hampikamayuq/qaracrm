@@ -250,6 +250,48 @@ export type DashboardResponseTime = {
   variacaoPct: number | null;
 };
 
+// ---------------- relatórios ----------------
+
+export type ReportTipo = 'comercial' | 'atendimento' | 'tawany';
+
+// period preset OU from/to (YYYY-MM-DD, máx. 366 dias) — from/to tem precedência.
+export type ReportParams = { period?: DashboardPeriod; from?: string; to?: string };
+
+export type ReportComercial = {
+  leadsNovos: number;
+  porEstagio: Array<{ stage: string; label: string; count: number }>;
+  conversaoPct: number | null;
+  porEspecialidade: Array<{ pipeline: string; count: number; convertidos: number }>;
+  perdas: Array<{ reason: string; count: number }>;
+  comparativo: { leadsNovos: number; conversaoPct: number | null; perdas: number };
+};
+
+export type ReportAtendimento = {
+  conversasAtivas: number;
+  medianaPrimeiraRespostaMin: number | null;
+  mensagensRecebidas: number;
+  mensagensEnviadas: number;
+  tawanyVsHumano: { tawany: number; humano: number };
+  comparativo: {
+    conversasAtivas: number;
+    medianaPrimeiraRespostaMin: number | null;
+    mensagensRecebidas: number;
+    mensagensEnviadas: number;
+    tawanyVsHumano: { tawany: number; humano: number };
+  };
+};
+
+export type ReportTawany = {
+  respostas: number;
+  handoffs: number;
+  taxaResolucaoPct: number | null;
+  bloqueios: Array<{ motivo: string; count: number }>;
+  latenciaMediaMs: number | null;
+  fallbacks: number;
+  porDia: DashboardDailyPoint[];
+  comparativo: { respostas: number; handoffs: number; taxaResolucaoPct: number | null };
+};
+
 const getToken = (): string | null => {
   if (typeof window === 'undefined') return null;
   return sessionStorage.getItem('auth_token') ?? localStorage.getItem('auth_token');
@@ -539,5 +581,28 @@ export const api = {
       throw new Error(res.error ?? 'Falha ao carregar o dashboard');
     }
     return res.data;
+  },
+
+  // ---------------- relatórios ----------------
+
+  // Mesmo contrato do getDashboard: lança em falha para o Promise.all da
+  // página cair no estado de erro com retry.
+  async getReport<T>(tipo: ReportTipo, params: ReportParams): Promise<T> {
+    const res = await this.get<T>(`/reports/${tipo}${qs(params)}`);
+    if (!res.success || res.data === undefined) {
+      throw new Error(res.error ?? 'Falha ao carregar o relatório');
+    }
+    return res.data;
+  },
+
+  // CSV precisa do header Authorization → baixa via fetch e devolve o Blob
+  // (mesmo padrão do .ics da agenda).
+  async downloadReportCsv(tipo: ReportTipo, params: ReportParams): Promise<Blob | null> {
+    const headers = new Headers();
+    const token = getToken();
+    if (token) headers.set('Authorization', `Bearer ${token}`);
+    const res = await fetch(`${BASE_URL}/reports/${tipo}/export.csv${qs(params)}`, { headers });
+    if (!res.ok) return null;
+    return res.blob();
   },
 };

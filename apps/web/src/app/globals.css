@@ -2380,6 +2380,95 @@ select {
 }
 
 /* ============================================================
+   Relatórios (/reports) — reusa kpi/chart/skeleton do dashboard
+   ============================================================ */
+
+.report-section {
+  margin-top: 32px;
+}
+
+.report-section:first-child {
+  margin-top: 0;
+}
+
+.report-head {
+  align-items: flex-end;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.report-head .section-title {
+  margin: 0 0 2px;
+}
+
+.report-head .btn {
+  flex: 0 0 auto;
+}
+
+/* seções têm 3-4 KPIs (não os 5 fixos do dashboard) */
+.report-section .kpi-grid {
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+}
+
+/* período custom: dois <input type=date> ao lado do segmented */
+.report-range {
+  align-items: center;
+  display: inline-flex;
+  gap: 8px;
+}
+
+.report-range .input {
+  width: 148px;
+}
+
+/* tabela compacta dentro de chart-card (especialidades, bloqueios) */
+.report-table {
+  border-collapse: collapse;
+  font-size: 13px;
+  width: 100%;
+}
+
+.report-table th {
+  border-bottom: 1px solid var(--border);
+  color: var(--text-3);
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  padding: 6px 8px;
+  text-align: left;
+  text-transform: uppercase;
+}
+
+.report-table td {
+  border-bottom: 1px solid var(--surface-3);
+  color: var(--text-2);
+  font-variant-numeric: tabular-nums;
+  padding: 8px;
+}
+
+.report-table td:first-child {
+  color: var(--text);
+  text-transform: capitalize;
+}
+
+.report-table tr:last-child td {
+  border-bottom: none;
+}
+
+@media (max-width: 640px) {
+  .report-head {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .report-range {
+    flex-wrap: wrap;
+  }
+}
+
+/* ============================================================
    Agenda (calendário interno)
    ============================================================ */
 
