@@ -13,6 +13,11 @@ const mocks = vi.hoisted(() => ({
       findMany: vi.fn(),
       groupBy: vi.fn(),
     },
+    conversation: { findMany: vi.fn() },
+    task: { findMany: vi.fn() },
+    appointment: { findMany: vi.fn() },
+    chatMessage: { findMany: vi.fn() },
+    aiSuggestion: { findMany: vi.fn() },
   },
 }));
 
@@ -273,6 +278,145 @@ describe('Pipeline routes', () => {
         },
         expect.objectContaining({ id: 'a1', from: null, to: null, byName: null }),
       ],
+    });
+  });
+
+  describe('getLeadTimelineRoute', () => {
+    beforeEach(() => {
+      mocks.prisma.conversation.findMany.mockResolvedValue([]);
+      mocks.prisma.activity.findMany.mockResolvedValue([]);
+      mocks.prisma.task.findMany.mockResolvedValue([]);
+      mocks.prisma.appointment.findMany.mockResolvedValue([]);
+      mocks.prisma.chatMessage.findMany.mockResolvedValue([]);
+      mocks.prisma.aiSuggestion.findMany.mockResolvedValue([]);
+    });
+
+    it('une activities, tasks, appointments, mensagens agregadas e sugestões, ordenado desc', async () => {
+      mocks.prisma.conversation.findMany.mockResolvedValue([{ id: 'c1' }]);
+      mocks.prisma.activity.findMany.mockResolvedValue([
+        {
+          id: 'a1', type: 'STAGE_CHANGE', userId: 'u1', user: { name: 'Diego' },
+          createdAt: new Date('2026-07-05T10:00:00.000Z'),
+          body: JSON.stringify({ type: 'stage_change', from: 'novo-lead', to: 'agendado' }),
+        },
+        {
+          id: 'a2', type: 'NOTE', userId: null, user: null,
+          createdAt: new Date('2026-07-04T09:00:00.000Z'),
+          body: 'Paciente pediu retorno na sexta',
+        },
+      ]);
+      mocks.prisma.task.findMany.mockResolvedValue([
+        {
+          id: 't1', title: 'Ligar', status: 'DONE', dueAt: null,
+          createdAt: new Date('2026-07-03T12:00:00.000Z'), updatedAt: new Date('2026-07-06T12:00:00.000Z'),
+        },
+        {
+          id: 't2', title: 'Cobrar retorno', status: 'OPEN', dueAt: new Date('2026-07-01T12:00:00.000Z'),
+          createdAt: new Date('2026-06-30T12:00:00.000Z'), updatedAt: new Date('2026-06-30T12:00:00.000Z'),
+        },
+      ]);
+      mocks.prisma.appointment.findMany.mockResolvedValue([
+        {
+          id: 'ap1', scheduledAt: new Date('2026-07-10T14:00:00.000Z'), status: 'CONFIRMED',
+          createdAt: new Date('2026-07-02T10:00:00.000Z'), professional: { name: 'Dra. Ana' },
+        },
+      ]);
+      mocks.prisma.chatMessage.findMany.mockResolvedValue([
+        { conversationId: 'c1', sentAt: new Date('2026-07-05T08:00:00.000Z'), direction: 'IN', agentHandled: false },
+        { conversationId: 'c1', sentAt: new Date('2026-07-05T08:05:00.000Z'), direction: 'OUT', agentHandled: true },
+        { conversationId: 'c1', sentAt: new Date('2026-07-05T08:10:00.000Z'), direction: 'OUT', agentHandled: true },
+      ]);
+      mocks.prisma.aiSuggestion.findMany.mockResolvedValue([
+        {
+          id: 's1', status: 'APPROVED', body: 'Oi Maria, podemos agendar…',
+          decidedAt: new Date('2026-07-05T08:04:00.000Z'), createdAt: new Date('2026-07-05T08:03:00.000Z'),
+          approvedBy: { name: 'Recepção' },
+        },
+      ]);
+      const { getLeadTimelineRoute } = await import('./pipeline-routes');
+      const response = res();
+
+      await getLeadTimelineRoute(req({ params: { id: 'l1' }, query: {} }), response);
+
+      const data = (response.json as ReturnType<typeof vi.fn>).mock.calls[0][0].data;
+      // Sempre desc por data
+      const dates = data.map((i: { at: string }) => i.at);
+      expect([...dates].sort().reverse()).toEqual(dates);
+
+      const byType = Object.fromEntries(data.map((i: { type: string }) => [i.type, i]));
+      expect(byType.stage_change).toMatchObject({ title: 'Novo lead → Agendado', byName: 'Diego' });
+      // Nota sem userId → atribuída à Tawany (tool createActivity)
+      expect(byType.note).toMatchObject({ detail: 'Paciente pediu retorno na sexta', byName: 'Tawany' });
+      expect(byType.appointment).toMatchObject({ detail: expect.stringContaining('Confirmado') });
+      expect(byType.suggestion).toMatchObject({ title: 'Sugestão da Tawany aprovada', byName: 'Recepção' });
+      // 3 mensagens do mesmo dia/conversa viram UM item agregado
+      expect(byType.messages).toMatchObject({
+        title: '3 mensagens (2 da Tawany)',
+        at: '2026-07-05T08:10:00.000Z',
+      });
+      expect(data.filter((i: { type: string }) => i.type === 'messages')).toHaveLength(1);
+
+      // tasks: criada + concluída (t1) e criada + vencida (t2)
+      const taskTitles = data.filter((i: { type: string }) => i.type === 'task').map((i: { title: string }) => i.title);
+      expect(taskTitles).toEqual(expect.arrayContaining([
+        'Tarefa criada: Ligar', 'Tarefa concluída: Ligar',
+        'Tarefa criada: Cobrar retorno', 'Tarefa venceu: Cobrar retorno',
+      ]));
+    });
+
+    it('respeita ?limit= e usa 50 como default', async () => {
+      mocks.prisma.task.findMany.mockResolvedValue(
+        Array.from({ length: 80 }, (_, i) => ({
+          id: `t${i}`, title: `Task ${i}`, status: 'OPEN', dueAt: null,
+          createdAt: new Date(2026, 0, 1, 0, i), updatedAt: new Date(2026, 0, 1, 0, i),
+        })),
+      );
+      const { getLeadTimelineRoute } = await import('./pipeline-routes');
+
+      const def = res();
+      await getLeadTimelineRoute(req({ params: { id: 'l1' }, query: {} }), def);
+      expect((def.json as ReturnType<typeof vi.fn>).mock.calls[0][0].data).toHaveLength(50);
+
+      const limited = res();
+      await getLeadTimelineRoute(req({ params: { id: 'l1' }, query: { limit: '10' } }), limited);
+      expect((limited.json as ReturnType<typeof vi.fn>).mock.calls[0][0].data).toHaveLength(10);
+    });
+  });
+
+  describe('createLeadNoteRoute', () => {
+    it('cria activity NOTE com userId do autor e valida body', async () => {
+      mocks.prisma.lead.findUnique.mockResolvedValue({ id: 'l1' });
+      mocks.prisma.activity.create.mockResolvedValue({ id: 'n1', createdAt: new Date('2026-07-07T12:00:00.000Z') });
+      const { createLeadNoteRoute } = await import('./pipeline-routes');
+
+      const ok = res();
+      await createLeadNoteRoute(
+        req({ params: { id: 'l1' }, body: { body: '  Retornar amanhã  ' }, userId: 'u1' } as Partial<Request>),
+        ok,
+      );
+      expect(mocks.prisma.activity.create).toHaveBeenCalledWith({
+        data: { targetType: 'lead', targetId: 'l1', type: 'NOTE', body: 'Retornar amanhã', userId: 'u1' },
+      });
+      expect(ok.status).toHaveBeenCalledWith(201);
+
+      const empty = res();
+      await createLeadNoteRoute(req({ params: { id: 'l1' }, body: { body: '   ' } }), empty);
+      expect(empty.status).toHaveBeenCalledWith(400);
+
+      const tooLong = res();
+      await createLeadNoteRoute(req({ params: { id: 'l1' }, body: { body: 'x'.repeat(2001) } }), tooLong);
+      expect(tooLong.status).toHaveBeenCalledWith(400);
+    });
+
+    it('retorna 404 quando o lead não existe', async () => {
+      mocks.prisma.lead.findUnique.mockResolvedValue(null);
+      const { createLeadNoteRoute } = await import('./pipeline-routes');
+      const response = res();
+
+      await createLeadNoteRoute(req({ params: { id: 'ghost' }, body: { body: 'oi' } }), response);
+
+      expect(response.status).toHaveBeenCalledWith(404);
+      expect(mocks.prisma.activity.create).not.toHaveBeenCalled();
     });
   });
 });

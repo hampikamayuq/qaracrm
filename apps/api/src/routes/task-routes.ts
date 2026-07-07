@@ -2,6 +2,7 @@ import { Router } from 'express';
 import type { Request, Response } from 'express';
 import { prisma } from '../lib/deps';
 import { authMiddleware } from '../middleware/auth-middleware';
+import { categorizeTask } from '../lib/followup/categorize';
 
 const router = Router();
 
@@ -29,7 +30,17 @@ export const listTasksRoute = async (req: Request, res: Response): Promise<void>
         assignedTo: { select: { id: true, name: true } },
       },
     });
-    res.json({ success: true, data: tasks });
+    // Bucket do follow-up (Atrasadas/Hoje/Próximas) re-derivado na leitura —
+    // mesma regra do followup-engine (lib/followup/categorize).
+    const now = new Date();
+    const data = tasks.map((task) => ({
+      ...task,
+      category: categorizeTask(
+        { status: task.status, dueAt: task.dueAt ? task.dueAt.toISOString() : null },
+        now,
+      ),
+    }));
+    res.json({ success: true, data });
   } catch (error) {
     jsonError(res, 500, (error as Error).message);
   }

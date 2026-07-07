@@ -21,8 +21,12 @@ const addDays = (d: Date, n: number): Date => { const x = new Date(d); x.setDate
 // "leave the row alone" — we never want to flip a closed task's category.
 // ponytail: categorize is called per row inside a batch; an unparseable dueAt
 // becomes NO_DATE rather than throwing, so one bad row can't abort the run.
+// 'OPEN' é o status default das tasks criadas via Prisma (task-routes);
+// 'TODO'/'pending' são os valores usados pelo followup-engine.
+const PENDING_STATUSES = new Set(['pending', 'TODO', 'OPEN']);
+
 export const categorizeTask = (task: CategorizableTask, now: Date): TaskCategory | null => {
-  if (task.status !== 'pending' && task.status !== 'TODO') return null;
+  if (!PENDING_STATUSES.has(task.status ?? '')) return null;
   const due = task.dueAt ? new Date(task.dueAt) : null;
   if (!due || isNaN(due.valueOf())) return 'NO_DATE';
 

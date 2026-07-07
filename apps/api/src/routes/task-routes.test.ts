@@ -66,6 +66,22 @@ describe('Task routes', () => {
     }));
   });
 
+  it('GET / re-deriva o bucket do follow-up (category) a partir do dueAt', async () => {
+    const now = Date.now();
+    mocks.prisma.task.findMany.mockResolvedValue([
+      { id: 't1', title: 'Atrasada', status: 'OPEN', dueAt: new Date(now - 2 * 86_400_000) },
+      { id: 't2', title: 'Hoje', status: 'OPEN', dueAt: new Date(now) },
+      { id: 't3', title: 'Sem data', status: 'OPEN', dueAt: null },
+    ]);
+    const app = await makeApp();
+
+    const res = await request(app).get('/api/tasks').set(AUTH);
+
+    expect(res.status).toBe(200);
+    const byId = Object.fromEntries(res.body.data.map((t: { id: string; category: string }) => [t.id, t.category]));
+    expect(byId).toEqual({ t1: 'OVERDUE', t2: 'TODAY', t3: 'NO_DATE' });
+  });
+
   it('GET /?status=DONE filtra por status válido e ignora status inválido', async () => {
     mocks.prisma.task.findMany.mockResolvedValue([]);
     const app = await makeApp();

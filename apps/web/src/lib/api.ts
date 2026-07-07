@@ -49,16 +49,53 @@ export type PipelineLead = {
   nextFollowUpAt: string | null;
 };
 
-export type LeadHistoryEntry = {
+export type TimelineItem = {
   id: string;
-  type: 'stage_change' | 'pipeline_change';
-  from: string | null;
-  to: string | null;
-  lostReason: string | null;
-  note: string | null;
-  byUserId: string | null;
-  byName: string | null;
+  type: 'stage_change' | 'pipeline_change' | 'note' | 'task' | 'appointment' | 'messages' | 'suggestion' | 'bot';
   at: string;
+  title: string;
+  detail?: string;
+  byName?: string | null;
+};
+
+export type FeedPeriod = '24h' | '7d';
+
+export type AppointmentStatus = 'SCHEDULED' | 'CONFIRMED' | 'DONE' | 'NO_SHOW' | 'CANCELLED';
+
+export type Appointment = {
+  id: string;
+  scheduledAt: string;
+  endAt: string | null;
+  status: string;
+  notes: string | null;
+  leadId: string | null;
+  patientId: string | null;
+  professionalId: string | null;
+  serviceId: string | null;
+  unitId: string | null;
+  lead: { id: string; name: string; phone: string | null } | null;
+  patient: { id: string; name: string } | null;
+  professional: { id: string; name: string; specialty: string } | null;
+  unit: { id: string; name: string } | null;
+};
+
+export type Professional = { id: string; name: string; specialty: string };
+
+export type ClinicUnit = { id: string; name: string; city: string | null };
+
+export type TaskCategory = 'OVERDUE' | 'TODAY' | 'UPCOMING' | 'NO_DATE';
+
+export type TaskItem = {
+  id: string;
+  title: string;
+  description: string | null;
+  status: string;
+  priority: string;
+  dueAt: string | null;
+  category: TaskCategory | null;
+  lead: { id: string; name: string } | null;
+  conversation: { id: string } | null;
+  assignedTo: { id: string; name: string } | null;
 };
 
 export type Pipeline = {
@@ -389,9 +426,13 @@ export const api = {
     });
   },
 
-  async getLeadHistory(leadId: string): Promise<LeadHistoryEntry[]> {
-    const res = await this.get<LeadHistoryEntry[]>(`/pipeline/leads/${leadId}/history`);
+  async getLeadTimeline(leadId: string, limit = 50): Promise<TimelineItem[]> {
+    const res = await this.get<TimelineItem[]>(`/pipeline/leads/${leadId}/timeline?limit=${limit}`);
     return res.data ?? [];
+  },
+
+  addLeadNote(leadId: string, body: string): Promise<ApiResponse<{ id: string; body: string; at: string }>> {
+    return this.post(`/pipeline/leads/${leadId}/notes`, { body });
   },
 
   updateLeadPipeline(leadId: string, pipeline: string): Promise<ApiResponse<{ pipeline: string }>> {
@@ -424,6 +465,70 @@ export const api = {
       method: 'PUT',
       body: JSON.stringify({ tags }),
     });
+  },
+
+  // ---------------- agenda ----------------
+
+  async getAppointments(opts: {
+    from?: string;
+    to?: string;
+    professionalId?: string;
+    status?: string;
+  } = {}): Promise<Appointment[]> {
+    const res = await this.get<Appointment[]>(`/appointments${qs(opts)}`);
+    return res.data ?? [];
+  },
+
+  createAppointment(input: {
+    scheduledAt: string;
+    endAt?: string;
+    leadId?: string;
+    patientId?: string;
+    professionalId?: string;
+    unitId?: string;
+    notes?: string;
+  }): Promise<ApiResponse<Appointment>> {
+    return this.post('/appointments', input);
+  },
+
+  updateAppointment(id: string, input: { status?: AppointmentStatus; scheduledAt?: string; notes?: string }): Promise<ApiResponse<Appointment>> {
+    return this.fetch(`/appointments/${id}`, { method: 'PATCH', body: JSON.stringify(input) });
+  },
+
+  async getProfessionals(): Promise<Professional[]> {
+    const res = await this.get<Professional[]>('/appointments/professionals');
+    return res.data ?? [];
+  },
+
+  async getUnits(): Promise<ClinicUnit[]> {
+    const res = await this.get<ClinicUnit[]>('/appointments/units');
+    return res.data ?? [];
+  },
+
+  // .ics precisa do header Authorization → baixa via fetch e devolve o Blob.
+  async downloadAgendaIcs(from: string, to: string): Promise<Blob | null> {
+    const headers = new Headers();
+    const token = getToken();
+    if (token) headers.set('Authorization', `Bearer ${token}`);
+    const res = await fetch(`${BASE_URL}/appointments/export.ics${qs({ from, to })}`, { headers });
+    if (!res.ok) return null;
+    return res.blob();
+  },
+
+  // ---------------- tarefas & atividades ----------------
+
+  async getTasks(): Promise<TaskItem[]> {
+    const res = await this.get<TaskItem[]>('/tasks');
+    return res.data ?? [];
+  },
+
+  setTaskStatus(id: string, status: 'OPEN' | 'IN_PROGRESS' | 'DONE' | 'CANCELED'): Promise<ApiResponse<{ status: string }>> {
+    return this.fetch(`/tasks/${id}`, { method: 'PATCH', body: JSON.stringify({ status }) });
+  },
+
+  async getActivityFeed(period: FeedPeriod): Promise<TimelineItem[]> {
+    const res = await this.get<TimelineItem[]>(`/activities/feed?period=${period}`);
+    return res.data ?? [];
   },
 
   // Dashboard: um fetcher só — lança em falha para o Promise.all da página

@@ -1,10 +1,12 @@
 'use client';
 
-import { Suspense, useCallback, useEffect, useMemo, useState } from 'react';
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { CalendarClock, ChevronDown, Clock3, Filter, Flame, RefreshCw, X } from 'lucide-react';
-import { api, type LeadHistoryEntry, type PipelineLead } from '@/lib/api';
+import { CalendarClock, Clock3, Flame, RefreshCw, X } from 'lucide-react';
+import { api, type PipelineLead, type TimelineItem } from '@/lib/api';
 import { LOSS_REASONS, lossLabel } from '@/lib/pipeline-meta';
+import { FilterMenu } from '../filter-menu';
+import { ActivityTimeline } from '../activity-timeline';
 
 // Estágios canônicos do funil (KB §5) — mesmo conjunto servido por
 // GET /pipelines/:pipeline/stages.
@@ -102,17 +104,6 @@ const formatDate = (value: string | null | undefined) => (
   value ? new Date(value).toLocaleDateString('pt-BR') : '—'
 );
 
-const relativeTime = (iso: string) => {
-  const diffMs = Date.now() - new Date(iso).getTime();
-  const mins = Math.floor(diffMs / 60_000);
-  if (mins < 1) return 'agora';
-  if (mins < 60) return `há ${mins} min`;
-  const hours = Math.floor(mins / 60);
-  if (hours < 24) return `há ${hours}h`;
-  const days = Math.floor(hours / 24);
-  return `há ${days}d`;
-};
-
 const TAG_CLASSES: Record<string, string> = {
   LEAD_QUENTE: 'chip-danger',
   LEAD_FRIO: 'chip-info',
@@ -209,6 +200,16 @@ const LeadCard = ({
   );
 };
 
+// Filtros da timeline: chips por grupo de tipo (toggle, 'all' default).
+const TIMELINE_FILTERS: Array<{ value: string; label: string; types: TimelineItem['type'][] }> = [
+  { value: 'moves', label: 'Movimentos', types: ['stage_change', 'pipeline_change'] },
+  { value: 'tawany', label: 'Tawany', types: ['suggestion'] },
+  { value: 'notes', label: 'Notas', types: ['note'] },
+  { value: 'tasks', label: 'Tarefas', types: ['task'] },
+  { value: 'appointments', label: 'Agenda', types: ['appointment'] },
+  { value: 'messages', label: 'Mensagens', types: ['messages'] },
+];
+
 const LeadDrawer = ({
   lead,
   onClose,
@@ -218,23 +219,50 @@ const LeadDrawer = ({
   onClose: () => void;
   onStageChange: (id: string, stage: string) => void;
 }) => {
-  const [history, setHistory] = useState<LeadHistoryEntry[]>([]);
-  const [historyLoading, setHistoryLoading] = useState(false);
+  const [timeline, setTimeline] = useState<TimelineItem[]>([]);
+  const [timelineLoading, setTimelineLoading] = useState(false);
+  const [timelineFilter, setTimelineFilter] = useState('all');
+  const [note, setNote] = useState('');
+  const [savingNote, setSavingNote] = useState(false);
   const leadId = lead?.id ?? null;
 
+  const loadTimeline = useCallback(async (id: string) => {
+    setTimelineLoading(true);
+    try {
+      setTimeline(await api.getLeadTimeline(id));
+    } finally {
+      setTimelineLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
-    setHistory([]);
-    if (!leadId) return undefined;
-    let alive = true;
-    setHistoryLoading(true);
-    api.getLeadHistory(leadId)
-      .then((entries) => { if (alive) setHistory(entries); })
-      .finally(() => { if (alive) setHistoryLoading(false); });
-    return () => { alive = false; };
-  }, [leadId]);
+    setTimeline([]);
+    setTimelineFilter('all');
+    setNote('');
+    if (!leadId) return;
+    loadTimeline(leadId);
+  }, [leadId, loadTimeline]);
 
   if (!lead) return null;
   const temp = leadTemp(lead);
+
+  const activeFilter = TIMELINE_FILTERS.find((f) => f.value === timelineFilter);
+  const visibleTimeline = activeFilter
+    ? timeline.filter((item) => activeFilter.types.includes(item.type))
+    : timeline;
+
+  const submitNote = async () => {
+    const body = note.trim();
+    if (!body || !leadId) return;
+    setSavingNote(true);
+    try {
+      await api.addLeadNote(leadId, body);
+      setNote('');
+      await loadTimeline(leadId);
+    } finally {
+      setSavingNote(false);
+    }
+  };
 
   return (
     <div
@@ -316,30 +344,55 @@ const LeadDrawer = ({
           </section>
 
           <section className="drawer-section">
-            <h3>Histórico</h3>
-            {historyLoading ? (
+            <h3>Atividades</h3>
+            <div className="chips tl-filter">
+              <button
+                type="button"
+                className={`chip chip-toggle ${timelineFilter === 'all' ? 'chip-toggle-active' : ''}`}
+                onClick={() => setTimelineFilter('all')}
+                aria-pressed={timelineFilter === 'all'}
+              >
+                Tudo
+              </button>
+              {TIMELINE_FILTERS.map((f) => (
+                <button
+                  key={f.value}
+                  type="button"
+                  className={`chip chip-toggle ${timelineFilter === f.value ? 'chip-toggle-active' : ''}`}
+                  onClick={() => setTimelineFilter(timelineFilter === f.value ? 'all' : f.value)}
+                  aria-pressed={timelineFilter === f.value}
+                >
+                  {f.label}
+                </button>
+              ))}
+            </div>
+
+            <div className="note-form">
+              <textarea
+                className="textarea"
+                rows={2}
+                value={note}
+                onChange={(e) => setNote(e.target.value)}
+                placeholder="Adicionar nota ao histórico…"
+                aria-label="Adicionar nota"
+              />
+              <button
+                type="button"
+                className="btn btn-primary"
+                disabled={savingNote || !note.trim()}
+                onClick={submitNote}
+              >
+                {savingNote ? 'Salvando…' : 'Adicionar nota'}
+              </button>
+            </div>
+
+            {timelineLoading ? (
               <span className="faint">Carregando…</span>
-            ) : history.length === 0 ? (
-              <span className="faint">Sem movimentações registradas</span>
             ) : (
-              <ul className="history-list">
-                {history.map((entry) => (
-                  <li key={entry.id} className="history-item">
-                    <span className="history-move">
-                      {entry.type === 'pipeline_change'
-                        ? `${pipelineLabel(entry.from)} → ${pipelineLabel(entry.to)}`
-                        : `${stageLabel(entry.from ?? '—')} → ${stageLabel(entry.to ?? '—')}`}
-                      {entry.lostReason ? (
-                        <span className="chip chip-danger" style={{ marginLeft: '6px' }}>{lossLabel(entry.lostReason)}</span>
-                      ) : null}
-                    </span>
-                    {entry.note ? <span className="history-note">“{entry.note}”</span> : null}
-                    <span className="faint">
-                      {entry.byName ? `por ${entry.byName} · ` : ''}{relativeTime(entry.at)}
-                    </span>
-                  </li>
-                ))}
-              </ul>
+              <ActivityTimeline
+                items={visibleTimeline}
+                emptyText={timelineFilter === 'all' ? 'Sem atividades registradas' : 'Nada nesse filtro'}
+              />
             )}
           </section>
 
@@ -447,59 +500,6 @@ const LossReasonModal = ({
   );
 };
 
-function FilterMenu({
-  label,
-  value,
-  options,
-  onChange,
-  ariaLabel,
-}: {
-  label: string;
-  value: string;
-  options: Array<{ value: string; label: string }>;
-  onChange: (value: string) => void;
-  ariaLabel: string;
-}) {
-  const [open, setOpen] = useState(false);
-  const active = options.find((o) => o.value === value);
-
-  return (
-    <div className="menu-anchor">
-      <button
-        type="button"
-        className={`btn ${value !== 'all' ? 'btn-filter-active' : ''}`}
-        onClick={() => setOpen(!open)}
-        aria-expanded={open}
-        aria-haspopup="listbox"
-      >
-        <Filter size={15} />
-        <span>{active?.label ?? label}</span>
-        <ChevronDown size={14} style={{ transform: open ? 'rotate(180deg)' : undefined, transition: 'transform 150ms' }} />
-      </button>
-
-      {open && (
-        <>
-          <div className="menu-backdrop" onClick={() => setOpen(false)} />
-          <div className="menu" role="listbox" aria-label={ariaLabel}>
-            {options.map((opt) => (
-              <button
-                key={opt.value}
-                type="button"
-                className={`menu-item ${value === opt.value ? 'menu-item-active' : ''}`}
-                onClick={() => { onChange(opt.value); setOpen(false); }}
-                role="option"
-                aria-selected={value === opt.value}
-              >
-                {opt.label}
-              </button>
-            ))}
-          </div>
-        </>
-      )}
-    </div>
-  );
-}
-
 function PipelineBoard() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -543,6 +543,25 @@ function PipelineBoard() {
   useEffect(() => {
     loadLeads();
   }, [loadLeads]);
+
+  // Deep link ?lead=<id> (usado pela agenda): abre o drawer do lead ao
+  // carregar. O ref evita reabrir a cada reload de leads (ex.: após mover).
+  const deepLinkLead = searchParams.get('lead');
+  const openedLeadRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!deepLinkLead || leads.length === 0 || openedLeadRef.current === deepLinkLead) return;
+    const target = leads.find((l) => l.id === deepLinkLead);
+    if (target) {
+      openedLeadRef.current = deepLinkLead;
+      setSelectedLead(target);
+    }
+  }, [deepLinkLead, leads]);
+
+  const closeDrawer = useCallback(() => {
+    setSelectedLead(null);
+    openedLeadRef.current = null;
+    if (deepLinkLead) setParam('lead', null);
+  }, [deepLinkLead, setParam]);
 
   const doMove = useCallback(async (
     lead: PipelineLead,
@@ -708,7 +727,7 @@ function PipelineBoard() {
         })}
       </section>
 
-      <LeadDrawer lead={selectedLead} onClose={() => setSelectedLead(null)} onStageChange={handleStageChange} />
+      <LeadDrawer lead={selectedLead} onClose={closeDrawer} onStageChange={handleStageChange} />
 
       {lossTarget && (
         <LossReasonModal

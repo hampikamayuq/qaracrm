@@ -382,11 +382,234 @@ export const getLeadHistoryRoute = async (req: Request, res: Response): Promise<
   }
 };
 
+// ---------------- timeline do lead ----------------
+
+export type TimelineItem = {
+  id: string;
+  type: 'stage_change' | 'pipeline_change' | 'note' | 'task' | 'appointment' | 'messages' | 'suggestion';
+  at: string;
+  title: string;
+  detail?: string;
+  byName?: string | null;
+};
+
+const stageLabel = (value: string | null | undefined): string => {
+  if (!value) return '—';
+  if (value in STAGE_LABELS) return STAGE_LABELS[value as UiStage];
+  return value;
+};
+
+const pipelineTitle = (value: string | null | undefined): string =>
+  value ? value.charAt(0).toUpperCase() + value.slice(1).replace(/-/g, ' ') : '—';
+
+const APPOINTMENT_STATUS_LABELS: Record<string, string> = {
+  SCHEDULED: 'Agendado',
+  CONFIRMED: 'Confirmado',
+  DONE: 'Realizado',
+  NO_SHOW: 'Faltou',
+  CANCELLED: 'Cancelado',
+};
+
+const SUGGESTION_TITLES: Record<string, string> = {
+  SENT: 'Tawany enviou resposta',
+  APPROVED: 'Sugestão da Tawany aprovada',
+  TEST_SENT: 'Tawany respondeu em modo teste',
+};
+
+const truncate = (text: string, max: number): string =>
+  text.length > max ? `${text.slice(0, max - 1)}…` : text;
+
+const dayKey = (d: Date): string => d.toISOString().slice(0, 10);
+
+const formatDateTimePt = (d: Date): string =>
+  d.toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit', timeZone: 'America/Sao_Paulo' });
+
+// União ordenada (desc) de activities, tasks, appointments, mensagens
+// agregadas por dia/conversa e sugestões da Tawany. Item: {type,at,title,…}.
+export const getLeadTimelineRoute = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const leadId = paramStr(req.params.id);
+    if (!leadId) {
+      jsonError(res, 400, 'leadId required');
+      return;
+    }
+    const rawLimit = Number(req.query.limit);
+    const limit = Number.isInteger(rawLimit) && rawLimit > 0 ? Math.min(rawLimit, 200) : 50;
+    const now = new Date();
+    const items: TimelineItem[] = [];
+
+    const conversations = await prisma.conversation.findMany({ where: { leadId }, select: { id: true } });
+    const conversationIds = conversations.map((c) => c.id);
+
+    const [activities, tasks, appointments, messages, suggestions] = await Promise.all([
+      prisma.activity.findMany({
+        where: { targetType: 'lead', targetId: leadId, type: { in: ['STAGE_CHANGE', 'PIPELINE_CHANGE', 'NOTE'] } },
+        orderBy: { createdAt: 'desc' },
+        take: 300,
+        include: { user: { select: { name: true } } },
+      }),
+      prisma.task.findMany({
+        where: { leadId },
+        orderBy: { createdAt: 'desc' },
+        take: 200,
+        select: { id: true, title: true, status: true, dueAt: true, createdAt: true, updatedAt: true },
+      }),
+      prisma.appointment.findMany({
+        where: { leadId },
+        orderBy: { scheduledAt: 'desc' },
+        take: 100,
+        select: {
+          id: true, scheduledAt: true, status: true, createdAt: true,
+          professional: { select: { name: true } },
+        },
+      }),
+      conversationIds.length === 0 ? [] : prisma.chatMessage.findMany({
+        where: { conversationId: { in: conversationIds } },
+        orderBy: { sentAt: 'desc' },
+        take: 1000,
+        select: { conversationId: true, sentAt: true, direction: true, agentHandled: true },
+      }),
+      conversationIds.length === 0 ? [] : prisma.aiSuggestion.findMany({
+        where: { conversationId: { in: conversationIds }, status: { in: ['SENT', 'APPROVED', 'TEST_SENT'] } },
+        orderBy: { createdAt: 'desc' },
+        take: 100,
+        include: { approvedBy: { select: { name: true } } },
+      }),
+    ]);
+
+    for (const row of activities) {
+      if (row.type === 'NOTE') {
+        items.push({
+          id: `note-${row.id}`,
+          type: 'note',
+          at: row.createdAt.toISOString(),
+          title: 'Nota',
+          detail: truncate(row.body, 500),
+          // ponytail: notas sem userId hoje só vêm da tool createActivity da
+          // Tawany; humanos passam pelo POST /leads/:id/notes (com userId).
+          byName: row.user?.name ?? 'Tawany',
+        });
+        continue;
+      }
+      let parsed: Partial<StageChangeEvent> = {};
+      try {
+        parsed = JSON.parse(row.body) as Partial<StageChangeEvent>;
+      } catch { /* body legado não-JSON */ }
+      const isPipeline = row.type === 'PIPELINE_CHANGE';
+      items.push({
+        id: `move-${row.id}`,
+        type: isPipeline ? 'pipeline_change' : 'stage_change',
+        at: row.createdAt.toISOString(),
+        title: isPipeline
+          ? `${pipelineTitle(parsed.from)} → ${pipelineTitle(parsed.to)}`
+          : `${stageLabel(parsed.from)} → ${stageLabel(parsed.to)}${parsed.lostReason ? ` (motivo: ${parsed.lostReason})` : ''}`,
+        ...(parsed.note ? { detail: parsed.note } : {}),
+        byName: row.user?.name ?? null,
+      });
+    }
+
+    for (const task of tasks) {
+      items.push({ id: `task-created-${task.id}`, type: 'task', at: task.createdAt.toISOString(), title: `Tarefa criada: ${task.title}` });
+      if (task.status === 'DONE') {
+        items.push({ id: `task-done-${task.id}`, type: 'task', at: task.updatedAt.toISOString(), title: `Tarefa concluída: ${task.title}` });
+      } else if (task.status !== 'CANCELED' && task.dueAt && task.dueAt < now) {
+        items.push({ id: `task-due-${task.id}`, type: 'task', at: task.dueAt.toISOString(), title: `Tarefa venceu: ${task.title}` });
+      }
+    }
+
+    for (const appt of appointments) {
+      items.push({
+        id: `appt-${appt.id}`,
+        type: 'appointment',
+        at: appt.createdAt.toISOString(),
+        title: `Agendamento para ${formatDateTimePt(appt.scheduledAt)}`,
+        detail: [APPOINTMENT_STATUS_LABELS[appt.status] ?? appt.status, appt.professional?.name].filter(Boolean).join(' · '),
+      });
+    }
+
+    // Mensagens agregadas por conversa+dia — nunca uma linha por mensagem.
+    const groups = new Map<string, { total: number; tawany: number; incoming: number; last: Date }>();
+    for (const msg of messages) {
+      const key = `${msg.conversationId}|${dayKey(msg.sentAt)}`;
+      const group = groups.get(key) ?? { total: 0, tawany: 0, incoming: 0, last: msg.sentAt };
+      group.total += 1;
+      if (msg.direction === 'IN') group.incoming += 1;
+      if (msg.direction === 'OUT' && msg.agentHandled) group.tawany += 1;
+      if (msg.sentAt > group.last) group.last = msg.sentAt;
+      groups.set(key, group);
+    }
+    for (const [key, group] of groups) {
+      items.push({
+        id: `msgs-${key}`,
+        type: 'messages',
+        at: group.last.toISOString(),
+        title: `${group.total} ${group.total === 1 ? 'mensagem' : 'mensagens'}${group.tawany > 0 ? ` (${group.tawany} da Tawany)` : ''}`,
+        detail: `${group.incoming} recebidas · ${group.total - group.incoming} enviadas`,
+      });
+    }
+
+    for (const sug of suggestions) {
+      items.push({
+        id: `sug-${sug.id}`,
+        type: 'suggestion',
+        at: (sug.decidedAt ?? sug.createdAt).toISOString(),
+        title: SUGGESTION_TITLES[sug.status] ?? `Sugestão da Tawany (${sug.status})`,
+        detail: truncate(sug.body, 200),
+        byName: sug.approvedBy?.name ?? null,
+      });
+    }
+
+    items.sort((a, b) => b.at.localeCompare(a.at));
+    res.json({ success: true, data: items.slice(0, limit) });
+  } catch (error) {
+    jsonError(res, 500, (error as Error).message);
+  }
+};
+
+// Nota manual no timeline — mesma Activity NOTE da tool createActivity da
+// Tawany, mas com userId do autor.
+export const createLeadNoteRoute = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const leadId = paramStr(req.params.id);
+    const body = typeof req.body?.body === 'string' ? req.body.body.trim() : '';
+    if (!leadId || !body) {
+      jsonError(res, 400, 'body required');
+      return;
+    }
+    if (body.length > 2000) {
+      jsonError(res, 400, 'body must be at most 2000 characters');
+      return;
+    }
+    const lead = await prisma.lead.findUnique({ where: { id: leadId }, select: { id: true } });
+    if (!lead) {
+      jsonError(res, 404, 'Lead not found');
+      return;
+    }
+    const activity = await prisma.activity.create({
+      data: {
+        targetType: 'lead',
+        targetId: leadId,
+        type: 'NOTE',
+        body,
+        userId: req.userId ?? null,
+      },
+    });
+    res.status(201).json({ success: true, data: { id: activity.id, body, at: activity.createdAt.toISOString() } });
+  } catch (error) {
+    jsonError(res, 500, (error as Error).message);
+  }
+};
+
+// Montado em /api/pipeline (app.ts). Os paths de leads eram '/pipeline/leads…',
+// o que gerava /api/pipeline/pipeline/leads… — e o front chama
+// /api/pipeline/leads…, então tudo de leads respondia 404. Corrigido.
 router.get('/pipelines', authMiddleware, getPipelinesRoute);
 router.get('/pipelines/:pipeline/stages', authMiddleware, getPipelineStagesRoute);
-router.get('/pipeline/leads', authMiddleware, getPipelineLeadsRoute);
-router.get('/pipeline/leads/:id/history', authMiddleware, getLeadHistoryRoute);
-router.patch('/pipeline/leads/:id/move', authMiddleware, moveLeadRoute);
-router.patch('/pipeline/leads/:id/pipeline', authMiddleware, updateLeadPipelineRoute);
+router.get('/leads', authMiddleware, getPipelineLeadsRoute);
+router.get('/leads/:id/history', authMiddleware, getLeadHistoryRoute);
+router.get('/leads/:id/timeline', authMiddleware, getLeadTimelineRoute);
+router.post('/leads/:id/notes', authMiddleware, createLeadNoteRoute);
+router.patch('/leads/:id/move', authMiddleware, moveLeadRoute);
+router.patch('/leads/:id/pipeline', authMiddleware, updateLeadPipelineRoute);
 
 export default router;

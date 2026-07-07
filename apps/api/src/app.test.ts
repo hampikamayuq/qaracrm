@@ -6,6 +6,6 @@ describe('api app assembly', () => {
     const stack = app.router.stack as Array<{ name?: string; route?: { path?: string } }>;
 
     expect(stack.some((layer) => layer.route?.path === '/api/health')).toBe(true);
-    expect(stack.filter((layer) => layer.name === 'router')).toHaveLength(13);
+    expect(stack.filter((layer) => layer.name === 'router')).toHaveLength(14);
   });
 });
