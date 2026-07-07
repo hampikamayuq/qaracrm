@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { FlaskConical, Pause, Play, Trash2, Upload } from 'lucide-react';
+import { Bot, FlaskConical, Trash2, Upload, Zap } from 'lucide-react';
 import { api, type BotSummary } from '@/lib/api';
 
 export default function BotsPage() {
@@ -45,7 +45,7 @@ export default function BotsPage() {
         flash(res.error ?? 'Falha ao importar');
       }
     } catch {
-      flash('Arquivo invalido: esperado JSON exportado do construtor de fluxo.');
+      flash('Arquivo inválido: esperado JSON exportado do construtor de fluxo.');
     }
   };
 
@@ -65,7 +65,7 @@ export default function BotsPage() {
       <div className="toolbar">
         <div>
           <h1 className="title">Bots</h1>
-          <div className="muted">Fluxos automaticos deterministas — respondem antes da Tawany.</div>
+          <div className="muted">Fluxos automáticos deterministas — respondem antes da Tawany.</div>
         </div>
         <div className="toolbar-right">
           <input
@@ -80,31 +80,46 @@ export default function BotsPage() {
             }}
           />
           <button className="btn btn-primary" type="button" onClick={() => fileInput.current?.click()}>
-            <Upload size={16} />Importar JSON
+            <Upload size={15} />Importar JSON
           </button>
         </div>
       </div>
 
-      {feedback ? <div className="card muted">{feedback}</div> : null}
+      {feedback ? <div className="flash" role="status" style={{ marginBottom: '12px' }}>{feedback}</div> : null}
 
       <section className="list">
-        {loading ? <div className="card muted">Carregando...</div> : null}
-        {!loading && bots.length === 0 ? <div className="card muted">Nenhum fluxo importado ainda.</div> : null}
+        {loading ? <div className="card muted">Carregando…</div> : null}
+        {!loading && bots.length === 0 ? (
+          <div className="card muted">Nenhum fluxo importado ainda. Importe um JSON do construtor de fluxo para começar.</div>
+        ) : null}
         {bots.map((bot) => (
           <article className="card" key={bot.id}>
-            <div className="card-head">
-              <div>
-                <div className="lead-name">{bot.name}</div>
-                <div className="muted">{bot.rules} regras · gatilho: {bot.trigger} · atualizado {new Date(bot.updatedAt).toLocaleString('pt-BR')}</div>
+            <div className="bot-card-head">
+              <div className="bot-id">
+                <span className="bot-mark" aria-hidden="true"><Bot size={18} /></span>
+                <div>
+                  <div className="lead-name">{bot.name}</div>
+                  <div className="muted">Atualizado {new Date(bot.updatedAt).toLocaleString('pt-BR')}</div>
+                </div>
               </div>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={bot.active}
+                aria-label={bot.active ? `Pausar fluxo ${bot.name}` : `Ativar fluxo ${bot.name}`}
+                className="switch-row"
+                onClick={() => toggle(bot)}
+              >
+                <span className="switch" aria-hidden="true"><span className="switch-thumb" /></span>
+                {bot.active ? 'Ativo' : 'Pausado'}
+              </button>
+            </div>
+            <div className="bot-foot">
               <div className="chips">
+                <span className="chip chip-info"><Zap size={11} />gatilho: {bot.trigger}</span>
+                <span className="chip">{bot.rules} regras</span>
                 <span className={`chip ${bot.active ? 'chip-ok' : 'chip-warning'}`}>{bot.active ? 'ativo' : 'pausado'}</span>
               </div>
-            </div>
-            <div className="suggestion-actions">
-              <button className="btn" type="button" onClick={() => toggle(bot)}>
-                {bot.active ? <><Pause size={15} />Pausar</> : <><Play size={15} />Ativar</>}
-              </button>
               <button
                 className="btn btn-danger"
                 type="button"
@@ -122,10 +137,10 @@ export default function BotsPage() {
         ))}
       </section>
 
-      <section className="card">
-        <h2 className="title"><FlaskConical size={18} /> Testar mensagem</h2>
-        <p className="muted">Simule uma mensagem recebida e veja qual fluxo responderia (nada e enviado).</p>
-        <div className="inline-form">
+      <section className="card" style={{ marginTop: '16px', display: 'grid', gap: '8px' }}>
+        <h2 className="section-title"><FlaskConical size={16} />Testar mensagem</h2>
+        <p className="muted" style={{ margin: 0 }}>Simule uma mensagem recebida e veja qual fluxo responderia (nada é enviado).</p>
+        <div className="inline-form" style={{ marginTop: '2px' }}>
           <input
             className="input"
             placeholder="Ex.: Olá, gostaria de agendar uma consulta com o Dr. Diego Galvez"
@@ -134,15 +149,15 @@ export default function BotsPage() {
             onKeyDown={(event) => event.key === 'Enter' && runTest()}
           />
           <button className="btn btn-primary" disabled={testing} type="button" onClick={runTest}>
-            {testing ? 'Testando...' : 'Testar'}
+            {testing ? 'Testando…' : 'Testar'}
           </button>
         </div>
         {testResult ? (
           testResult.matched ? (
-            <div className="panel-block">
+            <div className="panel-block" style={{ marginTop: '6px' }}>
               <div className="chips"><span className="chip chip-ok">match: {testResult.botName}</span></div>
               {testResult.responses.map((response, index) => (
-                <article className="message-bubble message-out" key={index}>
+                <article className="message-bubble message-out" key={index} style={{ alignSelf: 'flex-start' }}>
                   <div style={{ whiteSpace: 'pre-wrap' }}>{response}</div>
                 </article>
               ))}

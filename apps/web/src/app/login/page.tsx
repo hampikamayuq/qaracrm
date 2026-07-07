@@ -25,32 +25,44 @@ export default function LoginPage() {
 
   return (
     <main className="login">
-      <form className="login-card" onSubmit={submit}>
-        <div>
-          <h1 className="title">QARA CRM</h1>
-          <p className="muted">Acesso da operacao</p>
+      <div className="login-panel">
+        <div className="login-brand">
+          <span className="brand-mark" aria-hidden="true">Q</span>
+          <div>
+            <strong>QARA CRM</strong>
+            <small>Acesso da operação</small>
+          </div>
         </div>
-        <input
-          className="input"
-          type="email"
-          autoComplete="email"
-          placeholder="Email"
-          value={email}
-          onChange={(event) => setEmail(event.target.value)}
-          required
-        />
-        <input
-          className="input"
-          type="password"
-          autoComplete="current-password"
-          placeholder="Senha"
-          value={password}
-          onChange={(event) => setPassword(event.target.value)}
-          required
-        />
-        {error ? <p className="error">{error}</p> : null}
-        <button className="btn btn-primary" type="submit"><LogIn size={17} />Entrar</button>
-      </form>
+        <form className="form" onSubmit={submit}>
+          <label className="field">
+            <span>E-mail</span>
+            <input
+              className="input"
+              type="email"
+              autoComplete="email"
+              placeholder="nome@clinicaqara.com.br"
+              value={email}
+              onChange={(event) => setEmail(event.target.value)}
+              required
+            />
+          </label>
+          <label className="field">
+            <span>Senha</span>
+            <input
+              className="input"
+              type="password"
+              autoComplete="current-password"
+              placeholder="Sua senha"
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+              required
+            />
+          </label>
+          {error ? <p className="error" role="alert">{error}</p> : null}
+          <button className="btn btn-primary btn-block" type="submit"><LogIn size={16} />Entrar</button>
+        </form>
+        <p className="login-foot">Acesso restrito à equipe da Clínica QARA.</p>
+      </div>
     </main>
   );
 }

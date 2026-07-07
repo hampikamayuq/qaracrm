@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState, useCallback } from 'react';
-import { RefreshCw, Filter, ChevronDown } from 'lucide-react';
+import { CalendarClock, ChevronDown, Filter, RefreshCw, X } from 'lucide-react';
 import { api, type PipelineLead, type Pipeline } from '@/lib/api';
 
 const STAGES = ['NOVO', 'QUALIFICADO', 'AGENDADO', 'COMPARECEU', 'PERDIDO', 'CONVERTIDO'] as const;
@@ -20,6 +20,26 @@ const CLINICAL_PIPELINES = [
 
 type PipelineSlug = typeof CLINICAL_PIPELINES[number] | 'all';
 
+const STAGE_LABELS: Record<string, string> = {
+  NOVO: 'Novo',
+  QUALIFICADO: 'Qualificado',
+  AGENDADO: 'Agendado',
+  COMPARECEU: 'Compareceu',
+  PERDIDO: 'Perdido',
+  CONVERTIDO: 'Convertido',
+};
+
+const STAGE_COLORS: Record<string, string> = {
+  NOVO: 'var(--info)',
+  QUALIFICADO: 'var(--ai)',
+  AGENDADO: 'var(--warning)',
+  COMPARECEU: 'var(--ok)',
+  PERDIDO: 'var(--danger)',
+  CONVERTIDO: 'var(--accent)',
+};
+
+const stageLabel = (stage: string) => STAGE_LABELS[stage] ?? stage;
+
 const scoreClass = (score: number) => (
   score >= 80 ? 'chip-danger' : score >= 55 ? 'chip-warning' : 'chip-ok'
 );
@@ -28,30 +48,42 @@ const temperatureLabel = (value: string | null | undefined) => (
   value === 'HOT' ? 'Quente' : value === 'WARM' ? 'Morno' : value === 'COLD' ? 'Frio' : '—'
 );
 
+const temperatureClass = (value: string | null | undefined) => (
+  value === 'HOT' ? 'temp-hot' : value === 'WARM' ? 'temp-warm' : value === 'COLD' ? 'temp-cold' : 'temp-none'
+);
+
 const pipelineLabel = (slug: string | null) => {
   if (!slug) return 'Sem especialidade';
   return slug.charAt(0).toUpperCase() + slug.slice(1).replace('-', ' ');
+};
+
+const pipelineChipStyle = (slug: string) => {
+  let hue = 0;
+  for (let i = 0; i < slug.length; i += 1) hue = (hue * 31 + slug.charCodeAt(i)) % 360;
+  return {
+    background: `hsl(${hue} 50% 95%)`,
+    borderColor: `hsl(${hue} 42% 82%)`,
+    color: `hsl(${hue} 55% 30%)`,
+  };
 };
 
 const formatDate = (value: string | null | undefined) => (
   value ? new Date(value).toLocaleDateString('pt-BR') : '—'
 );
 
-const tagColors: Record<string, string> = {
-  LEAD_QUENTE: 'bg-orange-500',
-  LEAD_FRIO: 'bg-blue-500',
-  NOVO: 'bg-cyan-500',
-  AGENDAR: 'bg-purple-500',
-  FOLLOW_UP: 'bg-yellow-500',
-  NO_SHOW: 'bg-red-500',
-  VIP: 'bg-pink-500',
-  HUMANO: 'bg-green-500',
+const TAG_CLASSES: Record<string, string> = {
+  LEAD_QUENTE: 'chip-danger',
+  LEAD_FRIO: 'chip-info',
+  NOVO: '',
+  AGENDAR: 'chip-info',
+  FOLLOW_UP: 'chip-warning',
+  NO_SHOW: 'chip-danger',
+  VIP: 'chip-ai',
+  HUMANO: 'chip-ok',
 };
 
 const TagChip = ({ tag }: { tag: string }) => (
-  <span key={tag} className={`chip text-xs ${tagColors[tag] || 'bg-gray-500'}`}>
-    {tag}
-  </span>
+  <span className={`chip ${TAG_CLASSES[tag] ?? ''}`}>{tag}</span>
 );
 
 const LeadCard = ({
@@ -63,31 +95,43 @@ const LeadCard = ({
   onStageChange: (id: string, stage: string) => void;
   onClick: (lead: PipelineLead) => void;
 }) => (
-  <article
-    className="lead-card cursor-pointer hover:shadow-md transition-shadow"
-    onClick={() => onClick(lead)}
-  >
+  <article className="lead-card" onClick={() => onClick(lead)}>
     <div className="card-head">
       <span className="lead-name">{lead.name?.firstName || '(sem nome)'} {lead.name?.lastName || ''}</span>
       <span className={`chip ${scoreClass(lead.score)}`}>{lead.score}</span>
     </div>
     {lead.whatsapp?.primaryPhoneNumber && (
-      <div className="muted text-xs">{lead.whatsapp.primaryPhoneNumber}</div>
+      <div className="faint">{lead.whatsapp.primaryPhoneNumber}</div>
     )}
-    <div className="chips text-xs" style={{ marginTop: '4px' }}>
-      {lead.tags.slice(0, 4).map((tag) => <TagChip key={tag} tag={tag} />)}
-      {lead.tags.length > 4 && <span className="muted">+{lead.tags.length - 4}</span>}
+    <div className="lead-card-meta">
+      <span className={`temp ${temperatureClass(lead.temperature)}`}>{temperatureLabel(lead.temperature)}</span>
+      {lead.pipeline ? (
+        <span className="chip" style={pipelineChipStyle(lead.pipeline)}>{pipelineLabel(lead.pipeline)}</span>
+      ) : null}
+      {lead.nextFollowUpAt ? (
+        <span className="faint" title="Próximo follow-up">
+          <CalendarClock size={11} style={{ verticalAlign: '-1px', marginRight: '3px' }} />
+          {formatDate(lead.nextFollowUpAt)}
+        </span>
+      ) : null}
     </div>
+    {lead.tags.length > 0 ? (
+      <div className="chips">
+        {lead.tags.slice(0, 4).map((tag) => <TagChip key={tag} tag={tag} />)}
+        {lead.tags.length > 4 && <span className="faint">+{lead.tags.length - 4}</span>}
+      </div>
+    ) : null}
     <select
       value={lead.stage}
       onChange={(e) => {
         e.stopPropagation();
         onStageChange(lead.id, e.target.value);
       }}
-      className="stage-select"
-      style={{ marginTop: '8px', width: '100%', padding: '4px', fontSize: '12px' }}
+      onClick={(e) => e.stopPropagation()}
+      className="select stage-select"
+      aria-label="Mover para etapa"
     >
-      {STAGES.map((s) => <option key={s} value={s}>{s}</option>)}
+      {STAGES.map((s) => <option key={s} value={s}>{stageLabel(s)}</option>)}
     </select>
   </article>
 );
@@ -105,78 +149,79 @@ const LeadDrawer = ({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex"
+      className="drawer-root"
       onClick={onClose}
       role="dialog"
       aria-modal="true"
       aria-labelledby="drawer-title"
     >
-      <div className="absolute inset-0 bg-black/30" />
-      <aside className="relative w-full max-w-md bg-white h-full flex flex-col shadow-xl overflow-hidden">
-        <header className="p-4 border-b flex justify-between items-center">
-          <h2 id="drawer-title" className="text-lg font-semibold">
+      <div className="drawer-backdrop" />
+      <aside className="drawer" onClick={(e) => e.stopPropagation()}>
+        <header className="drawer-head">
+          <h2 id="drawer-title">
             {lead.name?.firstName || '(sem nome)'} {lead.name?.lastName || ''}
           </h2>
-          <button onClick={onClose} className="text-2xl leading-none hover:text-gray-600" aria-label="Fechar">✕</button>
+          <button onClick={onClose} className="icon-btn" type="button" aria-label="Fechar">
+            <X size={17} />
+          </button>
         </header>
 
-        <div className="flex-1 overflow-y-auto p-4 space-y-6">
-          <div className="flex flex-wrap gap-2">
-            <span className={`chip ${scoreClass(lead.score)}`}>{lead.score}</span>
+        <div className="drawer-body">
+          <div className="chips">
+            <span className={`chip ${scoreClass(lead.score)}`}>Score {lead.score}</span>
             {lead.temperature && (
-              <span className={`chip ${lead.temperature === 'HOT' ? 'chip-danger' : lead.temperature === 'WARM' ? 'chip-warning' : 'chip-ok'}`}>
-                {temperatureLabel(lead.temperature)}
-              </span>
+              <span className={`temp ${temperatureClass(lead.temperature)}`}>{temperatureLabel(lead.temperature)}</span>
             )}
             {lead.pipeline && (
-              <span className="chip bg-blue-500">{pipelineLabel(lead.pipeline)}</span>
+              <span className="chip" style={pipelineChipStyle(lead.pipeline)}>{pipelineLabel(lead.pipeline)}</span>
             )}
           </div>
 
-          <section>
-            <h3 className="font-medium text-sm mb-2">Contato</h3>
-            <dl className="space-y-1 text-sm text-gray-600">
-              <div className="flex justify-between">
+          <section className="drawer-section">
+            <h3>Contato</h3>
+            <dl className="kv">
+              <div>
                 <dt>WhatsApp</dt>
-                <dd className="font-medium">{lead.whatsapp?.primaryPhoneNumber || '—'}</dd>
+                <dd>{lead.whatsapp?.primaryPhoneNumber || '—'}</dd>
               </div>
-              <div className="flex justify-between">
+              <div>
                 <dt>E-mail</dt>
-                <dd className="font-medium">{lead.email?.primaryEmail || '—'}</dd>
+                <dd>{lead.email?.primaryEmail || '—'}</dd>
               </div>
             </dl>
           </section>
 
-          <section>
-            <h3 className="font-medium text-sm mb-2">Origem e Intenção</h3>
-            <dl className="space-y-1 text-sm text-gray-600">
-              <div className="flex justify-between">
+          <section className="drawer-section">
+            <h3>Origem e Intenção</h3>
+            <dl className="kv">
+              <div>
                 <dt>Origem</dt>
-                <dd className="font-medium">{lead.source || '—'}</dd>
+                <dd>{lead.source || '—'}</dd>
               </div>
-              <div className="flex justify-between">
+              <div>
                 <dt>Intenção</dt>
-                <dd className="font-medium">{lead.intent || '—'}</dd>
+                <dd>{lead.intent || '—'}</dd>
               </div>
             </dl>
           </section>
 
-          <section>
-            <h3 className="font-medium text-sm mb-2">Etapa do Funil</h3>
+          <section className="drawer-section">
+            <h3>Etapa do Funil</h3>
             <select
               value={lead.stage}
               onChange={(e) => onStageChange(lead.id, e.target.value)}
-              className="w-full p-2 border rounded text-sm"
+              className="select"
+              aria-label="Etapa do funil"
             >
-              {STAGES.map((s) => <option key={s} value={s}>{s}</option>)}
+              {STAGES.map((s) => <option key={s} value={s}>{stageLabel(s)}</option>)}
             </select>
           </section>
 
-          <section>
-            <h3 className="font-medium text-sm mb-2">Tags</h3>
-            <div className="flex flex-wrap gap-2">
+          <section className="drawer-section">
+            <h3>Tags</h3>
+            <div className="chips">
               {lead.tags.length === 0 ? (
-                <span className="muted text-sm">Sem tags</span>
+                <span className="faint">Sem tags</span>
               ) : (
                 lead.tags.map((tag) => <TagChip key={tag} tag={tag} />)
               )}
@@ -184,24 +229,22 @@ const LeadDrawer = ({
           </section>
 
           {lead.notes && (
-            <section>
-              <h3 className="font-medium text-sm mb-2">Observações</h3>
-              <div className="p-3 bg-gray-50 rounded text-sm text-gray-700 whitespace-pre-wrap">
-                {lead.notes}
-              </div>
+            <section className="drawer-section">
+              <h3>Observações</h3>
+              <div className="note-box">{lead.notes}</div>
             </section>
           )}
 
-          <section>
-            <h3 className="font-medium text-sm mb-2">Follow-ups</h3>
-            <dl className="space-y-1 text-sm text-gray-600">
-              <div className="flex justify-between">
+          <section className="drawer-section">
+            <h3>Follow-ups</h3>
+            <dl className="kv">
+              <div>
                 <dt>Último</dt>
-                <dd className="font-medium">{formatDate(lead.lastFollowUpAt)}</dd>
+                <dd>{formatDate(lead.lastFollowUpAt)}</dd>
               </div>
-              <div className="flex justify-between">
+              <div>
                 <dt>Próximo</dt>
-                <dd className="font-medium">{formatDate(lead.nextFollowUpAt)}</dd>
+                <dd>{formatDate(lead.nextFollowUpAt)}</dd>
               </div>
             </dl>
           </section>
@@ -252,13 +295,13 @@ export default function PipelinePage() {
   const filteredLeads = leads.filter(l => selectedPipeline === 'all' || l.pipeline === selectedPipeline);
 
   return (
-    <main className="page page-wide">
+    <main className="page page-wide page-tight">
       <div className="toolbar">
         <div>
           <h1 className="title">Pipeline Clínico</h1>
           <div className="muted">
-            {loading ? 'Carregando...' : `${filteredLeads.length} leads`}
-            {selectedPipeline !== 'all' && <span> | {pipelineLabel(selectedPipeline)}</span>}
+            {loading ? 'Carregando…' : `${filteredLeads.length} leads`}
+            {selectedPipeline !== 'all' && <span> · {pipelineLabel(selectedPipeline)}</span>}
           </div>
         </div>
         <div className="toolbar-right">
@@ -268,28 +311,37 @@ export default function PipelinePage() {
             pipelines={pipelines}
           />
           <button className="btn" type="button" onClick={loadLeads} disabled={loading}>
-            <RefreshCw size={17} className={loading ? 'animate-spin' : ''} /> Atualizar
+            <RefreshCw size={15} className={loading ? 'spin' : ''} /> Atualizar
           </button>
         </div>
       </div>
 
-      <section className="kanban" style={{ minHeight: 'calc(100vh - 200px)' }}>
-        {STAGES.map((stage) => (
-          <div className="column" key={stage}>
-            <h2 className="column-title">
-              <span>{stage}</span>
-              <span>{filteredLeads.filter(l => l.stage === stage).length}</span>
-            </h2>
-            {filteredLeads.filter(l => l.stage === stage).map((lead) => (
-              <LeadCard
-                key={lead.id}
-                lead={lead}
-                onStageChange={handleStageChange}
-                onClick={setSelectedLead}
-              />
-            ))}
-          </div>
-        ))}
+      <section className="kanban" aria-label="Kanban de leads">
+        {STAGES.map((stage) => {
+          const stageLeads = filteredLeads.filter(l => l.stage === stage);
+          return (
+            <div className="column" key={stage}>
+              <h2 className="column-title">
+                <span>
+                  <span className="stage-dot" style={{ background: STAGE_COLORS[stage] }} aria-hidden="true" />
+                  {stageLabel(stage)}
+                </span>
+                <span className="count-badge">{stageLeads.length}</span>
+              </h2>
+              <div className="column-body">
+                {stageLeads.length === 0 ? <div className="column-empty">Sem leads nesta etapa</div> : null}
+                {stageLeads.map((lead) => (
+                  <LeadCard
+                    key={lead.id}
+                    lead={lead}
+                    onStageChange={handleStageChange}
+                    onClick={setSelectedLead}
+                  />
+                ))}
+              </div>
+            </div>
+          );
+        })}
       </section>
 
       <LeadDrawer lead={selectedLead} onClose={() => setSelectedLead(null)} onStageChange={handleStageChange} />
@@ -317,30 +369,30 @@ function PipelineFilter({
   ];
 
   return (
-    <div className="relative" style={{ minWidth: '200px' }}>
+    <div className="menu-anchor">
       <button
         type="button"
-        className="btn flex items-center gap-2"
+        className="btn"
         onClick={() => setOpen(!open)}
         aria-expanded={open}
         aria-haspopup="listbox"
       >
-        <Filter size={16} />
+        <Filter size={15} />
         <span>
           {allOptions.find((o) => o.value === selectedPipeline)?.label || 'Todas'}
         </span>
-        <ChevronDown size={14} className={open ? 'rotate-180' : ''} />
+        <ChevronDown size={14} style={{ transform: open ? 'rotate(180deg)' : undefined, transition: 'transform 150ms' }} />
       </button>
 
       {open && (
         <>
-          <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
-          <div className="absolute right-0 top-full z-50 mt-1 bg-white border rounded shadow-lg min-w-[220px] max-h-60 overflow-auto">
+          <div className="menu-backdrop" onClick={() => setOpen(false)} />
+          <div className="menu" role="listbox" aria-label="Especialidades">
             {allOptions.map((opt) => (
               <button
                 key={opt.value}
                 type="button"
-                className={`w-full px-4 py-2 text-left ${selectedPipeline === opt.value ? 'bg-blue-50 text-blue-700' : ''}`}
+                className={`menu-item ${selectedPipeline === opt.value ? 'menu-item-active' : ''}`}
                 onClick={() => { onChange(opt.value as PipelineSlug); setOpen(false); }}
                 role="option"
                 aria-selected={selectedPipeline === opt.value}
