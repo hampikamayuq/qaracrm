@@ -1,10 +1,28 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
-import { CalendarClock, ChevronDown, Filter, RefreshCw, X } from 'lucide-react';
-import { api, type PipelineLead, type Pipeline } from '@/lib/api';
+import { Suspense, useCallback, useEffect, useMemo, useState } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
+import { CalendarClock, ChevronDown, Clock3, Filter, Flame, RefreshCw, X } from 'lucide-react';
+import { api, type LeadHistoryEntry, type PipelineLead } from '@/lib/api';
 
-const STAGES = ['NOVO', 'QUALIFICADO', 'AGENDADO', 'COMPARECEU', 'PERDIDO', 'CONVERTIDO'] as const;
+// Estágios canônicos do funil (KB §5) — mesmo conjunto servido por
+// GET /pipelines/:pipeline/stages.
+const STAGES = [
+  'novo-lead',
+  'qualificado',
+  'horario-oferecido',
+  'agendado',
+  'confirmado',
+  'atendido',
+  'reagendado',
+  'perdido',
+  'alta-manutencao',
+] as const;
+
+type Stage = typeof STAGES[number];
+
+// Colunas terminais: colapsadas por padrão para não poluir o quadro.
+const TERMINAL_STAGES: readonly Stage[] = ['perdido', 'alta-manutencao'];
 
 const CLINICAL_PIPELINES = [
   'dermatologia-clinica',
@@ -21,22 +39,42 @@ const CLINICAL_PIPELINES = [
 type PipelineSlug = typeof CLINICAL_PIPELINES[number] | 'all';
 
 const STAGE_LABELS: Record<string, string> = {
-  NOVO: 'Novo',
-  QUALIFICADO: 'Qualificado',
-  AGENDADO: 'Agendado',
-  COMPARECEU: 'Compareceu',
-  PERDIDO: 'Perdido',
-  CONVERTIDO: 'Convertido',
+  'novo-lead': 'Novo lead',
+  qualificado: 'Qualificado',
+  'horario-oferecido': 'Horário oferecido',
+  agendado: 'Agendado',
+  confirmado: 'Confirmado',
+  atendido: 'Compareceu',
+  reagendado: 'Reagendado',
+  perdido: 'Perdido',
+  'alta-manutencao': 'Alta / manutenção',
 };
 
 const STAGE_COLORS: Record<string, string> = {
-  NOVO: 'var(--info)',
-  QUALIFICADO: 'var(--ai)',
-  AGENDADO: 'var(--warning)',
-  COMPARECEU: 'var(--ok)',
-  PERDIDO: 'var(--danger)',
-  CONVERTIDO: 'var(--accent)',
+  'novo-lead': 'var(--info)',
+  qualificado: 'var(--ai)',
+  'horario-oferecido': 'var(--warning)',
+  agendado: 'var(--accent)',
+  confirmado: 'var(--ok)',
+  atendido: 'var(--ok)',
+  reagendado: 'var(--warning)',
+  perdido: 'var(--danger)',
+  'alta-manutencao': 'var(--text-3)',
 };
+
+// Motivos canônicos de perda (família status:perdido-* da KB §15, estendida).
+const LOSS_REASONS = [
+  { value: 'preco', label: 'Preço' },
+  { value: 'plano', label: 'Plano de saúde' },
+  { value: 'horario', label: 'Horário' },
+  { value: 'sem-resposta', label: 'Sem resposta' },
+  { value: 'concorrente', label: 'Concorrente' },
+  { value: 'fora-de-perfil', label: 'Fora de perfil' },
+  { value: 'outro', label: 'Outro' },
+] as const;
+
+const lossLabel = (value: string | null) =>
+  LOSS_REASONS.find((r) => r.value === value)?.label ?? value ?? '—';
 
 const stageLabel = (stage: string) => STAGE_LABELS[stage] ?? stage;
 
@@ -44,13 +82,19 @@ const scoreClass = (score: number) => (
   score >= 80 ? 'chip-danger' : score >= 55 ? 'chip-warning' : 'chip-ok'
 );
 
-const temperatureLabel = (value: string | null | undefined) => (
-  value === 'HOT' ? 'Quente' : value === 'WARM' ? 'Morno' : value === 'COLD' ? 'Frio' : '—'
-);
+// Temperatura real dos dados: coluna Lead.temperature (HOT/WARM/COLD) quando
+// preenchida, senão as tags canônicas LEAD_QUENTE/LEAD_FRIO do classifier.
+type Temp = 'quente' | 'morno' | 'frio';
 
-const temperatureClass = (value: string | null | undefined) => (
-  value === 'HOT' ? 'temp-hot' : value === 'WARM' ? 'temp-warm' : value === 'COLD' ? 'temp-cold' : 'temp-none'
-);
+const leadTemp = (lead: PipelineLead): Temp | null => {
+  if (lead.temperature === 'HOT' || lead.tags.includes('LEAD_QUENTE')) return 'quente';
+  if (lead.temperature === 'WARM') return 'morno';
+  if (lead.temperature === 'COLD' || lead.tags.includes('LEAD_FRIO')) return 'frio';
+  return null;
+};
+
+const TEMP_LABELS: Record<Temp, string> = { quente: 'Quente', morno: 'Morno', frio: 'Frio' };
+const TEMP_CLASSES: Record<Temp, string> = { quente: 'temp-hot', morno: 'temp-warm', frio: 'temp-cold' };
 
 const pipelineLabel = (slug: string | null) => {
   if (!slug) return 'Sem especialidade';
@@ -71,6 +115,17 @@ const formatDate = (value: string | null | undefined) => (
   value ? new Date(value).toLocaleDateString('pt-BR') : '—'
 );
 
+const relativeTime = (iso: string) => {
+  const diffMs = Date.now() - new Date(iso).getTime();
+  const mins = Math.floor(diffMs / 60_000);
+  if (mins < 1) return 'agora';
+  if (mins < 60) return `há ${mins} min`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `há ${hours}h`;
+  const days = Math.floor(hours / 24);
+  return `há ${days}d`;
+};
+
 const TAG_CLASSES: Record<string, string> = {
   LEAD_QUENTE: 'chip-danger',
   LEAD_FRIO: 'chip-info',
@@ -86,6 +141,34 @@ const TagChip = ({ tag }: { tag: string }) => (
   <span className={`chip ${TAG_CLASSES[tag] ?? ''}`}>{tag}</span>
 );
 
+const StalledBadge = ({ days }: { days: number }) => (
+  <span className="chip chip-warning stalled-badge" title="Sem movimentação de estágio">
+    <Clock3 size={11} aria-hidden="true" /> Parado há {days}d
+  </span>
+);
+
+const StageSelect = ({
+  value,
+  onChange,
+  className,
+  label,
+}: {
+  value: string;
+  onChange: (stage: string) => void;
+  className: string;
+  label: string;
+}) => (
+  <select
+    value={value}
+    onChange={(e) => onChange(e.target.value)}
+    onClick={(e) => e.stopPropagation()}
+    className={className}
+    aria-label={label}
+  >
+    {STAGES.map((s) => <option key={s} value={s}>{stageLabel(s)}</option>)}
+  </select>
+);
+
 const LeadCard = ({
   lead,
   onStageChange,
@@ -94,47 +177,50 @@ const LeadCard = ({
   lead: PipelineLead;
   onStageChange: (id: string, stage: string) => void;
   onClick: (lead: PipelineLead) => void;
-}) => (
-  <article className="lead-card" onClick={() => onClick(lead)}>
-    <div className="card-head">
-      <span className="lead-name">{lead.name?.firstName || '(sem nome)'} {lead.name?.lastName || ''}</span>
-      <span className={`chip ${scoreClass(lead.score)}`}>{lead.score}</span>
-    </div>
-    {lead.whatsapp?.primaryPhoneNumber && (
-      <div className="faint">{lead.whatsapp.primaryPhoneNumber}</div>
-    )}
-    <div className="lead-card-meta">
-      <span className={`temp ${temperatureClass(lead.temperature)}`}>{temperatureLabel(lead.temperature)}</span>
-      {lead.pipeline ? (
-        <span className="chip" style={pipelineChipStyle(lead.pipeline)}>{pipelineLabel(lead.pipeline)}</span>
-      ) : null}
-      {lead.nextFollowUpAt ? (
-        <span className="faint" title="Próximo follow-up">
-          <CalendarClock size={11} style={{ verticalAlign: '-1px', marginRight: '3px' }} />
-          {formatDate(lead.nextFollowUpAt)}
-        </span>
-      ) : null}
-    </div>
-    {lead.tags.length > 0 ? (
-      <div className="chips">
-        {lead.tags.slice(0, 4).map((tag) => <TagChip key={tag} tag={tag} />)}
-        {lead.tags.length > 4 && <span className="faint">+{lead.tags.length - 4}</span>}
+}) => {
+  const temp = leadTemp(lead);
+  return (
+    <article className={`lead-card ${lead.isStalled ? 'lead-card-stalled' : ''}`} onClick={() => onClick(lead)}>
+      <div className="card-head">
+        <span className="lead-name">{lead.name?.firstName || '(sem nome)'} {lead.name?.lastName || ''}</span>
+        <span className={`chip ${scoreClass(lead.score)}`}>{lead.score}</span>
       </div>
-    ) : null}
-    <select
-      value={lead.stage}
-      onChange={(e) => {
-        e.stopPropagation();
-        onStageChange(lead.id, e.target.value);
-      }}
-      onClick={(e) => e.stopPropagation()}
-      className="select stage-select"
-      aria-label="Mover para etapa"
-    >
-      {STAGES.map((s) => <option key={s} value={s}>{stageLabel(s)}</option>)}
-    </select>
-  </article>
-);
+      {lead.whatsapp?.primaryPhoneNumber && (
+        <div className="faint">{lead.whatsapp.primaryPhoneNumber}</div>
+      )}
+      <div className="lead-card-meta">
+        {temp && <span className={`temp ${TEMP_CLASSES[temp]}`}>{TEMP_LABELS[temp]}</span>}
+        {lead.pipeline ? (
+          <span className="chip" style={pipelineChipStyle(lead.pipeline)}>{pipelineLabel(lead.pipeline)}</span>
+        ) : null}
+        {lead.nextFollowUpAt ? (
+          <span className="faint" title="Próximo follow-up">
+            <CalendarClock size={11} style={{ verticalAlign: '-1px', marginRight: '3px' }} />
+            {formatDate(lead.nextFollowUpAt)}
+          </span>
+        ) : null}
+      </div>
+      {lead.isStalled ? (
+        <div className="chips"><StalledBadge days={lead.daysInStage} /></div>
+      ) : null}
+      {lead.stage === 'perdido' && lead.lostReason ? (
+        <div className="chips"><span className="chip chip-danger">{lossLabel(lead.lostReason)}</span></div>
+      ) : null}
+      {lead.tags.length > 0 ? (
+        <div className="chips">
+          {lead.tags.slice(0, 4).map((tag) => <TagChip key={tag} tag={tag} />)}
+          {lead.tags.length > 4 && <span className="faint">+{lead.tags.length - 4}</span>}
+        </div>
+      ) : null}
+      <StageSelect
+        value={lead.stage}
+        onChange={(stage) => onStageChange(lead.id, stage)}
+        className="select stage-select"
+        label="Mover para etapa"
+      />
+    </article>
+  );
+};
 
 const LeadDrawer = ({
   lead,
@@ -145,7 +231,23 @@ const LeadDrawer = ({
   onClose: () => void;
   onStageChange: (id: string, stage: string) => void;
 }) => {
+  const [history, setHistory] = useState<LeadHistoryEntry[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const leadId = lead?.id ?? null;
+
+  useEffect(() => {
+    setHistory([]);
+    if (!leadId) return undefined;
+    let alive = true;
+    setHistoryLoading(true);
+    api.getLeadHistory(leadId)
+      .then((entries) => { if (alive) setHistory(entries); })
+      .finally(() => { if (alive) setHistoryLoading(false); });
+    return () => { alive = false; };
+  }, [leadId]);
+
   if (!lead) return null;
+  const temp = leadTemp(lead);
 
   return (
     <div
@@ -169,12 +271,11 @@ const LeadDrawer = ({
         <div className="drawer-body">
           <div className="chips">
             <span className={`chip ${scoreClass(lead.score)}`}>Score {lead.score}</span>
-            {lead.temperature && (
-              <span className={`temp ${temperatureClass(lead.temperature)}`}>{temperatureLabel(lead.temperature)}</span>
-            )}
+            {temp && <span className={`temp ${TEMP_CLASSES[temp]}`}>{TEMP_LABELS[temp]}</span>}
             {lead.pipeline && (
               <span className="chip" style={pipelineChipStyle(lead.pipeline)}>{pipelineLabel(lead.pipeline)}</span>
             )}
+            {lead.isStalled && <StalledBadge days={lead.daysInStage} />}
           </div>
 
           <section className="drawer-section">
@@ -207,14 +308,52 @@ const LeadDrawer = ({
 
           <section className="drawer-section">
             <h3>Etapa do Funil</h3>
-            <select
+            <StageSelect
               value={lead.stage}
-              onChange={(e) => onStageChange(lead.id, e.target.value)}
+              onChange={(stage) => onStageChange(lead.id, stage)}
               className="select"
-              aria-label="Etapa do funil"
-            >
-              {STAGES.map((s) => <option key={s} value={s}>{stageLabel(s)}</option>)}
-            </select>
+              label="Etapa do funil"
+            />
+            <dl className="kv">
+              <div>
+                <dt>No estágio há</dt>
+                <dd>{lead.daysInStage} {lead.daysInStage === 1 ? 'dia' : 'dias'}</dd>
+              </div>
+              {lead.stage === 'perdido' && lead.lostReason ? (
+                <div>
+                  <dt>Motivo de perda</dt>
+                  <dd>{lossLabel(lead.lostReason)}</dd>
+                </div>
+              ) : null}
+            </dl>
+          </section>
+
+          <section className="drawer-section">
+            <h3>Histórico</h3>
+            {historyLoading ? (
+              <span className="faint">Carregando…</span>
+            ) : history.length === 0 ? (
+              <span className="faint">Sem movimentações registradas</span>
+            ) : (
+              <ul className="history-list">
+                {history.map((entry) => (
+                  <li key={entry.id} className="history-item">
+                    <span className="history-move">
+                      {entry.type === 'pipeline_change'
+                        ? `${pipelineLabel(entry.from)} → ${pipelineLabel(entry.to)}`
+                        : `${stageLabel(entry.from ?? '—')} → ${stageLabel(entry.to ?? '—')}`}
+                      {entry.lostReason ? (
+                        <span className="chip chip-danger" style={{ marginLeft: '6px' }}>{lossLabel(entry.lostReason)}</span>
+                      ) : null}
+                    </span>
+                    {entry.note ? <span className="history-note">“{entry.note}”</span> : null}
+                    <span className="faint">
+                      {entry.byName ? `por ${entry.byName} · ` : ''}{relativeTime(entry.at)}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
           </section>
 
           <section className="drawer-section">
@@ -254,17 +393,155 @@ const LeadDrawer = ({
   );
 };
 
-export default function PipelinePage() {
+// Modal de motivo de perda: mover para "Perdido" exige um motivo canônico;
+// a observação opcional vai na activity, não vira tag.
+const LossReasonModal = ({
+  lead,
+  onConfirm,
+  onCancel,
+}: {
+  lead: PipelineLead;
+  onConfirm: (lostReason: string, note: string) => void;
+  onCancel: () => void;
+}) => {
+  const [reason, setReason] = useState<string>(lead.lostReason ?? '');
+  const [note, setNote] = useState('');
+
+  return (
+    <div className="modal-root" role="dialog" aria-modal="true" aria-labelledby="loss-modal-title" onClick={onCancel}>
+      <div className="modal-backdrop" />
+      <div className="modal" onClick={(e) => e.stopPropagation()}>
+        <header className="modal-head">
+          <h2 id="loss-modal-title">Marcar como perdido</h2>
+          <span className="muted">
+            {lead.name?.firstName || '(sem nome)'} — informe o motivo da perda
+          </span>
+        </header>
+
+        <div className="radio-list" role="radiogroup" aria-label="Motivo de perda">
+          {LOSS_REASONS.map((option) => (
+            <label key={option.value} className="radio-item">
+              <input
+                type="radio"
+                name="lostReason"
+                value={option.value}
+                checked={reason === option.value}
+                onChange={() => setReason(option.value)}
+              />
+              {option.label}
+            </label>
+          ))}
+        </div>
+
+        <label className="field">
+          <span className="muted">Observação (opcional)</span>
+          <textarea
+            className="textarea"
+            rows={2}
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            placeholder="Ex.: vai pensar e retorna mês que vem"
+          />
+        </label>
+
+        <div className="modal-actions">
+          <button type="button" className="btn" onClick={onCancel}>Cancelar</button>
+          <button
+            type="button"
+            className="btn btn-danger"
+            disabled={!reason}
+            onClick={() => reason && onConfirm(reason, note.trim())}
+          >
+            Confirmar perda
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+function FilterMenu({
+  label,
+  value,
+  options,
+  onChange,
+  ariaLabel,
+}: {
+  label: string;
+  value: string;
+  options: Array<{ value: string; label: string }>;
+  onChange: (value: string) => void;
+  ariaLabel: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const active = options.find((o) => o.value === value);
+
+  return (
+    <div className="menu-anchor">
+      <button
+        type="button"
+        className={`btn ${value !== 'all' ? 'btn-filter-active' : ''}`}
+        onClick={() => setOpen(!open)}
+        aria-expanded={open}
+        aria-haspopup="listbox"
+      >
+        <Filter size={15} />
+        <span>{active?.label ?? label}</span>
+        <ChevronDown size={14} style={{ transform: open ? 'rotate(180deg)' : undefined, transition: 'transform 150ms' }} />
+      </button>
+
+      {open && (
+        <>
+          <div className="menu-backdrop" onClick={() => setOpen(false)} />
+          <div className="menu" role="listbox" aria-label={ariaLabel}>
+            {options.map((opt) => (
+              <button
+                key={opt.value}
+                type="button"
+                className={`menu-item ${value === opt.value ? 'menu-item-active' : ''}`}
+                onClick={() => { onChange(opt.value); setOpen(false); }}
+                role="option"
+                aria-selected={value === opt.value}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function PipelineBoard() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+
   const [leads, setLeads] = useState<PipelineLead[]>([]);
-  const [pipelines, setPipelines] = useState<Pipeline[]>([]);
-  const [selectedPipeline, setSelectedPipeline] = useState<PipelineSlug>('all');
   const [selectedLead, setSelectedLead] = useState<PipelineLead | null>(null);
+  const [lossTarget, setLossTarget] = useState<PipelineLead | null>(null);
+  const [expandedTerminals, setExpandedTerminals] = useState<Set<Stage>>(new Set());
   const [loading, setLoading] = useState(false);
 
-  const loadPipelines = useCallback(async () => {
-    const data = await api.getPipelines();
-    setPipelines(data);
-  }, []);
+  // Filtros vivem na URL (compartilháveis). 'all' / ausente = sem filtro.
+  const rawPipeline = searchParams.get('pipeline');
+  const selectedPipeline: PipelineSlug =
+    rawPipeline && (CLINICAL_PIPELINES as readonly string[]).includes(rawPipeline)
+      ? (rawPipeline as PipelineSlug)
+      : 'all';
+  const origemFilter = searchParams.get('origem') ?? 'all';
+  const rawTemp = searchParams.get('temp');
+  const tempFilter: Temp | 'all' =
+    rawTemp === 'quente' || rawTemp === 'morno' || rawTemp === 'frio' ? rawTemp : 'all';
+  const onlyStalled = searchParams.get('parados') === '1';
+
+  const setParam = useCallback((key: string, value: string | null) => {
+    const params = new URLSearchParams(searchParams.toString());
+    if (!value || value === 'all') params.delete(key);
+    else params.set(key, value);
+    const text = params.toString();
+    router.replace(`/pipeline${text ? `?${text}` : ''}`, { scroll: false });
+  }, [router, searchParams]);
 
   const loadLeads = useCallback(async () => {
     setLoading(true);
@@ -277,22 +554,56 @@ export default function PipelinePage() {
   }, [selectedPipeline]);
 
   useEffect(() => {
-    loadPipelines();
-  }, [loadPipelines]);
-
-  useEffect(() => {
     loadLeads();
   }, [loadLeads]);
 
-  const handleStageChange = async (leadId: string, stage: string) => {
-    const lead = leads.find(l => l.id === leadId);
-    if (!lead) return;
-
-    await api.moveLead(leadId, stage, lead.pipeline || undefined);
+  const doMove = useCallback(async (
+    lead: PipelineLead,
+    stage: string,
+    extra: { lostReason?: string; note?: string } = {},
+  ) => {
+    await api.moveLead(lead.id, stage, { pipeline: lead.pipeline || undefined, ...extra });
+    setSelectedLead(null);
     loadLeads();
-  };
+  }, [loadLeads]);
 
-  const filteredLeads = leads.filter(l => selectedPipeline === 'all' || l.pipeline === selectedPipeline);
+  // Mover para "perdido" abre o modal de motivo; cancelar aborta (o select é
+  // controlado pelo estado, então o card volta sozinho ao estágio anterior).
+  const handleStageChange = useCallback((leadId: string, stage: string) => {
+    const lead = leads.find((l) => l.id === leadId);
+    if (!lead || lead.stage === stage) return;
+    if (stage === 'perdido') {
+      setLossTarget(lead);
+      return;
+    }
+    doMove(lead, stage);
+  }, [leads, doMove]);
+
+  const origemOptions = useMemo(() => {
+    const sources = Array.from(new Set(leads.map((l) => l.source).filter((s): s is string => Boolean(s)))).sort();
+    return [
+      { value: 'all', label: 'Todas as origens' },
+      ...sources.map((s) => ({ value: s, label: s })),
+    ];
+  }, [leads]);
+
+  const filteredLeads = leads.filter((lead) => (
+    (selectedPipeline === 'all' || lead.pipeline === selectedPipeline)
+    && (origemFilter === 'all' || lead.source === origemFilter)
+    && (tempFilter === 'all' || leadTemp(lead) === tempFilter)
+    && (!onlyStalled || lead.isStalled)
+  ));
+
+  const stalledCount = filteredLeads.filter((l) => l.isStalled).length;
+
+  const toggleTerminal = (stage: Stage) => {
+    setExpandedTerminals((prev) => {
+      const next = new Set(prev);
+      if (next.has(stage)) next.delete(stage);
+      else next.add(stage);
+      return next;
+    });
+  };
 
   return (
     <main className="page page-wide page-tight">
@@ -302,14 +613,48 @@ export default function PipelinePage() {
           <div className="muted">
             {loading ? 'Carregando…' : `${filteredLeads.length} leads`}
             {selectedPipeline !== 'all' && <span> · {pipelineLabel(selectedPipeline)}</span>}
+            {stalledCount > 0 && !loading && <span> · {stalledCount} parados</span>}
           </div>
         </div>
         <div className="toolbar-right">
-          <PipelineFilter
-            selectedPipeline={selectedPipeline}
-            onChange={setSelectedPipeline}
-            pipelines={pipelines}
+          <FilterMenu
+            label="Especialidade"
+            ariaLabel="Especialidades"
+            value={selectedPipeline}
+            onChange={(v) => setParam('pipeline', v)}
+            options={[
+              { value: 'all', label: 'Todas as especialidades' },
+              ...CLINICAL_PIPELINES.map((p) => ({ value: p, label: pipelineLabel(p) })),
+            ]}
           />
+          <FilterMenu
+            label="Origem"
+            ariaLabel="Origens"
+            value={origemFilter}
+            onChange={(v) => setParam('origem', v)}
+            options={origemOptions}
+          />
+          <FilterMenu
+            label="Temperatura"
+            ariaLabel="Temperaturas"
+            value={tempFilter}
+            onChange={(v) => setParam('temp', v)}
+            options={[
+              { value: 'all', label: 'Todas as temperaturas' },
+              { value: 'quente', label: 'Quente' },
+              { value: 'morno', label: 'Morno' },
+              { value: 'frio', label: 'Frio' },
+            ]}
+          />
+          <button
+            type="button"
+            className={`btn ${onlyStalled ? 'btn-filter-active' : ''}`}
+            aria-pressed={onlyStalled}
+            onClick={() => setParam('parados', onlyStalled ? null : '1')}
+            title="Mostrar só leads parados no estágio"
+          >
+            <Flame size={15} /> Só parados
+          </button>
           <button className="btn" type="button" onClick={loadLeads} disabled={loading}>
             <RefreshCw size={15} className={loading ? 'spin' : ''} /> Atualizar
           </button>
@@ -318,15 +663,47 @@ export default function PipelinePage() {
 
       <section className="kanban" aria-label="Kanban de leads">
         {STAGES.map((stage) => {
-          const stageLeads = filteredLeads.filter(l => l.stage === stage);
+          const stageLeads = filteredLeads.filter((l) => l.stage === stage);
+          const isTerminal = TERMINAL_STAGES.includes(stage);
+          const collapsed = isTerminal && !expandedTerminals.has(stage);
+
+          if (collapsed) {
+            return (
+              <button
+                key={stage}
+                type="button"
+                className="column column-collapsed"
+                onClick={() => toggleTerminal(stage)}
+                aria-expanded={false}
+                title={`Expandir ${stageLabel(stage)}`}
+              >
+                <span className="stage-dot" style={{ background: STAGE_COLORS[stage] }} aria-hidden="true" />
+                <span className="column-collapsed-label">{stageLabel(stage)}</span>
+                <span className="count-badge">{stageLeads.length}</span>
+              </button>
+            );
+          }
+
           return (
-            <div className="column" key={stage}>
+            <div className={`column ${isTerminal ? 'column-terminal' : ''}`} key={stage}>
               <h2 className="column-title">
                 <span>
                   <span className="stage-dot" style={{ background: STAGE_COLORS[stage] }} aria-hidden="true" />
                   {stageLabel(stage)}
                 </span>
-                <span className="count-badge">{stageLeads.length}</span>
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                  <span className="count-badge">{stageLeads.length}</span>
+                  {isTerminal && (
+                    <button
+                      type="button"
+                      className="icon-btn icon-btn-sm"
+                      onClick={() => toggleTerminal(stage)}
+                      aria-label={`Recolher ${stageLabel(stage)}`}
+                    >
+                      <X size={13} />
+                    </button>
+                  )}
+                </span>
               </h2>
               <div className="column-body">
                 {stageLeads.length === 0 ? <div className="column-empty">Sem leads nesta etapa</div> : null}
@@ -345,64 +722,27 @@ export default function PipelinePage() {
       </section>
 
       <LeadDrawer lead={selectedLead} onClose={() => setSelectedLead(null)} onStageChange={handleStageChange} />
+
+      {lossTarget && (
+        <LossReasonModal
+          lead={lossTarget}
+          onCancel={() => setLossTarget(null)}
+          onConfirm={(lostReason, note) => {
+            const target = lossTarget;
+            setLossTarget(null);
+            doMove(target, 'perdido', { lostReason, ...(note ? { note } : {}) });
+          }}
+        />
+      )}
     </main>
   );
 }
 
-function PipelineFilter({
-  selectedPipeline,
-  onChange,
-  pipelines,
-}: {
-  selectedPipeline: PipelineSlug;
-  onChange: (p: PipelineSlug) => void;
-  pipelines: Pipeline[];
-}) {
-  const [open, setOpen] = useState(false);
-
-  const allOptions = [
-    { value: 'all', label: 'Todas as especialidades' },
-    ...CLINICAL_PIPELINES.map((p) => ({
-      value: p,
-      label: p.charAt(0).toUpperCase() + p.slice(1).replace('-', ' '),
-    })),
-  ];
-
+export default function PipelinePage() {
+  // useSearchParams exige Suspense no App Router (build estático).
   return (
-    <div className="menu-anchor">
-      <button
-        type="button"
-        className="btn"
-        onClick={() => setOpen(!open)}
-        aria-expanded={open}
-        aria-haspopup="listbox"
-      >
-        <Filter size={15} />
-        <span>
-          {allOptions.find((o) => o.value === selectedPipeline)?.label || 'Todas'}
-        </span>
-        <ChevronDown size={14} style={{ transform: open ? 'rotate(180deg)' : undefined, transition: 'transform 150ms' }} />
-      </button>
-
-      {open && (
-        <>
-          <div className="menu-backdrop" onClick={() => setOpen(false)} />
-          <div className="menu" role="listbox" aria-label="Especialidades">
-            {allOptions.map((opt) => (
-              <button
-                key={opt.value}
-                type="button"
-                className={`menu-item ${selectedPipeline === opt.value ? 'menu-item-active' : ''}`}
-                onClick={() => { onChange(opt.value as PipelineSlug); setOpen(false); }}
-                role="option"
-                aria-selected={selectedPipeline === opt.value}
-              >
-                {opt.label}
-              </button>
-            ))}
-          </div>
-        </>
-      )}
-    </div>
+    <Suspense fallback={null}>
+      <PipelineBoard />
+    </Suspense>
   );
 }

@@ -1,7 +1,6 @@
 import type { DataApi } from 'src/lib/data';
-import { categorizeTask, daysSince, type TaskCategory } from 'src/lib/followup/categorize';
+import { categorizeTask, daysSince, FOLLOWUP_THRESHOLD_DAYS, type TaskCategory } from 'src/lib/followup/categorize';
 
-const FOLLOWUP_THRESHOLD_DAYS = 3;
 const FOLLOWUP_DUE_OFFSET_DAYS = 1; // give Tawany 24h before recategorization escalates
 
 type LeadLike = { id: string; stage?: string | null; lastFollowUpAt?: string | null; nextFollowUpAt?: string | null; assignedToId?: string | null };

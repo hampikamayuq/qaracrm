@@ -4,6 +4,10 @@
 
 export type TaskCategory = 'OVERDUE' | 'TODAY' | 'UPCOMING' | 'NO_DATE';
 
+// Limite único de "lead sem ação": usado pelo followup-engine (criar task de
+// follow-up) e pelo pipeline (badge "Parado há Xd"). Um lugar só.
+export const FOLLOWUP_THRESHOLD_DAYS = 3;
+
 export type CategorizableTask = {
   status?: string | null;
   dueAt?: string | null;

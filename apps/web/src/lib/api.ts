@@ -40,9 +40,25 @@ export type PipelineLead = {
   tags: string[];
   temperature: string | null;
   pipeline: string | null;
+  lostReason: string | null;
+  stageEnteredAt: string | null;
+  daysInStage: number;
+  isStalled: boolean;
   notes: string | null;
   lastFollowUpAt: string | null;
   nextFollowUpAt: string | null;
+};
+
+export type LeadHistoryEntry = {
+  id: string;
+  type: 'stage_change' | 'pipeline_change';
+  from: string | null;
+  to: string | null;
+  lostReason: string | null;
+  note: string | null;
+  byUserId: string | null;
+  byName: string | null;
+  at: string;
 };
 
 export type Pipeline = {
@@ -256,11 +272,20 @@ export const api = {
     return res.data ?? [];
   },
 
-  moveLead(leadId: string, stage: string, pipeline?: string): Promise<ApiResponse<{ stage: string; pipeline?: string }>> {
+  moveLead(
+    leadId: string,
+    stage: string,
+    opts: { pipeline?: string; lostReason?: string; note?: string } = {},
+  ): Promise<ApiResponse<{ stage: string; pipeline?: string; lostReason?: string }>> {
     return this.fetch(`/pipeline/leads/${leadId}/move`, {
       method: 'PATCH',
-      body: JSON.stringify({ stage, pipeline }),
+      body: JSON.stringify({ stage, ...opts }),
     });
+  },
+
+  async getLeadHistory(leadId: string): Promise<LeadHistoryEntry[]> {
+    const res = await this.get<LeadHistoryEntry[]>(`/pipeline/leads/${leadId}/history`);
+    return res.data ?? [];
   },
 
   updateLeadPipeline(leadId: string, pipeline: string): Promise<ApiResponse<{ pipeline: string }>> {
