@@ -29,6 +29,20 @@ const DEFAULT_SENSITIVE_KEYWORDS = [
   'com certeza', // outcome promises
 ];
 
+// Promessa de horário: a Tawany NÃO tem agenda real, então "agendei/confirmado
+// para <dia/hora>" é sempre invenção. Exige as duas partes (verbo de confirmação
+// + indicação de dia/hora) para não bloquear frases legítimas como
+// "vou verificar com a equipe os horários".
+const SCHEDULING_CLAIM_PATTERN =
+  /\b(agendei|marquei|reservei|confirmei|agendad[oa]|marcad[oa]|confirmad[oa])\s+(?:(?:a|o|sua|seu|voc[êe])\s+)?(?:\w+\s+)?(?:para|pra)\b/iu;
+const DATE_TIME_HINT_PATTERN =
+  /\b(segunda|ter[çc]a|quarta|quinta|sexta|s[áa]bado|domingo|amanh[ãa]|hoje|\d{1,2}\s*(?:h\b|hs\b|horas\b|:\d{2})|\d{1,2}\/\d{1,2})/iu;
+
+// Promessa de resultado: complementa os keywords ("garanto", "prometo", "com
+// certeza") com as formas nominais que eles não pegam.
+const OUTCOME_PROMISE_PATTERN =
+  /\b(resultado\s+garantido|garantia\s+de\s+resultado|cura\s+garantida|sucesso\s+garantido|resolver?\s+100\s*%|100\s*%\s+de\s+(?:sucesso|cura|efic[áa]cia|melhora))/iu;
+
 const extractPrices = (text: string): number[] => {
   const matches = text.matchAll(/R\$\s?(\d{1,3}(?:\.\d{3})*|\d+)(?:,(\d{2}))?/gi);
   const prices: number[] = [];
@@ -73,6 +87,16 @@ export const validateReply = (text: string, context: ValidationContext): Validat
 
   if (MOHS_OR_SKIN_CANCER_PATTERN.test(text) && !HYPOTHESIS_MARKERS.test(text)) {
     return { ok: false, reason: 'mohs_or_skin_cancer_affirmative_statement' };
+  }
+
+  // 4. Promessa de horário sem agenda real
+  if (SCHEDULING_CLAIM_PATTERN.test(text) && DATE_TIME_HINT_PATTERN.test(text)) {
+    return { ok: false, reason: 'schedule_promise_without_agenda' };
+  }
+
+  // 5. Promessa de resultado
+  if (OUTCOME_PROMISE_PATTERN.test(text)) {
+    return { ok: false, reason: 'outcome_promise' };
   }
 
   return { ok: true };

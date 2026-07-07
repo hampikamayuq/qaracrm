@@ -43,4 +43,11 @@ describe('buildTawanyContext', () => {
     const ctx = await buildTawanyContext('conv-2', api({ get }));
     expect(ctx.lead).toBeNull();
   });
+
+  it('carrega o summary pré-computado da conversation quando existe', async () => {
+    const get = vi.fn().mockResolvedValueOnce({ leadId: null, summary: 'Paciente quer agendar unhas.' });
+    const ctx = await buildTawanyContext('conv-3', api({ get }));
+    expect(ctx.summary).toBe('Paciente quer agendar unhas.');
+    expect(get).toHaveBeenCalledWith('conversation', 'conv-3', expect.objectContaining({ summary: true }));
+  });
 });

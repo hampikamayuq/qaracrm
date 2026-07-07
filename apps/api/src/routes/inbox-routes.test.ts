@@ -12,6 +12,9 @@ const mocks = vi.hoisted(() => ({
     lead: {
       update: vi.fn(),
     },
+    aiSuggestion: {
+      findMany: vi.fn(),
+    },
   },
   sendWhatsApp: {
     execute: vi.fn(),
@@ -38,6 +41,7 @@ const res = () => {
 describe('Inbox routes', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.prisma.aiSuggestion.findMany.mockResolvedValue([]);
   });
 
   it('lists conversations with search, filters, pagination, and latest message only', async () => {
@@ -75,6 +79,7 @@ describe('Inbox routes', () => {
         id: true,
         status: true,
         needsHuman: true,
+        handoffReason: true,
         channel: true,
         lastMessageAt: true,
         updatedAt: true,
@@ -188,11 +193,55 @@ describe('Inbox routes', () => {
       data: expect.objectContaining({ id: 'c1', lead: expect.objectContaining({ phone: '+5511999999999' }) }),
     });
   });
+
+  it('detail devolve agentState derivado e as sugestões enviadas (feedback 👍/👎)', async () => {
+    mocks.prisma.conversation.findUnique.mockResolvedValue({
+      id: 'c1',
+      status: 'PENDING_HUMAN',
+      needsHuman: true,
+      handoffReason: 'guard_failed: price_not_in_kb: 99900',
+      lead: { id: 'l1', name: 'Maria' },
+      messages: [],
+      tasks: [],
+      aiSuggestions: [],
+    });
+    mocks.prisma.aiSuggestion.findMany.mockResolvedValue([
+      { id: 's1', body: 'Olá!', status: 'SENT', feedback: null },
+    ]);
+    const { getInboxDetailRoute } = await import('./inbox-routes');
+    const response = res();
+
+    await getInboxDetailRoute(req({ params: { id: 'c1' } }), response);
+
+    expect(mocks.prisma.aiSuggestion.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: { conversationId: 'c1', status: { in: ['SENT', 'TEST_SENT'] } },
+    }));
+    expect(response.json).toHaveBeenCalledWith({
+      success: true,
+      data: expect.objectContaining({
+        agentState: 'aguardando_humano',
+        handoffReason: 'guard_failed: price_not_in_kb: 99900',
+        sentSuggestions: [{ id: 's1', body: 'Olá!', status: 'SENT', feedback: null }],
+      }),
+    });
+  });
+});
+
+describe('agentStateOf', () => {
+  it('deriva o estado de quem conduz a conversa', async () => {
+    const { agentStateOf } = await import('./inbox-routes');
+    expect(agentStateOf('OPEN', false)).toBe('tawany_ativa');
+    expect(agentStateOf('OPEN', true)).toBe('aguardando_humano');
+    expect(agentStateOf('PENDING_HUMAN', true)).toBe('aguardando_humano');
+    expect(agentStateOf('PENDING_PATIENT', false)).toBe('humano_assumiu');
+    expect(agentStateOf('RESOLVED', false)).toBe('humano_assumiu');
+  });
 });
 
 describe('Inbox phase-3 actions', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.prisma.aiSuggestion.findMany.mockResolvedValue([]);
   });
 
   it('reply requires text and sends via WhatsApp tool', async () => {
@@ -211,6 +260,52 @@ describe('Inbox phase-3 actions', () => {
       expect.anything(),
     );
     expect(ok.json).toHaveBeenCalledWith({ success: true, data: { ok: true, sent: true, messageId: 'm1' } });
+  });
+
+  it('reply formaliza "humano assumiu": limpa needsHuman e sai de OPEN', async () => {
+    mocks.prisma.conversation.findUnique.mockResolvedValue({ id: 'c1', status: 'PENDING_HUMAN' });
+    mocks.sendWhatsApp.execute.mockResolvedValue(JSON.stringify({ ok: true, sent: true }));
+    const { replyRoute } = await import('./inbox-routes');
+    await replyRoute(req({ params: { id: 'c1' }, body: { text: 'Oi' } }), res());
+
+    expect(mocks.prisma.conversation.updateMany).toHaveBeenCalledWith({
+      where: { id: 'c1' },
+      data: { needsHuman: false, status: 'PENDING_PATIENT' },
+    });
+  });
+
+  it('reply em conversa RESOLVED não reabre o estado', async () => {
+    mocks.prisma.conversation.findUnique.mockResolvedValue({ id: 'c1', status: 'RESOLVED' });
+    mocks.sendWhatsApp.execute.mockResolvedValue(JSON.stringify({ ok: true, sent: true }));
+    const { replyRoute } = await import('./inbox-routes');
+    await replyRoute(req({ params: { id: 'c1' }, body: { text: 'Oi' } }), res());
+
+    expect(mocks.prisma.conversation.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('devolver-tawany reabre a conversa para a Tawany e limpa o motivo', async () => {
+    mocks.prisma.conversation.updateMany.mockResolvedValue({ count: 1 });
+    const { devolverTawanyRoute } = await import('./inbox-routes');
+    const response = res();
+    await devolverTawanyRoute(req({ params: { id: 'c1' } }), response);
+
+    expect(mocks.prisma.conversation.updateMany).toHaveBeenCalledWith({
+      where: { id: 'c1' },
+      data: { needsHuman: false, status: 'OPEN', handoffReason: null },
+    });
+    expect(response.json).toHaveBeenCalledWith({
+      success: true,
+      data: { status: 'OPEN', needsHuman: false, agentState: 'tawany_ativa' },
+    });
+  });
+
+  it('devolver-tawany retorna 404 para conversa inexistente', async () => {
+    mocks.prisma.conversation.updateMany.mockResolvedValue({ count: 0 });
+    const { devolverTawanyRoute } = await import('./inbox-routes');
+    const response = res();
+    await devolverTawanyRoute(req({ params: { id: 'ghost' } }), response);
+
+    expect(response.status).toHaveBeenCalledWith(404);
   });
 
   it('handoff flags conversation for human', async () => {

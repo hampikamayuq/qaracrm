@@ -16,6 +16,7 @@
     "db:migrate:deploy": "prisma migrate deploy",
     "db:push": "prisma db push",
     "db:seed": "tsx src/lib/seed/seed.ts",
+    "db:seed:knowledge": "tsx src/scripts/seed-knowledge.ts",
     "postinstall": "prisma generate"
   },
   "dependencies": {

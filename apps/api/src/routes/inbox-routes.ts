@@ -19,6 +19,14 @@ const jsonError = (res: Response, status: number, error: string): void => {
   res.status(status).json({ success: false, error });
 };
 
+// Estado derivado de quem está conduzindo a conversa (badge do inbox):
+//   tawany_ativa      — OPEN e sem needsHuman: Tawany responde sozinha.
+//   aguardando_humano — needsHuman: handoff pendente (motivo em handoffReason).
+//   humano_assumiu    — humano respondeu/assumiu (status != OPEN, sem needsHuman).
+export type AgentState = 'tawany_ativa' | 'aguardando_humano' | 'humano_assumiu';
+export const agentStateOf = (status: string, needsHuman: boolean): AgentState =>
+  needsHuman ? 'aguardando_humano' : status === 'OPEN' ? 'tawany_ativa' : 'humano_assumiu';
+
 const positiveInt = (value: unknown, fallback: number): number => {
   const parsed = typeof value === 'string' ? Number.parseInt(value, 10) : Number.NaN;
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
@@ -56,6 +64,7 @@ export const listInboxRoute = async (req: Request, res: Response): Promise<void>
           id: true,
           status: true,
           needsHuman: true,
+          handoffReason: true,
           channel: true,
           lastMessageAt: true,
           updatedAt: true,
@@ -84,7 +93,14 @@ export const listInboxRoute = async (req: Request, res: Response): Promise<void>
       prisma.conversation.count({ where }),
     ]);
 
-    res.json({ success: true, data: { items, total, page } });
+    res.json({
+      success: true,
+      data: {
+        items: items.map((item) => ({ ...item, agentState: agentStateOf(item.status, item.needsHuman) })),
+        total,
+        page,
+      },
+    });
   } catch {
     jsonError(res, 500, 'Failed to load inbox');
   }
@@ -104,6 +120,7 @@ export const getInboxDetailRoute = async (req: Request, res: Response): Promise<
         id: true,
         status: true,
         needsHuman: true,
+        handoffReason: true,
         channel: true,
         lastMessageAt: true,
         updatedAt: true,
@@ -176,7 +193,23 @@ export const getInboxDetailRoute = async (req: Request, res: Response): Promise<
       return;
     }
 
-    res.json({ success: true, data: item });
+    // Sugestões já enviadas (SENT/TEST_SENT) para o feedback 👍/👎 nas bolhas
+    // da Tawany. A UI casa mensagem ↔ sugestão pelo body.
+    const sentSuggestions = await prisma.aiSuggestion.findMany({
+      where: { conversationId: id, status: { in: ['SENT', 'TEST_SENT'] } },
+      orderBy: { createdAt: 'desc' },
+      take: 50,
+      select: { id: true, body: true, status: true, feedback: true },
+    });
+
+    res.json({
+      success: true,
+      data: {
+        ...item,
+        agentState: agentStateOf(item.status, item.needsHuman),
+        sentSuggestions,
+      },
+    });
   } catch {
     jsonError(res, 500, 'Failed to load conversation');
   }
@@ -190,12 +223,20 @@ export const replyRoute = async (req: Request, res: Response): Promise<void> => 
       jsonError(res, 400, 'text required');
       return;
     }
-    const conversation = await prisma.conversation.findUnique({ where: { id }, select: { id: true } });
+    const conversation = await prisma.conversation.findUnique({ where: { id }, select: { id: true, status: true } });
     if (!conversation) {
       jsonError(res, 404, 'Conversation not found');
       return;
     }
     const result = JSON.parse(await sendWhatsApp.execute({ conversationId: id, text: text.trim() }, data));
+    // Resposta manual = humano assumiu: formaliza o estado. Tawany não volta a
+    // responder (gate exige status OPEN) até "Devolver para a Tawany".
+    if (conversation.status !== 'RESOLVED' && conversation.status !== 'CLOSED') {
+      await prisma.conversation.updateMany({
+        where: { id },
+        data: { needsHuman: false, status: 'PENDING_PATIENT' },
+      });
+    }
     res.json({ success: true, data: result });
   } catch (error) {
     jsonError(res, 500, (error as Error).message);
@@ -213,6 +254,24 @@ export const handoffRoute = async (req: Request, res: Response): Promise<void> =
       return;
     }
     res.json({ success: true, data: { needsHuman: true, status: 'PENDING_HUMAN' } });
+  } catch (error) {
+    jsonError(res, 500, (error as Error).message);
+  }
+};
+
+// Reabre a conversa para a Tawany: precisa de needsHuman=false + status OPEN
+// (o gate do runTawanyHandler exige os dois) e limpa o motivo do handoff.
+export const devolverTawanyRoute = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const result = await prisma.conversation.updateMany({
+      where: { id: paramStr(req.params.id) },
+      data: { needsHuman: false, status: 'OPEN', handoffReason: null },
+    });
+    if (result.count === 0) {
+      jsonError(res, 404, 'Conversation not found');
+      return;
+    }
+    res.json({ success: true, data: { status: 'OPEN', needsHuman: false, agentState: 'tawany_ativa' } });
   } catch (error) {
     jsonError(res, 500, (error as Error).message);
   }
@@ -292,6 +351,7 @@ router.get('/list', authMiddleware, listInboxRoute);
 router.get('/:id', authMiddleware, getInboxDetailRoute);
 router.post('/:id/reply', authMiddleware, replyRoute);
 router.post('/:id/handoff', authMiddleware, handoffRoute);
+router.post('/:id/devolver-tawany', authMiddleware, devolverTawanyRoute);
 router.patch('/:id/status', authMiddleware, setStatusRoute);
 router.post('/:id/tags', authMiddleware, addTagRoute);
 router.delete('/:id/tags/:tag', authMiddleware, removeTagRoute);

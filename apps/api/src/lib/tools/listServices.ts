@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import type { DataApi } from 'src/lib/data';
 
-const SERVICE_SELECT = { id: true, name: true, description: true, durationMin: true, defaultPriceCents: true, modality: true };
+const SERVICE_SELECT = { id: true, name: true, description: true, category: true, priceCents: true, professionalId: true };
 
 export const listServices = {
   name: 'listServices',

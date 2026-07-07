@@ -1,8 +1,93 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { FlaskConical, Pause, Play, Trash2, Upload } from 'lucide-react';
-import { api, type BotSummary } from '@/lib/api';
+import { Bot, Copy, FlaskConical, History, Pencil, Plus, Trash2, Upload, X, Zap } from 'lucide-react';
+import { api, type BotSummary, type BotVersion } from '@/lib/api';
+import { BotEditor, type EditorBot } from './bot-editor';
+
+// Modal de histórico de versões: quando, quem e "Reverter para esta".
+function HistoryModal({ bot, onClose, onReverted }: {
+  bot: BotSummary;
+  onClose: () => void;
+  onReverted: (message: string) => void;
+}) {
+  const [versions, setVersions] = useState<BotVersion[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [reverting, setReverting] = useState(false);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    let alive = true;
+    api.getBotVersions(bot.id)
+      .then((rows) => { if (alive) setVersions(rows); })
+      .finally(() => { if (alive) setLoading(false); });
+    return () => { alive = false; };
+  }, [bot.id]);
+
+  const revert = async (version: BotVersion) => {
+    const label = version.name ?? bot.name;
+    if (!window.confirm(`Reverter "${bot.name}" para a versão "${label}" de ${new Date(version.at).toLocaleString('pt-BR')}? A versão atual será guardada no histórico.`)) {
+      return;
+    }
+    setReverting(true);
+    setError('');
+    try {
+      const res = await api.revertBot(bot.id, version.id);
+      if (res.success) {
+        onReverted(`Fluxo "${bot.name}" revertido para a versão de ${new Date(version.at).toLocaleString('pt-BR')}.`);
+      } else {
+        setError(res.error ?? 'Falha ao reverter.');
+      }
+    } finally {
+      setReverting(false);
+    }
+  };
+
+  return (
+    <div className="modal-root" role="dialog" aria-modal="true" aria-labelledby="bot-history-title" onClick={onClose}>
+      <div className="modal-backdrop" />
+      <div className="modal" onClick={(e) => e.stopPropagation()}>
+        <header className="modal-head">
+          <h2 id="bot-history-title">Histórico de versões</h2>
+          <span className="muted">{bot.name} — cada salvamento guarda a versão anterior</span>
+        </header>
+
+        {error ? <p className="error">{error}</p> : null}
+        {loading ? <div className="muted">Carregando…</div> : null}
+        {!loading && versions.length === 0 ? (
+          <div className="muted">Nenhuma versão anterior ainda. Edite e salve o fluxo para criar a primeira.</div>
+        ) : null}
+        {!loading && versions.length > 0 ? (
+          <ul className="history-list">
+            {versions.map((version) => (
+              <li key={version.id} className="history-item">
+                <span className="history-move">
+                  {version.name ?? '(sem nome)'} · {version.rules} regra{version.rules === 1 ? '' : 's'}
+                </span>
+                <span className="muted">
+                  {new Date(version.at).toLocaleString('pt-BR')}{version.byName ? ` — por ${version.byName}` : ''}
+                </span>
+                <button
+                  className="btn"
+                  type="button"
+                  disabled={reverting}
+                  style={{ justifySelf: 'start', marginTop: '4px' }}
+                  onClick={() => revert(version)}
+                >
+                  <History size={13} />Reverter para esta
+                </button>
+              </li>
+            ))}
+          </ul>
+        ) : null}
+
+        <div className="modal-actions">
+          <button className="btn" type="button" onClick={onClose}><X size={14} />Fechar</button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 export default function BotsPage() {
   const [bots, setBots] = useState<BotSummary[]>([]);
@@ -11,6 +96,9 @@ export default function BotsPage() {
   const [testText, setTestText] = useState('');
   const [testResult, setTestResult] = useState<{ matched: boolean; botName?: string; responses: string[] } | null>(null);
   const [testing, setTesting] = useState(false);
+  const [editor, setEditor] = useState<EditorBot | null>(null);
+  const [riskTerms, setRiskTerms] = useState<string[]>([]);
+  const [historyBot, setHistoryBot] = useState<BotSummary | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
 
   const reload = async () => {
@@ -22,7 +110,10 @@ export default function BotsPage() {
     }
   };
 
-  useEffect(() => { void reload(); }, []);
+  useEffect(() => {
+    void reload();
+    void api.getBotRiskTerms().then(setRiskTerms);
+  }, []);
 
   const flash = (message: string) => {
     setFeedback(message);
@@ -45,7 +136,7 @@ export default function BotsPage() {
         flash(res.error ?? 'Falha ao importar');
       }
     } catch {
-      flash('Arquivo invalido: esperado JSON exportado do construtor de fluxo.');
+      flash('Arquivo inválido: esperado JSON exportado do construtor de fluxo.');
     }
   };
 
@@ -60,12 +151,31 @@ export default function BotsPage() {
     }
   };
 
+  const openEdit = async (bot: BotSummary) => {
+    const detail = await api.getBot(bot.id);
+    if (!detail) {
+      flash('Não foi possível carregar o fluxo para edição.');
+      return;
+    }
+    setEditor({ id: detail.id, name: detail.name, rules: detail.rules });
+  };
+
+  const duplicate = async (bot: BotSummary) => {
+    const res = await api.duplicateBot(bot.id);
+    if (res.success && res.data) {
+      flash(`Fluxo duplicado como "${res.data.name}" (pausado).`);
+      await reload();
+    } else {
+      flash(res.error ?? 'Falha ao duplicar.');
+    }
+  };
+
   return (
     <main className="page">
       <div className="toolbar">
         <div>
           <h1 className="title">Bots</h1>
-          <div className="muted">Fluxos automaticos deterministas — respondem antes da Tawany.</div>
+          <div className="muted">Fluxos automáticos deterministas — respondem antes da Tawany.</div>
         </div>
         <div className="toolbar-right">
           <input
@@ -79,53 +189,86 @@ export default function BotsPage() {
               event.target.value = '';
             }}
           />
-          <button className="btn btn-primary" type="button" onClick={() => fileInput.current?.click()}>
-            <Upload size={16} />Importar JSON
+          <button className="btn" type="button" onClick={() => fileInput.current?.click()}>
+            <Upload size={15} />Importar JSON
+          </button>
+          <button
+            className="btn btn-primary"
+            type="button"
+            onClick={() => setEditor({ id: null, name: '', rules: [] })}
+          >
+            <Plus size={15} />Novo bot
           </button>
         </div>
       </div>
 
-      {feedback ? <div className="card muted">{feedback}</div> : null}
+      {feedback ? <div className="flash" role="status" style={{ marginBottom: '12px' }}>{feedback}</div> : null}
 
       <section className="list">
-        {loading ? <div className="card muted">Carregando...</div> : null}
-        {!loading && bots.length === 0 ? <div className="card muted">Nenhum fluxo importado ainda.</div> : null}
+        {loading ? <div className="card muted">Carregando…</div> : null}
+        {!loading && bots.length === 0 ? (
+          <div className="card muted">Nenhum fluxo importado ainda. Importe um JSON do construtor de fluxo para começar.</div>
+        ) : null}
         {bots.map((bot) => (
           <article className="card" key={bot.id}>
-            <div className="card-head">
-              <div>
-                <div className="lead-name">{bot.name}</div>
-                <div className="muted">{bot.rules} regras · gatilho: {bot.trigger} · atualizado {new Date(bot.updatedAt).toLocaleString('pt-BR')}</div>
+            <div className="bot-card-head">
+              <div className="bot-id">
+                <span className="bot-mark" aria-hidden="true"><Bot size={18} /></span>
+                <div>
+                  <div className="lead-name">{bot.name}</div>
+                  <div className="muted">Atualizado {new Date(bot.updatedAt).toLocaleString('pt-BR')}</div>
+                </div>
               </div>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={bot.active}
+                aria-label={bot.active ? `Pausar fluxo ${bot.name}` : `Ativar fluxo ${bot.name}`}
+                className="switch-row"
+                onClick={() => toggle(bot)}
+              >
+                <span className="switch" aria-hidden="true"><span className="switch-thumb" /></span>
+                {bot.active ? 'Ativo' : 'Pausado'}
+              </button>
+            </div>
+            <div className="bot-foot">
               <div className="chips">
+                <span className="chip chip-info"><Zap size={11} />gatilho: {bot.trigger}</span>
+                <span className="chip">{bot.rules} regras</span>
                 <span className={`chip ${bot.active ? 'chip-ok' : 'chip-warning'}`}>{bot.active ? 'ativo' : 'pausado'}</span>
               </div>
-            </div>
-            <div className="suggestion-actions">
-              <button className="btn" type="button" onClick={() => toggle(bot)}>
-                {bot.active ? <><Pause size={15} />Pausar</> : <><Play size={15} />Ativar</>}
-              </button>
-              <button
-                className="btn btn-danger"
-                type="button"
-                onClick={async () => {
-                  if (window.confirm(`Excluir o fluxo "${bot.name}"?`)) {
-                    await api.fetch(`/bots/${bot.id}`, { method: 'DELETE' });
-                    await reload();
-                  }
-                }}
-              >
-                <Trash2 size={15} />Excluir
-              </button>
+              <div className="toolbar-right">
+                <button className="btn" type="button" onClick={() => openEdit(bot)}>
+                  <Pencil size={14} />Editar
+                </button>
+                <button className="btn" type="button" onClick={() => duplicate(bot)}>
+                  <Copy size={14} />Duplicar
+                </button>
+                <button className="btn" type="button" onClick={() => setHistoryBot(bot)}>
+                  <History size={14} />Histórico
+                </button>
+                <button
+                  className="btn btn-danger"
+                  type="button"
+                  onClick={async () => {
+                    if (window.confirm(`Excluir o fluxo "${bot.name}"?`)) {
+                      await api.fetch(`/bots/${bot.id}`, { method: 'DELETE' });
+                      await reload();
+                    }
+                  }}
+                >
+                  <Trash2 size={15} />Excluir
+                </button>
+              </div>
             </div>
           </article>
         ))}
       </section>
 
-      <section className="card">
-        <h2 className="title"><FlaskConical size={18} /> Testar mensagem</h2>
-        <p className="muted">Simule uma mensagem recebida e veja qual fluxo responderia (nada e enviado).</p>
-        <div className="inline-form">
+      <section className="card" style={{ marginTop: '16px', display: 'grid', gap: '8px' }}>
+        <h2 className="section-title"><FlaskConical size={16} />Testar mensagem</h2>
+        <p className="muted" style={{ margin: 0 }}>Simule uma mensagem recebida e veja qual fluxo responderia (nada é enviado).</p>
+        <div className="inline-form" style={{ marginTop: '2px' }}>
           <input
             className="input"
             placeholder="Ex.: Olá, gostaria de agendar uma consulta com o Dr. Diego Galvez"
@@ -134,15 +277,15 @@ export default function BotsPage() {
             onKeyDown={(event) => event.key === 'Enter' && runTest()}
           />
           <button className="btn btn-primary" disabled={testing} type="button" onClick={runTest}>
-            {testing ? 'Testando...' : 'Testar'}
+            {testing ? 'Testando…' : 'Testar'}
           </button>
         </div>
         {testResult ? (
           testResult.matched ? (
-            <div className="panel-block">
+            <div className="panel-block" style={{ marginTop: '6px' }}>
               <div className="chips"><span className="chip chip-ok">match: {testResult.botName}</span></div>
               {testResult.responses.map((response, index) => (
-                <article className="message-bubble message-out" key={index}>
+                <article className="message-bubble message-out" key={index} style={{ alignSelf: 'flex-start' }}>
                   <div style={{ whiteSpace: 'pre-wrap' }}>{response}</div>
                 </article>
               ))}
@@ -152,6 +295,31 @@ export default function BotsPage() {
           )
         ) : null}
       </section>
+
+      {editor ? (
+        <BotEditor
+          bot={editor}
+          riskTerms={riskTerms}
+          onClose={() => setEditor(null)}
+          onSaved={async (message) => {
+            setEditor(null);
+            flash(message);
+            await reload();
+          }}
+        />
+      ) : null}
+
+      {historyBot ? (
+        <HistoryModal
+          bot={historyBot}
+          onClose={() => setHistoryBot(null)}
+          onReverted={async (message) => {
+            setHistoryBot(null);
+            flash(message);
+            await reload();
+          }}
+        />
+      ) : null}
     </main>
   );
 }

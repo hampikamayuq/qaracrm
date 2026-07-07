@@ -10,8 +10,12 @@ import lgpdRoutes from './routes/lgpd-routes.js';
 import botRoutes from './routes/bot-routes.js';
 import taskRoutes from './routes/task-routes.js';
 import pipelineRoutes from './routes/pipeline-routes.js';
+import activityRoutes from './routes/activity-routes.js';
 import tagsRoutes from './routes/tags-routes.js';
 import webhookCsvRoutes from './routes/webhook-csv-routes.js';
+import dashboardRoutes from './routes/dashboard-routes.js';
+import reportRoutes from './routes/report-routes.js';
+import settingsRoutes from './routes/settings-routes.js';
 import { prisma } from './lib/deps.js';
 import { createPrismaDataApi } from './lib/prisma-data-api.js';
 import { startScheduler } from './lib/scheduler.js';
@@ -50,8 +54,12 @@ app.use('/api/lgpd', lgpdRoutes);
 app.use('/api/bots', botRoutes);
 app.use('/api/tasks', taskRoutes);
 app.use('/api/pipeline', pipelineRoutes);
+app.use('/api/activities', activityRoutes);
 app.use('/api/tags', tagsRoutes);
 app.use('/api/webhook', webhookCsvRoutes);
+app.use('/api/dashboard', dashboardRoutes);
+app.use('/api/reports', reportRoutes);
+app.use('/api/settings', settingsRoutes);
 
 startScheduler(createPrismaDataApi(prisma));
 

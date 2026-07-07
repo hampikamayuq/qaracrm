@@ -116,6 +116,8 @@ model Conversation {
   channel       String?
   lastMessageAt DateTime?
   classification Json?
+  summary       String?
+  summaryUpdatedAt DateTime?
   handoffReason String?
   assignedToId  String?
   assignedTo    User?          @relation(fields: [assignedToId], references: [id])
@@ -164,6 +166,9 @@ model AiSuggestion {
   decidedAt      DateTime?
   humanEdited    Boolean      @default(false)
   originalBody   String?
+  feedback       String?      // "UP" | "DOWN" — avaliação humana da resposta
+  feedbackNote   String?      // 👎: o que deveria ter respondido
+  feedbackById   String?      // sem FK de propósito (mesmo padrão do AuditLog)
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
 
@@ -287,6 +292,31 @@ model AiRunLog {
 
   @@index([layer, createdAt])
   @@index([conversationId])
+}
+
+// Knowledge vivo da Tawany: seções editáveis pela equipe em /settings/knowledge.
+// Substitui o QARA_KNOWLEDGE_PROMPT hardcoded no system prompt quando populado
+// (seed: src/scripts/seed-knowledge.ts). Tabela vazia → fallback pro hardcoded.
+model KnowledgeSection {
+  id          String   @id @default(uuid())
+  slug        String   @unique
+  title       String
+  content     String
+  sortOrder   Int      @default(0)
+  updatedById String? // sem FK de propósito: sobrevive à exclusão do usuário (mesmo padrão do AuditLog)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+// Exemplos few-shot aprovados (pergunta → resposta) injetados no system prompt
+// da Tawany. Modelo próprio em vez de JSON num slug reservado de KnowledgeSection:
+// CRUD direto, sem parse/serialize nem risco de JSON quebrado via editor.
+model TawanyExample {
+  id          String   @id @default(uuid())
+  question    String
+  answer      String
+  createdById String? // sem FK de propósito (mesmo padrão do AuditLog)
+  createdAt   DateTime @default(now())
 }
 
 model KnowledgeArticle {

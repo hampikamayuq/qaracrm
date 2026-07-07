@@ -6,12 +6,13 @@ import { detectInjection } from 'src/lib/guards/prompt-injection';
 import { handoff } from 'src/lib/handoff';
 import { recordAiRun } from 'src/lib/ai-run-log';
 import { truncateToContextWindow } from 'src/lib/ai/context-window';
-import { buildTawanyContext } from 'src/lib/tawany/context';
+import { buildTawanyContext, N_RECENT } from 'src/lib/tawany/context';
 import { isAutopilotMode } from 'src/lib/shadow';
 import { buildMessages, buildSystemPrompt } from 'src/lib/tawany/prompt-builder';
 import { runQaraClassifier } from './qara-classifier';
 import { runLeadScorer } from 'src/lib/lead-score/orchestrator';
 import { runLeadsNovosFlow } from './leads-novos-flow';
+import { summarizeConversation } from './summarize-conversation';
 
 const MAX_ITERATIONS = 6;
 const OPT_OUT_PATTERN = /\b(sair|parar|cancelar|n[aã]o quero mais|n[aã]o enviar|remover|descadastrar)\b/iu;
@@ -27,14 +28,29 @@ const contextWindowOptions = () => ({
 });
 
 export type TawanyHandlerParams = { messageId: string; conversationId: string };
-export type TawanyDeps = { ai: AiClient; data: DataApi; testMode?: boolean };
+// Modo de envio da resposta final:
+//   'send'         — envia via sendWhatsApp e marca a aiSuggestion como SENT (autopilot).
+//   'suggest_only' — cria a aiSuggestion PENDING e NÃO envia; a aprovação humana
+//                    envia depois via /api/tawany/approve (human_approval).
+//   'test'         — cria a aiSuggestion TEST_SENT e NÃO envia (shadow / modo teste do inbox).
+// testMode: true é mantido por compat e equivale a sendMode: 'test'.
+// Sem sendMode explícito, o default é o comportamento seguro: só envia em autopilot.
+export type TawanySendMode = 'send' | 'suggest_only' | 'test';
+export type TawanyDeps = { ai: AiClient; data: DataApi; testMode?: boolean; sendMode?: TawanySendMode };
 export type TawanyResult = { status: 'replied' | 'handoff'; content: string; toolCalls: number };
+
+const resolveSendMode = (deps: { testMode?: boolean; sendMode?: TawanySendMode }): TawanySendMode => {
+  if (deps.sendMode) return deps.sendMode;
+  if (deps.testMode) return 'test';
+  return isAutopilotMode() ? 'send' : 'suggest_only';
+};
 
 export const runTawany = async (
   params: TawanyHandlerParams,
   deps: TawanyDeps,
 ): Promise<TawanyResult> => {
-  const { ai, data, testMode } = deps;
+  const { ai, data } = deps;
+  const sendMode = resolveSendMode(deps);
   let totalToolCalls = 0;
 
   try {
@@ -120,11 +136,11 @@ export const runTawany = async (
         status: 'PENDING',
         promptVersion: process.env.TAWANY_PROMPT_VERSION ?? 'v1',
       });
-      // Autopilot é o único modo que envia sem revisão humana. Em qualquer
-      // outro caso (human_approval, shadow, ou testMode explícito) a
-      // sugestão fica PENDING — visível no Inbox para aprovar/editar/descartar.
-      const shouldAutoSend = !deps.testMode && isAutopilotMode();
-      if (shouldAutoSend) {
+      // 'send' (autopilot) é o único modo que envia sem revisão humana.
+      // 'suggest_only' (human_approval) deixa a sugestão PENDING — visível no
+      // Inbox para aprovar/editar/descartar. 'test' (shadow/modo teste) marca
+      // TEST_SENT para não poluir a fila de aprovação.
+      if (sendMode === 'send') {
         await tawanyTools.execute(
           'sendWhatsApp',
           JSON.stringify({ conversationId: params.conversationId, text: reply }),
@@ -133,6 +149,8 @@ export const runTawany = async (
         if (typeof suggestion.id === 'string') {
           await data.update('aiSuggestion', suggestion.id, { status: 'SENT' });
         }
+      } else if (sendMode === 'test' && typeof suggestion.id === 'string') {
+        await data.update('aiSuggestion', suggestion.id, { status: 'TEST_SENT' });
       }
       await recordAiRun(data, {
         layer: 'tawany',
@@ -197,14 +215,16 @@ type ChatMessageRecord = {
 
 export type TawanyHandlerRunResult =
   | { status: 'skipped'; reason: string }
-  | { status: 'replied' | 'handoff'; toolCalls: number; reason?: string };
+  | { status: 'replied' | 'handoff'; toolCalls: number; reason?: string; content?: string };
 
 // ponytail: extraído para ser testável sem depender do runtime HTTP.
 // Espelha o handler real: skip se não-IN ou já tratado; gate de conversation;
 // cria ai; roda Tawany; roda classificador. Falha do classificador é logada, não fatal.
 export const runTawanyHandler = async (
   message: ChatMessageRecord,
-  deps: { ai?: AiClient; data: DataApi; testMode?: boolean },
+  // markHandled=false: run de observação (shadow) não consome a mensagem —
+  // um run real posterior (ex.: sugestão manual no inbox) ainda pode tratá-la.
+  deps: { ai?: AiClient; data: DataApi; testMode?: boolean; sendMode?: TawanySendMode; markHandled?: boolean },
 ): Promise<TawanyHandlerRunResult> => {
   if (message.direction !== 'IN' || message.agentHandled) {
     return { status: 'skipped', reason: 'not_inbound_or_already_handled' };
@@ -238,6 +258,7 @@ export const runTawanyHandler = async (
       await deps.data.update('conversation', message.conversationId, {
         needsHuman: true,
         status: 'PENDING_HUMAN',
+        handoffReason: 'opt_out_detected',
       });
       console.log(JSON.stringify({
         event: 'tawany_run',
@@ -253,6 +274,7 @@ export const runTawanyHandler = async (
       await deps.data.update('conversation', message.conversationId, {
         needsHuman: true,
         status: 'PENDING_HUMAN',
+        handoffReason: 'prompt_injection',
       });
       await recordAiRun(deps.data, {
         layer: 'tawany',
@@ -290,7 +312,7 @@ export const runTawanyHandler = async (
 
     const r = await runTawany(
       { messageId: message.id, conversationId: message.conversationId },
-      { ai, data: deps.data, testMode: deps.testMode },
+      { ai, data: deps.data, testMode: deps.testMode, sendMode: deps.sendMode },
     );
     console.log(JSON.stringify({ event: 'tawany_run', messageId: message.id, status: r.status, toolCalls: r.toolCalls }));
 
@@ -391,8 +413,34 @@ export const runTawanyHandler = async (
       }
     }
 
-    return { status: r.status, toolCalls: r.toolCalls };
+    // Summary: recomputa conversation.summary quando o histórico excede a janela
+    // verbatim do contexto (N_RECENT). Como o classifier: falha é logada, não fatal.
+    try {
+      const window = await deps.data.list('chatMessage', {
+        filter: { conversationId: { eq: message.conversationId } },
+        limit: N_RECENT + 1,
+        select: { id: true },
+      });
+      if (window.length > N_RECENT) {
+        const summary = await summarizeConversation(
+          { messageId: message.id, conversationId: message.conversationId },
+          deps.data,
+        );
+        console.log(JSON.stringify({
+          event: 'conversation_summary',
+          messageId: message.id,
+          conversationId: message.conversationId,
+          ok: summary.ok,
+        }));
+      }
+    } catch (e) {
+      console.error('[tawany-handler] summarize failed (non-fatal):', (e as Error).message);
+    }
+
+    return { status: r.status, toolCalls: r.toolCalls, content: r.content };
   } finally {
-    await deps.data.update('chatMessage', message.id, { agentHandled: true });
+    if (deps.markHandled !== false) {
+      await deps.data.update('chatMessage', message.id, { agentHandled: true });
+    }
   }
 };

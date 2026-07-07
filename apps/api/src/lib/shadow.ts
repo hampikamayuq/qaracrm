@@ -1,6 +1,6 @@
 import type { AiClient } from './ai-client';
 import type { DataApi } from './data';
-import { runTawany } from '../logic-functions/tawany-handler';
+import { runTawanyHandler, type TawanySendMode } from '../logic-functions/tawany-handler';
 
 export type ShadowMode = 'shadow' | 'human_approval' | 'autopilot';
 export type ProcessedShadowMessage = { conversationId: string; messageId: string };
@@ -75,25 +75,64 @@ export const recordShadowRun = async (
   }
 };
 
-export const runShadowForProcessedMessages = async (
+// SHADOW_MODE → modo de envio da Tawany:
+//   shadow         → 'test'         (observação pura: sugestão TEST_SENT, nunca envia)
+//   human_approval → 'suggest_only' (sugestão PENDING; aprovação humana envia via /api/tawany/approve)
+//   autopilot      → 'send'         (envia e marca SENT)
+const SEND_MODE_BY_SHADOW_MODE: Record<ShadowMode, TawanySendMode> = {
+  shadow: 'test',
+  human_approval: 'suggest_only',
+  autopilot: 'send',
+};
+
+// Roda a Tawany para as mensagens processadas pelo webhook, em TODOS os modos.
+// Sempre via runTawanyHandler para aplicar os gates de entrada (conversa
+// fechada/needsHuman, opt-out, prompt-injection) antes de qualquer chamada de IA.
+export const runTawanyForProcessedMessages = async (
   messages: ProcessedShadowMessage[],
   deps: { createAi: () => AiClient; data: DataApi },
 ): Promise<void> => {
-  if (!isShadowMode() || messages.length === 0) return;
+  if (messages.length === 0) return;
+  const mode = getShadowMode();
+  const sendMode = SEND_MODE_BY_SHADOW_MODE[mode];
 
-  const ai = deps.createAi();
+  let ai: AiClient | undefined;
+  try {
+    ai = deps.createAi();
+  } catch {
+    // sem OPENROUTER_API_KEY: runTawanyHandler trata a config ausente com handoff
+    ai = undefined;
+  }
+
   await Promise.all(messages.map(async (message) => {
-    const result = await runTawany({
-      messageId: message.messageId,
-      conversationId: message.conversationId,
-    }, { ai, data: deps.data });
-    await recordShadowRun(deps.data, {
-      conversationId: message.conversationId,
-      messageId: message.messageId,
-      tawanyReply: result.content,
-      twentyReply: '',
-      tawanyToolCalls: result.toolCalls,
-      match: false,
+    const chatMessage = await deps.data.get('chatMessage', message.messageId, {
+      id: true,
+      conversationId: true,
+      direction: true,
+      body: true,
+      agentHandled: true,
     });
+    if (!chatMessage) {
+      console.error('[tawany] processed message not found:', message.messageId);
+      return;
+    }
+
+    const result = await runTawanyHandler(
+      chatMessage as { id: string; conversationId: string; direction: 'IN' | 'OUT'; body: string; agentHandled?: boolean },
+      // shadow é observação pura: não marca agentHandled, para a mensagem
+      // continuar elegível a um run real depois (ex.: sugestão manual no inbox).
+      { ai, data: deps.data, sendMode, markHandled: mode !== 'shadow' },
+    );
+
+    if (mode === 'shadow' && result.status !== 'skipped') {
+      await recordShadowRun(deps.data, {
+        conversationId: message.conversationId,
+        messageId: message.messageId,
+        tawanyReply: result.content ?? '',
+        twentyReply: '',
+        tawanyToolCalls: result.toolCalls ?? 0,
+        match: false,
+      });
+    }
   }));
 };

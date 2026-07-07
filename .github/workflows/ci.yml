@@ -9,9 +9,6 @@ on:
 permissions:
   contents: read
 
-env:
-  TWENTY_VERSION: latest
-
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
@@ -23,35 +20,26 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Spawn Twenty test instance
-        id: twenty
-        uses: twentyhq/twenty/.github/actions/spawn-twenty-app-dev-test@main
-        with:
-          twenty-version: ${{ env.TWENTY_VERSION }}
-
-      - name: Enable Corepack
-        run: corepack enable
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version-file: '.nvmrc'
-          cache: yarn
+          cache: pnpm
 
       - name: Install dependencies
-        run: yarn install --immutable
+        run: pnpm install --frozen-lockfile
 
-      - name: Lint
-        run: yarn lint
+      - name: Lint API
+        run: pnpm --filter @qara/api lint
 
-      - name: Typecheck
-        run: yarn typecheck
+      - name: Typecheck API
+        run: pnpm --filter @qara/api exec tsc -p tsconfig.build.json --noEmit
 
-      - name: Unit tests
-        run: yarn test:unit
+      - name: API unit tests
+        run: pnpm --filter @qara/api test
 
-      - name: Run integration tests
-        run: yarn test
-        env:
-          TWENTY_API_URL: ${{ steps.twenty.outputs.server-url }}
-          TWENTY_API_KEY: ${{ steps.twenty.outputs.api-key }}
+      - name: Web build
+        run: pnpm --filter @qara/web build

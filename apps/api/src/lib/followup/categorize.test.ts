@@ -37,6 +37,10 @@ describe('categorizeTask', () => {
   it('accepts "pending" as well as "TODO"', () => {
     expect(categorizeTask({ status: 'pending', dueAt: '2026-07-04T08:00:00Z' }, noon('2026-07-04'))).toBe('TODAY');
   });
+
+  it('accepts "OPEN" (default das tasks criadas via Prisma)', () => {
+    expect(categorizeTask({ status: 'OPEN', dueAt: '2026-07-03T08:00:00Z' }, noon('2026-07-04'))).toBe('OVERDUE');
+  });
 });
 
 describe('daysSince', () => {

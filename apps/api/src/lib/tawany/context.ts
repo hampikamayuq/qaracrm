@@ -1,4 +1,5 @@
 import type { DataApi } from 'src/lib/data';
+import { loadKnowledgeContext, type KnowledgeSectionRow, type TawanyExampleRow } from './knowledge';
 
 export type RecentMessage = { id: string; direction: 'IN' | 'OUT'; body: string; sentAt: string };
 export type LeadSummary = {
@@ -14,15 +15,18 @@ export type LeadSummary = {
 export type TawanyContext = {
   conversationId: string;
   lead: LeadSummary;
-  recentMessages: RecentMessage[]; // últimas 3 verbatim, mais antiga primeiro
-  // ponytail: resumo pré-computado ainda não existe no runtime real — o
-  // logic-function que o gerava era um trigger Twenty, nunca chamado pelo
-  // webhook Express. Fica null até summarize-conversation ser plugado aqui.
+  recentMessages: RecentMessage[]; // últimas N_RECENT verbatim, mais antiga primeiro
+  // Resumo pré-computado por summarize-conversation (rodado pós-Tawany no
+  // tawany-handler quando o histórico excede a janela verbatim).
   summary: string | null;
   knownPrices: number[]; // centavos, dos Services ativos — alimenta validateReply
+  // Knowledge vivo (/settings/knowledge) + exemplos few-shot aprovados, ambos do
+  // cache de 60s. Vazios → prompt-builder cai no QARA_KNOWLEDGE_PROMPT hardcoded.
+  knowledgeSections: KnowledgeSectionRow[];
+  examples: TawanyExampleRow[];
 };
 
-const N_RECENT = 3;
+export const N_RECENT = 10;
 
 export const buildTawanyContext = async (
   conversationId: string,
@@ -31,7 +35,8 @@ export const buildTawanyContext = async (
   const conv = (await ctx.get('conversation', conversationId, {
     id: true,
     leadId: true,
-  })) as { leadId?: string | null } | null;
+    summary: true,
+  })) as { leadId?: string | null; summary?: string | null } | null;
   if (!conv) throw new Error(`Conversation not found: ${conversationId}`);
 
   let lead: LeadSummary = null;
@@ -78,11 +83,15 @@ export const buildTawanyContext = async (
     .map((s) => s.priceCents)
     .filter((v): v is number => typeof v === 'number');
 
+  const knowledge = await loadKnowledgeContext(ctx);
+
   return {
     conversationId,
     lead,
     recentMessages: messages.reverse(),
-    summary: null,
+    summary: typeof conv.summary === 'string' && conv.summary.length > 0 ? conv.summary : null,
     knownPrices,
+    knowledgeSections: knowledge.sections,
+    examples: knowledge.examples,
   };
 };

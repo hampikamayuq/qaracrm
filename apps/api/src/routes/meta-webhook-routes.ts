@@ -6,7 +6,7 @@ import { createPrismaDataApi } from '../lib/prisma-data-api';
 import { handleMetaWebhook } from '../logic-functions/meta-webhook';
 import { verifyMetaSignature } from '../lib/meta-signature';
 import { isDuplicateWebhook } from '../lib/webhook-dedup';
-import { forwardWebhookToTwenty, runShadowForProcessedMessages } from '../lib/shadow';
+import { forwardWebhookToTwenty, runTawanyForProcessedMessages } from '../lib/shadow';
 
 const router: Router = Router();
 const data = createPrismaDataApi(prisma);
@@ -79,10 +79,10 @@ export const receiveMetaWebhook = async (req: Request, res: Response): Promise<v
           where: { id: webhookEvent.id },
           data: { processed: true },
         });
-        void runShadowForProcessedMessages(result.processedMessages, {
+        void runTawanyForProcessedMessages(result.processedMessages, {
           createAi: createAiClient,
           data,
-        }).catch((err) => console.error('[shadow] tawany shadow run failed:', (err as Error).message));
+        }).catch((err) => console.error('[tawany] webhook run failed:', (err as Error).message));
       } catch (err) {
         console.error('[meta-webhook] async processing error:', (err as Error).message);
         await prisma.webhookEvent.update({

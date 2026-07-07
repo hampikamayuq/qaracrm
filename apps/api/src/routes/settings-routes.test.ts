@@ -1,0 +1,128 @@
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import express from 'express';
+import request from 'supertest';
+
+// supertest com router real + auth-middleware real (verifyToken mockado) —
+// cobre wiring, validação e o 401 sem Authorization (padrão tags-routes).
+const mocks = vi.hoisted(() => ({
+  prisma: {
+    knowledgeSection: {
+      findMany: vi.fn(),
+      updateMany: vi.fn(),
+    },
+    user: {
+      findMany: vi.fn(),
+    },
+    session: {
+      findUnique: vi.fn(),
+    },
+  },
+  invalidateKnowledgeCache: vi.fn(),
+}));
+
+vi.mock('../lib/deps', () => ({ prisma: mocks.prisma }));
+vi.mock('../lib/auth', () => ({
+  verifyToken: vi.fn((token: string) => (token === 'good-token' ? { userId: 'u1', role: 'ADMIN' } : null)),
+}));
+vi.mock('../lib/tawany/knowledge', () => ({
+  invalidateKnowledgeCache: mocks.invalidateKnowledgeCache,
+}));
+
+const AUTH = { Authorization: 'Bearer good-token' };
+
+const makeApp = async () => {
+  const { default: router } = await import('./settings-routes');
+  const app = express();
+  app.use(express.json());
+  app.use('/api/settings', router);
+  return app;
+};
+
+describe('Settings routes', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.prisma.session.findUnique.mockResolvedValue({
+      token: 'good-token',
+      expiresAt: new Date(Date.now() + 3600_000),
+    });
+  });
+
+  it('retorna 401 sem Authorization em todos os endpoints', async () => {
+    const app = await makeApp();
+    expect((await request(app).get('/api/settings/knowledge')).status).toBe(401);
+    expect((await request(app).put('/api/settings/knowledge/tags').send({ content: 'x' })).status).toBe(401);
+    expect((await request(app).get('/api/settings/ai')).status).toBe(401);
+    expect(mocks.prisma.knowledgeSection.findMany).not.toHaveBeenCalled();
+  });
+
+  it('GET /knowledge lista seções em ordem com nome de quem editou', async () => {
+    mocks.prisma.knowledgeSection.findMany.mockResolvedValue([
+      { id: 'k1', slug: 'tags', title: 'Tags', content: '...', updatedAt: new Date(), updatedById: 'u9' },
+      { id: 'k2', slug: 'clinica', title: 'Clínica', content: '...', updatedAt: new Date(), updatedById: null },
+    ]);
+    mocks.prisma.user.findMany.mockResolvedValue([{ id: 'u9', name: 'Ana' }]);
+    const app = await makeApp();
+
+    const res = await request(app).get('/api/settings/knowledge').set(AUTH);
+
+    expect(res.status).toBe(200);
+    expect(mocks.prisma.knowledgeSection.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ orderBy: { sortOrder: 'asc' } }),
+    );
+    expect(res.body.data[0].updatedByName).toBe('Ana');
+    expect(res.body.data[1].updatedByName).toBeNull();
+  });
+
+  it('PUT /knowledge/:slug valida content e title', async () => {
+    const app = await makeApp();
+
+    expect((await request(app).put('/api/settings/knowledge/tags').set(AUTH).send({})).status).toBe(400);
+    expect((await request(app).put('/api/settings/knowledge/tags').set(AUTH).send({ content: '  ' })).status).toBe(400);
+    expect(
+      (await request(app).put('/api/settings/knowledge/tags').set(AUTH).send({ content: 'a'.repeat(20_001) })).status,
+    ).toBe(400);
+    expect(
+      (await request(app).put('/api/settings/knowledge/tags').set(AUTH).send({ content: 'ok', title: '' })).status,
+    ).toBe(400);
+    expect(mocks.prisma.knowledgeSection.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('PUT /knowledge/:slug grava content + updatedById e invalida o cache', async () => {
+    mocks.prisma.knowledgeSection.updateMany.mockResolvedValue({ count: 1 });
+    const app = await makeApp();
+
+    const res = await request(app)
+      .put('/api/settings/knowledge/tags')
+      .set(AUTH)
+      .send({ content: 'novo conteúdo', title: 'Tags do CRM' });
+
+    expect(res.status).toBe(200);
+    expect(mocks.prisma.knowledgeSection.updateMany).toHaveBeenCalledWith({
+      where: { slug: 'tags' },
+      data: { content: 'novo conteúdo', title: 'Tags do CRM', updatedById: 'u1' },
+    });
+    expect(mocks.invalidateKnowledgeCache).toHaveBeenCalled();
+  });
+
+  it('PUT /knowledge/:slug retorna 404 para slug inexistente', async () => {
+    mocks.prisma.knowledgeSection.updateMany.mockResolvedValue({ count: 0 });
+    const app = await makeApp();
+
+    const res = await request(app).put('/api/settings/knowledge/ghost').set(AUTH).send({ content: 'x' });
+
+    expect(res.status).toBe(404);
+    expect(mocks.invalidateKnowledgeCache).not.toHaveBeenCalled();
+  });
+
+  it('GET /ai devolve shadowMode e promptVersion', async () => {
+    const app = await makeApp();
+
+    const res = await request(app).get('/api/settings/ai').set(AUTH);
+
+    expect(res.status).toBe(200);
+    expect(res.body.data).toEqual({
+      shadowMode: expect.stringMatching(/^(shadow|human_approval|autopilot)$/),
+      promptVersion: expect.any(String),
+    });
+  });
+});

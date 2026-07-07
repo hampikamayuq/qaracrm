@@ -2,10 +2,15 @@ const BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000/api';
 
 export type ApiResponse<T> = { success: boolean; data?: T; error?: string };
 
+// Estado derivado de quem conduz a conversa (badge do inbox)
+export type AgentState = 'tawany_ativa' | 'aguardando_humano' | 'humano_assumiu';
+
 export type Conversation = {
   id: string;
   status: string;
   needsHuman: boolean;
+  agentState?: AgentState;
+  handoffReason?: string | null;
   channel?: string | null;
   lastMessageAt?: string | null;
   updatedAt: string;
@@ -40,9 +45,62 @@ export type PipelineLead = {
   tags: string[];
   temperature: string | null;
   pipeline: string | null;
+  lostReason: string | null;
+  stageEnteredAt: string | null;
+  daysInStage: number;
+  isStalled: boolean;
   notes: string | null;
   lastFollowUpAt: string | null;
   nextFollowUpAt: string | null;
+};
+
+export type TimelineItem = {
+  id: string;
+  type: 'stage_change' | 'pipeline_change' | 'note' | 'task' | 'appointment' | 'messages' | 'suggestion' | 'bot';
+  at: string;
+  title: string;
+  detail?: string;
+  byName?: string | null;
+};
+
+export type FeedPeriod = '24h' | '7d';
+
+export type AppointmentStatus = 'SCHEDULED' | 'CONFIRMED' | 'DONE' | 'NO_SHOW' | 'CANCELLED';
+
+export type Appointment = {
+  id: string;
+  scheduledAt: string;
+  endAt: string | null;
+  status: string;
+  notes: string | null;
+  leadId: string | null;
+  patientId: string | null;
+  professionalId: string | null;
+  serviceId: string | null;
+  unitId: string | null;
+  lead: { id: string; name: string; phone: string | null } | null;
+  patient: { id: string; name: string } | null;
+  professional: { id: string; name: string; specialty: string } | null;
+  unit: { id: string; name: string } | null;
+};
+
+export type Professional = { id: string; name: string; specialty: string };
+
+export type ClinicUnit = { id: string; name: string; city: string | null };
+
+export type TaskCategory = 'OVERDUE' | 'TODAY' | 'UPCOMING' | 'NO_DATE';
+
+export type TaskItem = {
+  id: string;
+  title: string;
+  description: string | null;
+  status: string;
+  priority: string;
+  dueAt: string | null;
+  category: TaskCategory | null;
+  lead: { id: string; name: string } | null;
+  conversation: { id: string } | null;
+  assignedTo: { id: string; name: string } | null;
 };
 
 export type Pipeline = {
@@ -80,6 +138,36 @@ export type BotSummary = {
   rules: number;
   createdAt: string;
   updatedAt: string;
+};
+
+export type BotRuleInput = { terms: string[]; responses: string[] };
+
+export type BotDetail = {
+  id: string;
+  name: string;
+  trigger: string;
+  active: boolean;
+  rules: BotRuleInput[];
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type BotVersion = {
+  id: string;
+  name: string | null;
+  rules: number;
+  byUserId: string | null;
+  byName: string | null;
+  at: string;
+};
+
+export type BotTestResult = {
+  matched: boolean;
+  blockedByRisk?: boolean;
+  botName?: string;
+  ruleIndex?: number;
+  terms?: string[];
+  responses: string[];
 };
 
 export type ConversationDetail = Omit<Conversation, 'messages' | 'aiSuggestions' | 'lead'> & {
@@ -121,6 +209,131 @@ export type ConversationDetail = Omit<Conversation, 'messages' | 'aiSuggestions'
     status?: string;
     createdAt?: string;
   }>;
+  // Sugestões já enviadas (SENT/TEST_SENT) — feedback 👍/👎 nas bolhas da Tawany
+  sentSuggestions?: Array<{
+    id: string;
+    body: string;
+    status: string;
+    feedback: 'UP' | 'DOWN' | null;
+  }>;
+};
+
+// ---------------- knowledge vivo & IA ----------------
+
+export type KnowledgeSection = {
+  id: string;
+  slug: string;
+  title: string;
+  content: string;
+  updatedAt: string;
+  updatedById: string | null;
+  updatedByName: string | null;
+};
+
+export type TawanyExample = {
+  id: string;
+  question: string;
+  answer: string;
+  createdAt: string;
+};
+
+export type ReviewQueueItem = {
+  id: string;
+  body: string;
+  feedbackNote: string | null;
+  conversationId: string;
+  messageId: string | null;
+  question: string | null;
+  status: string;
+  createdAt: string;
+};
+
+export type AiSettings = { shadowMode: string; promptVersion: string };
+
+// ---------------- dashboard ----------------
+
+export type DashboardPeriod = '7d' | '30d' | '90d';
+
+export type DashboardSummary = {
+  leadsAtivos: number;
+  aguardandoResposta: number;
+  agendamentosSemana: number;
+  followupsAtrasados: number;
+  novosNoPeriodo: { atual: number; anterior: number; variacaoPct: number | null };
+};
+
+export type DashboardDailyPoint = { date: string; count: number };
+
+export type DashboardFunnelStage = { stage: string; label: string; count: number };
+
+export type DashboardLeadsPerDay = {
+  series: DashboardDailyPoint[];
+  previous: DashboardDailyPoint[];
+};
+
+export type DashboardSource = { source: string; count: number };
+
+export type DashboardLossReason = { reason: string; count: number };
+
+export type DashboardTawany = {
+  perDay: DashboardDailyPoint[];
+  respostas: number;
+  handoffs: number;
+  taxaHandoffPct: number | null;
+  bloqueios: Array<{ motivo: string; count: number }>;
+  latenciaMediaMs: number | null;
+  fallbacks: number;
+  total: number;
+};
+
+export type DashboardResponseTime = {
+  medianaMin: number | null;
+  mediaMin: number | null;
+  conversas: number;
+  medianaAnteriorMin: number | null;
+  variacaoPct: number | null;
+};
+
+// ---------------- relatórios ----------------
+
+export type ReportTipo = 'comercial' | 'atendimento' | 'tawany';
+
+// period preset OU from/to (YYYY-MM-DD, máx. 366 dias) — from/to tem precedência.
+export type ReportParams = { period?: DashboardPeriod; from?: string; to?: string };
+
+export type ReportComercial = {
+  leadsNovos: number;
+  porEstagio: Array<{ stage: string; label: string; count: number }>;
+  conversaoPct: number | null;
+  porEspecialidade: Array<{ pipeline: string; count: number; convertidos: number }>;
+  perdas: Array<{ reason: string; count: number }>;
+  comparativo: { leadsNovos: number; conversaoPct: number | null; perdas: number };
+};
+
+export type ReportAtendimento = {
+  conversasAtivas: number;
+  medianaPrimeiraRespostaMin: number | null;
+  mensagensRecebidas: number;
+  mensagensEnviadas: number;
+  tawanyVsHumano: { tawany: number; humano: number };
+  comparativo: {
+    conversasAtivas: number;
+    medianaPrimeiraRespostaMin: number | null;
+    mensagensRecebidas: number;
+    mensagensEnviadas: number;
+    tawanyVsHumano: { tawany: number; humano: number };
+  };
+};
+
+export type ReportTawany = {
+  respostas: number;
+  handoffs: number;
+  taxaResolucaoPct: number | null;
+  bloqueios: Array<{ motivo: string; count: number }>;
+  latenciaMediaMs: number | null;
+  fallbacks: number;
+  porDia: DashboardDailyPoint[];
+  comparativo: { respostas: number; handoffs: number; taxaResolucaoPct: number | null };
 };
 
 const getToken = (): string | null => {
@@ -193,6 +406,50 @@ export const api = {
     return this.post(`/inbox/${conversationId}/handoff`, {});
   },
 
+  devolverTawany(conversationId: string): Promise<ApiResponse<{ status: string; needsHuman: boolean; agentState: AgentState }>> {
+    return this.post(`/inbox/${conversationId}/devolver-tawany`, {});
+  },
+
+  // ---------------- feedback 👍/👎 e exemplos few-shot ----------------
+
+  sendSuggestionFeedback(suggestionId: string, feedback: 'UP' | 'DOWN', note?: string): Promise<ApiResponse<{ feedback: string }>> {
+    return this.post(`/tawany/suggestions/${suggestionId}/feedback`, note ? { feedback, note } : { feedback });
+  },
+
+  async getReviewQueue(): Promise<ReviewQueueItem[]> {
+    const res = await this.get<ReviewQueueItem[]>('/tawany/review-queue');
+    return res.data ?? [];
+  },
+
+  async getExamples(): Promise<TawanyExample[]> {
+    const res = await this.get<TawanyExample[]>('/tawany/examples');
+    return res.data ?? [];
+  },
+
+  createExample(question: string, answer: string): Promise<ApiResponse<TawanyExample>> {
+    return this.post('/tawany/examples', { question, answer });
+  },
+
+  deleteExample(id: string): Promise<ApiResponse<{ deleted: boolean }>> {
+    return this.fetch(`/tawany/examples/${id}`, { method: 'DELETE' });
+  },
+
+  // ---------------- knowledge vivo ----------------
+
+  async getKnowledgeSections(): Promise<KnowledgeSection[]> {
+    const res = await this.get<KnowledgeSection[]>('/settings/knowledge');
+    return res.data ?? [];
+  },
+
+  updateKnowledgeSection(slug: string, input: { content: string; title?: string }): Promise<ApiResponse<{ slug: string }>> {
+    return this.fetch(`/settings/knowledge/${encodeURIComponent(slug)}`, { method: 'PUT', body: JSON.stringify(input) });
+  },
+
+  async getAiSettings(): Promise<AiSettings | null> {
+    const res = await this.get<AiSettings>('/settings/ai');
+    return res.data ?? null;
+  },
+
   setConversationStatus(conversationId: string, status: string): Promise<ApiResponse<{ status: string }>> {
     return this.fetch(`/inbox/${conversationId}/status`, { method: 'PATCH', body: JSON.stringify({ status }) });
   },
@@ -228,8 +485,40 @@ export const api = {
     return this.post('/bots/import', { flow, source });
   },
 
-  testBot(text: string): Promise<ApiResponse<{ matched: boolean; botName?: string; responses: string[] }>> {
-    return this.post('/bots/test', { text });
+  // flow inline (opcional) testa o fluxo do editor sem salvar.
+  testBot(text: string, flow?: { rules: BotRuleInput[] }): Promise<ApiResponse<BotTestResult>> {
+    return this.post('/bots/test', flow ? { text, flow } : { text });
+  },
+
+  async getBot(id: string): Promise<BotDetail | null> {
+    const res = await this.get<BotDetail>(`/bots/${id}`);
+    return res.data ?? null;
+  },
+
+  createBot(input: { name: string; rules: BotRuleInput[] }): Promise<ApiResponse<{ id: string; name: string; rules: number }>> {
+    return this.post('/bots', input);
+  },
+
+  updateBot(id: string, input: { name: string; rules: BotRuleInput[] }): Promise<ApiResponse<{ id: string; name: string; rules: number }>> {
+    return this.fetch(`/bots/${id}`, { method: 'PUT', body: JSON.stringify(input) });
+  },
+
+  duplicateBot(id: string): Promise<ApiResponse<{ id: string; name: string; active: boolean }>> {
+    return this.post(`/bots/${id}/duplicate`, {});
+  },
+
+  async getBotVersions(id: string): Promise<BotVersion[]> {
+    const res = await this.get<BotVersion[]>(`/bots/${id}/versions`);
+    return res.data ?? [];
+  },
+
+  revertBot(id: string, versionId: string): Promise<ApiResponse<{ id: string; name: string; rules: number }>> {
+    return this.post(`/bots/${id}/revert`, { versionId });
+  },
+
+  async getBotRiskTerms(): Promise<string[]> {
+    const res = await this.get<string[]>('/bots/risk-terms');
+    return res.data ?? [];
   },
 
   async getPipeline(): Promise<PipelineStage[]> {
@@ -256,11 +545,24 @@ export const api = {
     return res.data ?? [];
   },
 
-  moveLead(leadId: string, stage: string, pipeline?: string): Promise<ApiResponse<{ stage: string; pipeline?: string }>> {
+  moveLead(
+    leadId: string,
+    stage: string,
+    opts: { pipeline?: string; lostReason?: string; note?: string } = {},
+  ): Promise<ApiResponse<{ stage: string; pipeline?: string; lostReason?: string }>> {
     return this.fetch(`/pipeline/leads/${leadId}/move`, {
       method: 'PATCH',
-      body: JSON.stringify({ stage, pipeline }),
+      body: JSON.stringify({ stage, ...opts }),
     });
+  },
+
+  async getLeadTimeline(leadId: string, limit = 50): Promise<TimelineItem[]> {
+    const res = await this.get<TimelineItem[]>(`/pipeline/leads/${leadId}/timeline?limit=${limit}`);
+    return res.data ?? [];
+  },
+
+  addLeadNote(leadId: string, body: string): Promise<ApiResponse<{ id: string; body: string; at: string }>> {
+    return this.post(`/pipeline/leads/${leadId}/notes`, { body });
   },
 
   updateLeadPipeline(leadId: string, pipeline: string): Promise<ApiResponse<{ pipeline: string }>> {
@@ -293,5 +595,102 @@ export const api = {
       method: 'PUT',
       body: JSON.stringify({ tags }),
     });
+  },
+
+  // ---------------- agenda ----------------
+
+  async getAppointments(opts: {
+    from?: string;
+    to?: string;
+    professionalId?: string;
+    status?: string;
+  } = {}): Promise<Appointment[]> {
+    const res = await this.get<Appointment[]>(`/appointments${qs(opts)}`);
+    return res.data ?? [];
+  },
+
+  createAppointment(input: {
+    scheduledAt: string;
+    endAt?: string;
+    leadId?: string;
+    patientId?: string;
+    professionalId?: string;
+    unitId?: string;
+    notes?: string;
+  }): Promise<ApiResponse<Appointment>> {
+    return this.post('/appointments', input);
+  },
+
+  updateAppointment(id: string, input: { status?: AppointmentStatus; scheduledAt?: string; notes?: string }): Promise<ApiResponse<Appointment>> {
+    return this.fetch(`/appointments/${id}`, { method: 'PATCH', body: JSON.stringify(input) });
+  },
+
+  async getProfessionals(): Promise<Professional[]> {
+    const res = await this.get<Professional[]>('/appointments/professionals');
+    return res.data ?? [];
+  },
+
+  async getUnits(): Promise<ClinicUnit[]> {
+    const res = await this.get<ClinicUnit[]>('/appointments/units');
+    return res.data ?? [];
+  },
+
+  // .ics precisa do header Authorization → baixa via fetch e devolve o Blob.
+  async downloadAgendaIcs(from: string, to: string): Promise<Blob | null> {
+    const headers = new Headers();
+    const token = getToken();
+    if (token) headers.set('Authorization', `Bearer ${token}`);
+    const res = await fetch(`${BASE_URL}/appointments/export.ics${qs({ from, to })}`, { headers });
+    if (!res.ok) return null;
+    return res.blob();
+  },
+
+  // ---------------- tarefas & atividades ----------------
+
+  async getTasks(): Promise<TaskItem[]> {
+    const res = await this.get<TaskItem[]>('/tasks');
+    return res.data ?? [];
+  },
+
+  setTaskStatus(id: string, status: 'OPEN' | 'IN_PROGRESS' | 'DONE' | 'CANCELED'): Promise<ApiResponse<{ status: string }>> {
+    return this.fetch(`/tasks/${id}`, { method: 'PATCH', body: JSON.stringify({ status }) });
+  },
+
+  async getActivityFeed(period: FeedPeriod): Promise<TimelineItem[]> {
+    const res = await this.get<TimelineItem[]>(`/activities/feed?period=${period}`);
+    return res.data ?? [];
+  },
+
+  // Dashboard: um fetcher só — lança em falha para o Promise.all da página
+  // cair no estado de erro com retry.
+  async getDashboard<T>(path: string, period: DashboardPeriod): Promise<T> {
+    const res = await this.get<T>(`/dashboard/${path}?period=${period}`);
+    if (!res.success || res.data === undefined) {
+      throw new Error(res.error ?? 'Falha ao carregar o dashboard');
+    }
+    return res.data;
+  },
+
+  // ---------------- relatórios ----------------
+
+  // Mesmo contrato do getDashboard: lança em falha para o Promise.all da
+  // página cair no estado de erro com retry.
+  async getReport<T>(tipo: ReportTipo, params: ReportParams): Promise<T> {
+    const res = await this.get<T>(`/reports/${tipo}${qs(params)}`);
+    if (!res.success || res.data === undefined) {
+      throw new Error(res.error ?? 'Falha ao carregar o relatório');
+    }
+    return res.data;
+  },
+
+  // CSV precisa do header Authorization → baixa via fetch e devolve o Blob
+  // (mesmo padrão do .ics da agenda).
+  async downloadReportCsv(tipo: ReportTipo, params: ReportParams): Promise<Blob | null> {
+    const headers = new Headers();
+    const token = getToken();
+    if (token) headers.set('Authorization', `Bearer ${token}`);
+    const res = await fetch(`${BASE_URL}/reports/${tipo}/export.csv${qs(params)}`, { headers });
+    if (!res.ok) return null;
+    return res.blob();
   },
 };

@@ -22,7 +22,7 @@ vi.mock('../lib/meta-signature', () => ({
 
 vi.mock('../lib/shadow', () => ({
   forwardWebhookToTwenty: vi.fn().mockResolvedValue(false),
-  runShadowForProcessedMessages: vi.fn().mockResolvedValue(undefined),
+  runTawanyForProcessedMessages: vi.fn().mockResolvedValue(undefined),
 }));
 
 const req = (overrides: Partial<Request>): Request => overrides as Request;
@@ -103,6 +103,31 @@ describe('Meta Webhook Routes', () => {
     expect(response.status).toHaveBeenCalledWith(200);
     expect(response.json).toHaveBeenCalledWith({ success: true, data: { eventId: 'evt-1' } });
     expect(prisma.webhookEvent.create).toHaveBeenCalled();
+  });
+
+  it('dispara a Tawany para as mensagens processadas (todos os modos)', async () => {
+    const { receiveMetaWebhook } = await import('./meta-webhook-routes');
+    const { handleMetaWebhook } = await import('../logic-functions/meta-webhook');
+    const { runTawanyForProcessedMessages } = await import('../lib/shadow');
+    vi.mocked(handleMetaWebhook).mockResolvedValueOnce({
+      processedMessages: [{ conversationId: 'conv-1', messageId: 'msg-1' }],
+    });
+    const response = res();
+
+    await receiveMetaWebhook(
+      req({
+        headers: {},
+        body: { object: 'whatsapp_business_account', entry: [] },
+      }),
+      response,
+    );
+    // processamento roda em setImmediate — espera o event loop drenar
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(runTawanyForProcessedMessages).toHaveBeenCalledWith(
+      [{ conversationId: 'conv-1', messageId: 'msg-1' }],
+      expect.objectContaining({ data: expect.anything() }),
+    );
   });
 
   it('forwards raw webhook bytes to Twenty after persistence', async () => {
