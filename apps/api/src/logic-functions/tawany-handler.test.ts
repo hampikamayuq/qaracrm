@@ -43,14 +43,14 @@ const chatResult = (over: Partial<ChatResult>): ChatResult => ({
 
 const makeData = (): DataApi => ({
   get: vi.fn().mockImplementation(async (obj: string) => {
-    if (obj === 'conversation') return { id: UUID, leadId: LEAD_ID, status: 'OPEN', needsHuman: false, summary: null };
-    if (obj === 'lead') return { id: LEAD_ID, name: { firstName: 'Maria', lastName: 'Silva' }, stage: 'NOVO', score: 50, intent: null, source: 'INDICACAO', tags: [] };
-    return { id: LEAD_ID, name: { firstName: 'Maria', lastName: 'Silva' }, stage: 'NOVO', score: 50, intent: null, tags: [] };
+    if (obj === 'conversation') return { id: UUID, leadId: LEAD_ID, status: 'OPEN', needsHuman: false };
+    if (obj === 'lead') return { id: LEAD_ID, name: 'Maria Silva', phone: null, stageId: null, score: 50, intent: null, source: 'INDICACAO', tags: [] };
+    return { id: LEAD_ID, name: 'Maria Silva', phone: null, stageId: null, score: 50, intent: null, tags: [] };
   }),
   list: vi.fn().mockImplementation(async (obj: string) =>
     obj === 'chatMessage'
       ? [{ id: 'm1', direction: 'IN', body: 'oi', sentAt: '2026-07-04T10:00:00Z' }]
-      : [{ defaultPriceCents: 55000, rjPriceCents: null, spPriceCents: null, telePriceCents: null }],
+      : [{ priceCents: 55000 }],
   ),
   create: vi.fn().mockResolvedValue({ id: 'created' }),
   update: vi.fn().mockResolvedValue({ id: 'updated' }),

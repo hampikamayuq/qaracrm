@@ -176,11 +176,11 @@ describe('write tools', () => {
 });
 
 describe('tawanyTools index', () => {
-  it('exports 11 LLM-callable tools with OpenAI-compatible schema', () => {
+  it('exports 12 LLM-callable tools with OpenAI-compatible schema', () => {
     // sendWhatsApp is now INTERNAL only (handler-side, not model-callable) to
     // prevent the model from sending a free-text reply AND calling sendWhatsApp
     // in the same iteration (double-send).
-    expect(ALL_TOOLS).toHaveLength(11);
+    expect(ALL_TOOLS).toHaveLength(12);
     for (const entry of tawanyTools.schema) {
       expect(entry.type).toBe('function');
       expect(entry.function.parameters).toHaveProperty('properties');

@@ -6,6 +6,7 @@ import { readConversationHistory } from './readConversationHistory';
 import { listProfessionals } from './listProfessionals';
 import { listServices } from './listServices';
 import { searchKnowledge } from './searchKnowledge';
+import { checkBotFaq } from './checkBotFaq';
 import { updateLead } from './updateLead';
 import { updateConversation } from './updateConversation';
 import { assignTag } from './assignTag';
@@ -27,6 +28,7 @@ export const ALL_TOOLS: TawanyTool[] = [
   listProfessionals,
   listServices,
   searchKnowledge,
+  checkBotFaq,
   updateLead,
   updateConversation,
   assignTag,

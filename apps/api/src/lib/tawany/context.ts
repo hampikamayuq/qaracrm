@@ -3,9 +3,9 @@ import type { DataApi } from 'src/lib/data';
 export type RecentMessage = { id: string; direction: 'IN' | 'OUT'; body: string; sentAt: string };
 export type LeadSummary = {
   id: string;
-  name: { firstName: string; lastName: string } | null;
-  whatsapp: unknown;
-  stage: string;
+  name: string;
+  phone: string | null;
+  stage: string | null;
   score: number;
   intent: string | null;
   tags: string[];
@@ -15,8 +15,11 @@ export type TawanyContext = {
   conversationId: string;
   lead: LeadSummary;
   recentMessages: RecentMessage[]; // últimas 3 verbatim, mais antiga primeiro
-  summary: string | null; // pré-computado pelo summarize-conversation
-  knownPrices: number[]; // centavos, dos professionals — alimenta validateReply
+  // ponytail: resumo pré-computado ainda não existe no runtime real — o
+  // logic-function que o gerava era um trigger Twenty, nunca chamado pelo
+  // webhook Express. Fica null até summarize-conversation ser plugado aqui.
+  summary: string | null;
+  knownPrices: number[]; // centavos, dos Services ativos — alimenta validateReply
 };
 
 const N_RECENT = 3;
@@ -28,21 +31,36 @@ export const buildTawanyContext = async (
   const conv = (await ctx.get('conversation', conversationId, {
     id: true,
     leadId: true,
-    summary: true,
-  })) as { leadId?: string | null; summary?: string | null } | null;
+  })) as { leadId?: string | null } | null;
   if (!conv) throw new Error(`Conversation not found: ${conversationId}`);
 
-  const lead = conv.leadId
-    ? ((await ctx.get('lead', conv.leadId, {
-        id: true,
-        name: { firstName: true, lastName: true },
-        whatsapp: true,
-        stage: true,
-        score: true,
-        intent: true,
-        tags: true,
-      })) as LeadSummary)
-    : null;
+  let lead: LeadSummary = null;
+  if (conv.leadId) {
+    const leadRow = (await ctx.get('lead', conv.leadId, {
+      id: true,
+      name: true,
+      phone: true,
+      stageId: true,
+      score: true,
+      intent: true,
+      tags: true,
+    })) as { id: string; name: string; phone: string | null; stageId: string | null; score: number; intent: string | null; tags: unknown } | null;
+
+    if (leadRow) {
+      const stageRow = leadRow.stageId
+        ? ((await ctx.get('pipelineStage', leadRow.stageId, { name: true })) as { name?: string } | null)
+        : null;
+      lead = {
+        id: leadRow.id,
+        name: leadRow.name,
+        phone: leadRow.phone,
+        stage: stageRow?.name ?? null,
+        score: leadRow.score,
+        intent: leadRow.intent,
+        tags: Array.isArray(leadRow.tags) ? leadRow.tags.filter((t): t is string => typeof t === 'string') : [],
+      };
+    }
+  }
 
   const messages = (await ctx.list('chatMessage', {
     filter: { conversationId: { eq: conversationId } },
@@ -51,20 +69,20 @@ export const buildTawanyContext = async (
     select: { id: true, direction: true, body: true, sentAt: true },
   })) as RecentMessage[];
 
-  const professionals = (await ctx.list('professional', {
+  const services = (await ctx.list('service', {
     filter: { active: { eq: true } },
-    select: { defaultPriceCents: true, rjPriceCents: true, spPriceCents: true, telePriceCents: true },
-  })) as Record<string, number | null>[];
+    select: { priceCents: true },
+  })) as { priceCents: number | null }[];
 
-  const knownPrices = professionals
-    .flatMap((p) => [p.defaultPriceCents, p.rjPriceCents, p.spPriceCents, p.telePriceCents])
+  const knownPrices = services
+    .map((s) => s.priceCents)
     .filter((v): v is number => typeof v === 'number');
 
   return {
     conversationId,
     lead,
     recentMessages: messages.reverse(),
-    summary: conv.summary ?? null,
+    summary: null,
     knownPrices,
   };
 };

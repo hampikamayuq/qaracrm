@@ -55,10 +55,11 @@ describe('handleMetaWebhook — inbound messages', () => {
     vi.clearAllMocks();
   });
 
-  it('creates conversation + IN message for a new sender', async () => {
-    const list = vi.fn().mockResolvedValue([]); // no dup, no existing conversation
+  it('creates a lead + conversation + IN message for a new sender', async () => {
+    const list = vi.fn().mockResolvedValue([]); // no dup, no existing conversation, no existing lead
     const create = vi
       .fn()
+      .mockResolvedValueOnce({ id: 'lead-1' }) // lead
       .mockResolvedValueOnce({ id: 'conv-1' }) // conversation
       .mockResolvedValueOnce({ id: 'msg-1' }); // chatMessage
     const update = vi.fn().mockResolvedValue({ id: 'conv-1' });
@@ -66,15 +67,21 @@ describe('handleMetaWebhook — inbound messages', () => {
 
     expect(create).toHaveBeenNthCalledWith(
       1,
+      'lead',
+      expect.objectContaining({ name: '5511999998888', phone: '5511999998888' }),
+    );
+    expect(create).toHaveBeenNthCalledWith(
+      2,
       'conversation',
       expect.objectContaining({
+        leadId: 'lead-1',
         channel: 'WHATSAPP',
         externalId: '5511999998888',
         status: 'OPEN',
       }),
     );
     expect(create).toHaveBeenNthCalledWith(
-      2,
+      3,
       'chatMessage',
       expect.objectContaining({
         conversationId: 'conv-1',
@@ -89,6 +96,25 @@ describe('handleMetaWebhook — inbound messages', () => {
       lastMessageAt: expect.any(String),
     });
     expect(result.processedMessages).toEqual([{ conversationId: 'conv-1', messageId: 'msg-1' }]);
+  });
+
+  it('reuses an existing lead by phone when creating a new conversation for it', async () => {
+    const list = vi
+      .fn()
+      .mockResolvedValueOnce([]) // dedup
+      .mockResolvedValueOnce([]) // no existing conversation
+      .mockResolvedValueOnce([{ id: 'lead-existing' }]); // existing lead by phone
+    const create = vi
+      .fn()
+      .mockResolvedValueOnce({ id: 'conv-1' })
+      .mockResolvedValueOnce({ id: 'msg-1' });
+    await handleMetaWebhook(waBody, api({ list, create, update: vi.fn() }), processDebounce());
+
+    expect(create).toHaveBeenNthCalledWith(
+      1,
+      'conversation',
+      expect.objectContaining({ leadId: 'lead-existing' }),
+    );
   });
 
   it('reuses an existing conversation', async () => {

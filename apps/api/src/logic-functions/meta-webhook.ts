@@ -22,6 +22,23 @@ const applyStatus = async (status: MetaStatusUpdate, data: DataApi): Promise<voi
   }
 };
 
+// Conversation.leadId é obrigatório no schema — todo primeiro contato precisa
+// de um Lead antes da conversa poder existir.
+const findOrCreateLead = async (msg: MetaInboundMessage, data: DataApi): Promise<string> => {
+  const existing = await data.list('lead', {
+    filter: { phone: { eq: msg.from } },
+    limit: 1,
+    select: { id: true },
+  });
+  if (existing[0]) return existing[0].id as string;
+  const created = await data.create('lead', {
+    name: msg.from,
+    phone: msg.from,
+    source: msg.channel,
+  });
+  return created.id as string;
+};
+
 const findOrCreateConversation = async (
   msg: MetaInboundMessage,
   data: DataApi,
@@ -32,13 +49,16 @@ const findOrCreateConversation = async (
     select: { id: true, leadId: true },
   });
   if (existing[0]) return { id: existing[0].id as string, leadId: existing[0].leadId as string | null | undefined };
+
+  const leadId = await findOrCreateLead(msg, data);
   const created = await data.create('conversation', {
+    leadId,
     channel: msg.channel,
     externalId: msg.from,
     status: 'OPEN',
     lastMessageAt: msg.sentAt,
   });
-  return { id: created.id as string, leadId: created.leadId as string | null | undefined };
+  return { id: created.id as string, leadId };
 };
 
 const ingestMessage = async (
