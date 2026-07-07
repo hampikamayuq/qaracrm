@@ -222,7 +222,9 @@ export type TawanyHandlerRunResult =
 // cria ai; roda Tawany; roda classificador. Falha do classificador é logada, não fatal.
 export const runTawanyHandler = async (
   message: ChatMessageRecord,
-  deps: { ai?: AiClient; data: DataApi; testMode?: boolean; sendMode?: TawanySendMode },
+  // markHandled=false: run de observação (shadow) não consome a mensagem —
+  // um run real posterior (ex.: sugestão manual no inbox) ainda pode tratá-la.
+  deps: { ai?: AiClient; data: DataApi; testMode?: boolean; sendMode?: TawanySendMode; markHandled?: boolean },
 ): Promise<TawanyHandlerRunResult> => {
   if (message.direction !== 'IN' || message.agentHandled) {
     return { status: 'skipped', reason: 'not_inbound_or_already_handled' };
@@ -437,6 +439,8 @@ export const runTawanyHandler = async (
 
     return { status: r.status, toolCalls: r.toolCalls, content: r.content };
   } finally {
-    await deps.data.update('chatMessage', message.id, { agentHandled: true });
+    if (deps.markHandled !== false) {
+      await deps.data.update('chatMessage', message.id, { agentHandled: true });
+    }
   }
 };

@@ -423,6 +423,16 @@ describe('runTawanyHandler', () => {
     );
   });
 
+  it('markHandled=false não consome a mensagem (run de observação/shadow)', async () => {
+    const data = makeData();
+    const r = await runTawanyHandler(
+      { id: 'm1', conversationId: UUID, direction: 'IN', body: 'oi' },
+      { ai: makeAi(chatResult({ content: 'Olá!', finishReason: 'stop' })), data, sendMode: 'test', markHandled: false },
+    );
+    expect(r.status).toBe('replied');
+    expect(data.update).not.toHaveBeenCalledWith('chatMessage', 'm1', { agentHandled: true });
+  });
+
   it('classifier failure does not break Tawany (logs and continues)', async () => {
     const data = makeData();
     vi.mocked(runQaraClassifier).mockRejectedValue(new Error('classifier boom'));

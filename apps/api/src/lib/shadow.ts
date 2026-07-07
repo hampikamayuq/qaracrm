@@ -119,7 +119,9 @@ export const runTawanyForProcessedMessages = async (
 
     const result = await runTawanyHandler(
       chatMessage as { id: string; conversationId: string; direction: 'IN' | 'OUT'; body: string; agentHandled?: boolean },
-      { ai, data: deps.data, sendMode },
+      // shadow é observação pura: não marca agentHandled, para a mensagem
+      // continuar elegível a um run real depois (ex.: sugestão manual no inbox).
+      { ai, data: deps.data, sendMode, markHandled: mode !== 'shadow' },
     );
 
     if (mode === 'shadow' && result.status !== 'skipped') {

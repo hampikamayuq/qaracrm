@@ -122,7 +122,8 @@ describe('runTawanyForProcessedMessages', () => {
     }));
     expect(runTawanyHandler).toHaveBeenCalledWith(
       inboundMessage,
-      expect.objectContaining({ data, sendMode: 'test' }),
+      // markHandled false: shadow não consome a mensagem (run real depois ainda pode tratá-la)
+      expect.objectContaining({ data, sendMode: 'test', markHandled: false }),
     );
     // observação pura: registra a Activity de shadow_run
     expect(data.create).toHaveBeenCalledWith('activity', expect.objectContaining({
@@ -144,7 +145,7 @@ describe('runTawanyForProcessedMessages', () => {
 
     expect(runTawanyHandler).toHaveBeenCalledWith(
       inboundMessage,
-      expect.objectContaining({ sendMode: 'suggest_only' }),
+      expect.objectContaining({ sendMode: 'suggest_only', markHandled: true }),
     );
     expect(data.create).not.toHaveBeenCalledWith('activity', expect.anything());
   });
