@@ -14,7 +14,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
       <body>
         <div className="app-shell">
           <aside className="sidebar" aria-label="Barra lateral">
-            <Link className="brand-block" href="/inbox">
+            <Link className="brand-block" href="/">
               <span className="brand-mark" aria-hidden="true">Q</span>
               <span>
                 <strong>QARA CRM</strong>

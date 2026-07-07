@@ -2026,3 +2026,355 @@ select {
     padding: 16px;
   }
 }
+
+/* ---------------- dashboard ---------------- */
+
+.kpi-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  margin-bottom: 16px;
+}
+
+.kpi-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-xs);
+  display: grid;
+  gap: 2px;
+  padding: 13px 15px 12px;
+  transition: border-color var(--dur-1) var(--ease), box-shadow var(--dur-1) var(--ease);
+}
+
+.kpi-card:hover {
+  border-color: var(--border-strong);
+  box-shadow: var(--shadow-sm);
+}
+
+.kpi-top {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 5px;
+}
+
+.kpi-icon {
+  align-items: center;
+  background: var(--surface-3);
+  border-radius: 8px;
+  color: var(--text-2);
+  display: inline-flex;
+  height: 26px;
+  justify-content: center;
+  width: 26px;
+}
+
+.kpi-warning .kpi-icon {
+  background: var(--warning-soft);
+  color: var(--warning);
+}
+
+.kpi-danger .kpi-icon {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.kpi-accent .kpi-icon {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.kpi-value {
+  font-size: 26px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+}
+
+.kpi-label {
+  color: var(--text-2);
+  font-size: 12.5px;
+  font-weight: 500;
+}
+
+.kpi-hint {
+  color: var(--text-3);
+  font-size: 11.5px;
+}
+
+.delta {
+  align-items: center;
+  border-radius: 999px;
+  display: inline-flex;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  gap: 2px;
+  padding: 2px 7px;
+}
+
+.delta-good {
+  background: var(--ok-soft);
+  color: var(--ok);
+}
+
+.delta-bad {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.delta-flat {
+  background: var(--surface-3);
+  color: var(--text-3);
+}
+
+.dash-grid {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.chart-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-xs);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+  padding: 16px 18px;
+}
+
+.chart-card-head {
+  align-items: baseline;
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+}
+
+.chart-card-head h2 {
+  align-items: center;
+  display: inline-flex;
+  font-size: 13.5px;
+  font-weight: 600;
+  gap: 8px;
+  letter-spacing: -0.005em;
+  margin: 0;
+}
+
+.chart-accent {
+  border-radius: 3px;
+  display: inline-block;
+  flex: 0 0 auto;
+  height: 9px;
+  width: 9px;
+}
+
+.chart-empty {
+  align-items: center;
+  background: var(--surface-2);
+  border: 1px dashed var(--border);
+  border-radius: var(--r-md);
+  color: var(--text-3);
+  display: flex;
+  font-size: 13px;
+  justify-content: center;
+  min-height: 180px;
+}
+
+.chart-tooltip {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: var(--shadow-md);
+  display: grid;
+  font-size: 12px;
+  gap: 4px;
+  padding: 8px 10px;
+}
+
+.chart-tooltip-label {
+  color: var(--text-2);
+  font-size: 11.5px;
+  font-weight: 600;
+}
+
+.chart-tooltip-row {
+  align-items: center;
+  display: flex;
+  gap: 6px;
+}
+
+.chart-tooltip-row strong {
+  font-variant-numeric: tabular-nums;
+  margin-left: auto;
+  padding-left: 12px;
+}
+
+.chart-tooltip-dot {
+  border-radius: 999px;
+  display: inline-block;
+  flex: 0 0 auto;
+  height: 8px;
+  width: 8px;
+}
+
+.mini-stats {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.mini-stat {
+  background: var(--surface-2);
+  border-radius: var(--r-md);
+  display: grid;
+  gap: 1px;
+  padding: 8px 10px;
+}
+
+.mini-stat-value {
+  font-size: 16px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+}
+
+.mini-stat-label {
+  color: var(--text-3);
+  font-size: 11px;
+}
+
+.block-list {
+  display: grid;
+  gap: 4px;
+}
+
+.block-row {
+  align-items: center;
+  background: var(--surface-2);
+  border-radius: var(--r-sm);
+  display: flex;
+  font-size: 12px;
+  justify-content: space-between;
+  padding: 5px 8px;
+}
+
+.block-motivo {
+  color: var(--text-2);
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: 11.5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.response-block {
+  display: grid;
+  gap: 10px;
+  padding-top: 6px;
+}
+
+.response-block p {
+  margin: 0;
+}
+
+.response-hero {
+  align-items: baseline;
+  display: flex;
+  gap: 10px;
+}
+
+.response-value {
+  font-size: 40px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  line-height: 1;
+}
+
+.dash-updating {
+  opacity: 0.6;
+  pointer-events: none;
+  transition: opacity var(--dur-2) var(--ease);
+}
+
+.dash-error {
+  align-items: center;
+  background: var(--danger-soft);
+  border: 1px solid var(--danger-border);
+  border-radius: var(--r-lg);
+  display: flex;
+  gap: 14px;
+  padding: 18px;
+}
+
+.dash-error svg {
+  color: var(--danger);
+  flex: 0 0 auto;
+}
+
+.dash-error p {
+  margin: 2px 0 0;
+}
+
+.dash-error .btn {
+  margin-left: auto;
+}
+
+@keyframes shimmer {
+  to { background-position: -200% 0; }
+}
+
+.skeleton {
+  animation: shimmer 1.4s ease infinite;
+  background: linear-gradient(100deg, var(--surface-3) 40%, var(--surface-2) 50%, var(--surface-3) 60%);
+  background-size: 200% 100%;
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+}
+
+.skeleton-kpi {
+  height: 106px;
+}
+
+.skeleton-chart {
+  height: 300px;
+}
+
+@media (max-width: 1280px) {
+  .kpi-grid {
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  }
+}
+
+@media (max-width: 1100px) {
+  .dash-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 480px) {
+  .kpi-grid {
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  }
+
+  .response-value {
+    font-size: 32px;
+  }
+
+  .mini-stats {
+    grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+  }
+
+  .dash-error {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .dash-error .btn {
+    margin-left: 0;
+  }
+}

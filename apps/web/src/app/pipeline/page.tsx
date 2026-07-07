@@ -4,6 +4,7 @@ import { Suspense, useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { CalendarClock, ChevronDown, Clock3, Filter, Flame, RefreshCw, X } from 'lucide-react';
 import { api, type LeadHistoryEntry, type PipelineLead } from '@/lib/api';
+import { LOSS_REASONS, lossLabel } from '@/lib/pipeline-meta';
 
 // Estágios canônicos do funil (KB §5) — mesmo conjunto servido por
 // GET /pipelines/:pipeline/stages.
@@ -61,20 +62,6 @@ const STAGE_COLORS: Record<string, string> = {
   perdido: 'var(--danger)',
   'alta-manutencao': 'var(--text-3)',
 };
-
-// Motivos canônicos de perda (família status:perdido-* da KB §15, estendida).
-const LOSS_REASONS = [
-  { value: 'preco', label: 'Preço' },
-  { value: 'plano', label: 'Plano de saúde' },
-  { value: 'horario', label: 'Horário' },
-  { value: 'sem-resposta', label: 'Sem resposta' },
-  { value: 'concorrente', label: 'Concorrente' },
-  { value: 'fora-de-perfil', label: 'Fora de perfil' },
-  { value: 'outro', label: 'Outro' },
-] as const;
-
-const lossLabel = (value: string | null) =>
-  LOSS_REASONS.find((r) => r.value === value)?.label ?? value ?? '—';
 
 const stageLabel = (stage: string) => STAGE_LABELS[stage] ?? stage;
 

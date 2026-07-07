@@ -12,6 +12,7 @@ import {
   FileText,
   Inbox,
   KanbanSquare,
+  LayoutDashboard,
   ListTodo,
   LogIn,
   Settings,
@@ -26,6 +27,7 @@ const NAV_GROUPS: NavGroup[] = [
   {
     label: 'Operação',
     items: [
+      { href: '/', label: 'Dashboard', icon: LayoutDashboard },
       { href: '/inbox', label: 'Inbox', icon: Inbox },
       { href: '/pipeline', label: 'Pipeline', icon: KanbanSquare },
       { href: '/contacts', label: 'Contatos', icon: ContactRound },

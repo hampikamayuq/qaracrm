@@ -139,6 +139,50 @@ export type ConversationDetail = Omit<Conversation, 'messages' | 'aiSuggestions'
   }>;
 };
 
+// ---------------- dashboard ----------------
+
+export type DashboardPeriod = '7d' | '30d' | '90d';
+
+export type DashboardSummary = {
+  leadsAtivos: number;
+  aguardandoResposta: number;
+  agendamentosSemana: number;
+  followupsAtrasados: number;
+  novosNoPeriodo: { atual: number; anterior: number; variacaoPct: number | null };
+};
+
+export type DashboardDailyPoint = { date: string; count: number };
+
+export type DashboardFunnelStage = { stage: string; label: string; count: number };
+
+export type DashboardLeadsPerDay = {
+  series: DashboardDailyPoint[];
+  previous: DashboardDailyPoint[];
+};
+
+export type DashboardSource = { source: string; count: number };
+
+export type DashboardLossReason = { reason: string; count: number };
+
+export type DashboardTawany = {
+  perDay: DashboardDailyPoint[];
+  respostas: number;
+  handoffs: number;
+  taxaHandoffPct: number | null;
+  bloqueios: Array<{ motivo: string; count: number }>;
+  latenciaMediaMs: number | null;
+  fallbacks: number;
+  total: number;
+};
+
+export type DashboardResponseTime = {
+  medianaMin: number | null;
+  mediaMin: number | null;
+  conversas: number;
+  medianaAnteriorMin: number | null;
+  variacaoPct: number | null;
+};
+
 const getToken = (): string | null => {
   if (typeof window === 'undefined') return null;
   return sessionStorage.getItem('auth_token') ?? localStorage.getItem('auth_token');
@@ -318,5 +362,15 @@ export const api = {
       method: 'PUT',
       body: JSON.stringify({ tags }),
     });
+  },
+
+  // Dashboard: um fetcher só — lança em falha para o Promise.all da página
+  // cair no estado de erro com retry.
+  async getDashboard<T>(path: string, period: DashboardPeriod): Promise<T> {
+    const res = await this.get<T>(`/dashboard/${path}?period=${period}`);
+    if (!res.success || res.data === undefined) {
+      throw new Error(res.error ?? 'Falha ao carregar o dashboard');
+    }
+    return res.data;
   },
 };

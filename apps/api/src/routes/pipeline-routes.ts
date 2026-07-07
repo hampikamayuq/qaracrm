@@ -12,7 +12,7 @@ const jsonError = (res: Response, status: number, error: string): void => {
 
 const paramStr = (value: unknown): string => (typeof value === 'string' ? value : '');
 
-const CLINICAL_PIPELINES = [
+export const CLINICAL_PIPELINES = [
   'dermatologia-clinica',
   'tricologia',
   'cirurgia',
@@ -28,7 +28,7 @@ const CLINICAL_PIPELINES = [
 // no Lead (mesmo prefixo já aprovado no QARA_CLASSIFICATION_PROMPT) em vez de
 // um novo campo — Lead.stageId/PipelineStage segue servindo o funil original
 // (Task 11 / operations-routes), que tem granularidade diferente.
-const UI_STAGES = [
+export const UI_STAGES = [
   'novo-lead',
   'qualificado',
   'horario-oferecido',
@@ -40,10 +40,10 @@ const UI_STAGES = [
   'alta-manutencao',
 ] as const;
 
-type UiStage = (typeof UI_STAGES)[number];
+export type UiStage = (typeof UI_STAGES)[number];
 const DEFAULT_STAGE: UiStage = 'novo-lead';
 
-const STAGE_LABELS: Record<UiStage, string> = {
+export const STAGE_LABELS: Record<UiStage, string> = {
   'novo-lead': 'Novo lead',
   qualificado: 'Qualificado',
   'horario-oferecido': 'Horário oferecido',
@@ -80,15 +80,15 @@ const LEGACY_STAGE_MAP: Record<string, UiStage> = {
   PERDIDO: 'perdido',
 };
 
-const tagsOf = (raw: unknown): string[] =>
+export const tagsOf = (raw: unknown): string[] =>
   Array.isArray(raw) ? raw.filter((t): t is string => typeof t === 'string') : [];
 
-const valueByPrefix = (tags: string[], prefix: string): string | null => {
+export const valueByPrefix = (tags: string[], prefix: string): string | null => {
   const found = tags.find((t) => t.startsWith(prefix));
   return found ? found.slice(prefix.length) : null;
 };
 
-const stageFromTags = (tags: string[]): UiStage => {
+export const stageFromTags = (tags: string[]): UiStage => {
   for (const tag of tags) {
     if (!tag.startsWith('status:')) continue;
     const value = tag.slice('status:'.length);
