@@ -74,7 +74,7 @@ beforeEach(() => {
 });
 
 describe('runTawany', () => {
-  it('replies (via sendWhatsApp stub) when guard passes', async () => {
+  it('replies with a PENDING suggestion (no auto-send) when guard passes, outside autopilot', async () => {
     const data = makeData();
     const r = await runTawany(
       { messageId: 'm1', conversationId: UUID },
@@ -82,7 +82,7 @@ describe('runTawany', () => {
     );
     expect(r.status).toBe('replied');
     expect(r.content).toBe('Olá Maria!');
-    expect(data.create).toHaveBeenCalledWith('chatMessage', expect.objectContaining({ direction: 'OUT', body: 'Olá Maria!' }));
+    expect(data.create).not.toHaveBeenCalledWith('chatMessage', expect.objectContaining({ direction: 'OUT' }));
     expect(recordAiRun).toHaveBeenCalledWith(data, expect.objectContaining({
       layer: 'tawany',
       model: 'minimax/minimax-m3',
@@ -95,8 +95,9 @@ describe('runTawany', () => {
     }));
   });
 
-  it('creates an AiSuggestion and marks it SENT for a valid low-risk reply', async () => {
+  it('creates an AiSuggestion and marks it SENT only in autopilot mode', async () => {
     process.env.TAWANY_PROMPT_VERSION = 'test-v2';
+    process.env.SHADOW_MODE = 'autopilot';
     const data = makeData();
     (data.create as ReturnType<typeof vi.fn>).mockImplementation(async (obj: string) =>
       obj === 'aiSuggestion' ? { id: 's1' } : { id: 'm1' },
@@ -116,6 +117,37 @@ describe('runTawany', () => {
       promptVersion: 'test-v2',
     });
     expect(data.update).toHaveBeenCalledWith('aiSuggestion', 's1', { status: 'SENT' });
+    delete process.env.SHADOW_MODE;
+  });
+
+  it('leaves the AiSuggestion PENDING for human review outside autopilot mode (default)', async () => {
+    delete process.env.SHADOW_MODE; // defaults to 'shadow', not autopilot
+    const data = makeData();
+    (data.create as ReturnType<typeof vi.fn>).mockImplementation(async (obj: string) =>
+      obj === 'aiSuggestion' ? { id: 's1' } : { id: 'm1' },
+    );
+    const r = await runTawany(
+      { messageId: 'm1', conversationId: UUID },
+      { ai: makeAi(chatResult({ content: 'Olá Maria!', finishReason: 'stop' })), data },
+    );
+    expect(r.status).toBe('replied');
+    expect(data.update).not.toHaveBeenCalledWith('aiSuggestion', 's1', expect.anything());
+    expect(data.create).not.toHaveBeenCalledWith('chatMessage', expect.objectContaining({ direction: 'OUT' }));
+  });
+
+  it('never auto-sends in testMode even when autopilot is configured', async () => {
+    process.env.SHADOW_MODE = 'autopilot';
+    const data = makeData();
+    (data.create as ReturnType<typeof vi.fn>).mockImplementation(async (obj: string) =>
+      obj === 'aiSuggestion' ? { id: 's1' } : { id: 'm1' },
+    );
+    const r = await runTawany(
+      { messageId: 'm1', conversationId: UUID },
+      { ai: makeAi(chatResult({ content: 'Olá Maria!', finishReason: 'stop' })), data, testMode: true },
+    );
+    expect(r.status).toBe('replied');
+    expect(data.update).not.toHaveBeenCalledWith('aiSuggestion', 's1', expect.anything());
+    delete process.env.SHADOW_MODE;
   });
 
   it('passes the patient model fallback list to the ai client', async () => {

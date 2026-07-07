@@ -7,6 +7,7 @@ import { handoff } from 'src/lib/handoff';
 import { recordAiRun } from 'src/lib/ai-run-log';
 import { truncateToContextWindow } from 'src/lib/ai/context-window';
 import { buildTawanyContext } from 'src/lib/tawany/context';
+import { isAutopilotMode } from 'src/lib/shadow';
 import { buildMessages, buildSystemPrompt } from 'src/lib/tawany/prompt-builder';
 import { runQaraClassifier } from './qara-classifier';
 import { runLeadScorer } from 'src/lib/lead-score/orchestrator';
@@ -119,15 +120,19 @@ export const runTawany = async (
         status: 'PENDING',
         promptVersion: process.env.TAWANY_PROMPT_VERSION ?? 'v1',
       });
-      if (!deps.testMode) {
+      // Autopilot é o único modo que envia sem revisão humana. Em qualquer
+      // outro caso (human_approval, shadow, ou testMode explícito) a
+      // sugestão fica PENDING — visível no Inbox para aprovar/editar/descartar.
+      const shouldAutoSend = !deps.testMode && isAutopilotMode();
+      if (shouldAutoSend) {
         await tawanyTools.execute(
           'sendWhatsApp',
           JSON.stringify({ conversationId: params.conversationId, text: reply }),
           data,
         );
-      }
-      if (typeof suggestion.id === 'string') {
-        await data.update('aiSuggestion', suggestion.id, { status: deps.testMode ? 'TEST_SENT' : 'SENT' });
+        if (typeof suggestion.id === 'string') {
+          await data.update('aiSuggestion', suggestion.id, { status: 'SENT' });
+        }
       }
       await recordAiRun(data, {
         layer: 'tawany',
