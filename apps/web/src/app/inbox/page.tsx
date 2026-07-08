@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { AlertTriangle, Bot, Check, CheckCheck, FlaskConical, MessageSquareText, Plus, Search, Send, Sparkles, ThumbsDown, ThumbsUp, Undo2, X } from 'lucide-react';
 import { api, type AgentState, type Conversation, type ConversationDetail } from '@/lib/api';
 
@@ -19,6 +19,9 @@ const statusLabel = (status: string) => (
     : status === 'RESOLVED' ? 'Resolvida'
     : status === 'PENDING' ? 'Pendente'
     : status === 'CLOSED' ? 'Fechada'
+    : status === 'NEEDS_HUMAN' ? 'Precisa de humano'
+    : status === 'PENDING_HUMAN' ? 'Aguardando humano'
+    : status === 'PENDING_PATIENT' ? 'Aguardando paciente'
     : status
 );
 
@@ -105,6 +108,17 @@ export default function InboxPage() {
   const [testMode, setTestMode] = useState(false);
   const [downvoteId, setDownvoteId] = useState<string | null>(null);
   const [downvoteNote, setDownvoteNote] = useState('');
+  // deep link /inbox?lead=<id> (vindo do card do pipeline): seleciona a
+  // conversa do lead assim que a lista carregar, em qualquer status.
+  const pendingLeadRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    const leadParam = new URLSearchParams(window.location.search).get('lead');
+    if (leadParam) {
+      pendingLeadRef.current = leadParam;
+      setStatus('ALL');
+    }
+  }, []);
 
   const reloadDetail = useCallback(async (id: string) => {
     setDetailLoading(true);
@@ -125,6 +139,13 @@ export default function InboxPage() {
       }).then((data) => {
         setConversations(data.items);
         setSelectedId((current) => {
+          if (pendingLeadRef.current) {
+            const byLead = data.items.find((item) => item.lead?.id === pendingLeadRef.current)?.id;
+            if (byLead) {
+              pendingLeadRef.current = null;
+              return byLead;
+            }
+          }
           const fromUrl = new URLSearchParams(window.location.search).get('conversationId') ?? '';
           const candidate = current || fromUrl;
           if (candidate && data.items.some((item) => item.id === candidate)) return candidate;
