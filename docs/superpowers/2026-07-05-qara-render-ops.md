@@ -26,16 +26,14 @@ needed — the process just has to stay alive. If the host suspends idle
 services (e.g. a free tier that sleeps), the scheduler will not fire while
 asleep; use a plan/tier that keeps the API resident.
 
-## Canonical URLs
+## Canonical URLs (live desde 05/07/2026)
 
-Replace with the real hostnames once services exist:
-
-- API: `https://<api-service>.example.com`
-- Web: `https://<web-service>.example.com`
-- Meta webhook (point the Meta App here): `https://<api-service>.example.com/api/webhooks/meta`
-- `OPENROUTER_HTTP_REFERER=https://<api-service>.example.com`
+- API (Render): `https://cliniqara-crm.onrender.com`
+- Web (Vercel): `https://web-indol-ten-37.vercel.app`
+- Meta webhook (point the Meta App here): `https://cliniqara-crm.onrender.com/api/webhooks/meta`
+- `OPENROUTER_HTTP_REFERER=https://cliniqara-crm.onrender.com`
 - `CORS_ORIGIN` / `CORS_DOMAIN` on the API = the web service's URL
-- `NEXT_PUBLIC_API_URL` on the web app = `https://<api-service>.example.com/api`
+- `NEXT_PUBLIC_API_URL` on the web app = `https://cliniqara-crm.onrender.com/api`
 
 ## Where values live
 
