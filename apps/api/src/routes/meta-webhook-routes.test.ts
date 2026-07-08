@@ -87,7 +87,7 @@ describe('Meta Webhook Routes', () => {
     expect(response.sendStatus).toHaveBeenCalledWith(403);
   });
 
-  it('accepts POST with empty body, persists WebhookEvent, returns 200', async () => {
+  it('rejeita POST quando META_APP_SECRET não está configurado (fail-closed)', async () => {
     const { receiveMetaWebhook } = await import('./meta-webhook-routes');
     const { prisma } = await import('../lib/deps');
     const response = res();
@@ -100,12 +100,31 @@ describe('Meta Webhook Routes', () => {
       response,
     );
 
+    expect(response.sendStatus).toHaveBeenCalledWith(403);
+    expect(prisma.webhookEvent.create).not.toHaveBeenCalled();
+  });
+
+  it('accepts POST with valid signature, persists WebhookEvent, returns 200', async () => {
+    process.env.META_APP_SECRET = 'test-secret';
+    const { receiveMetaWebhook } = await import('./meta-webhook-routes');
+    const { prisma } = await import('../lib/deps');
+    const response = res();
+
+    await receiveMetaWebhook(
+      req({
+        headers: { 'x-hub-signature-256': 'sha256=valid' },
+        body: { object: 'whatsapp_business_account', entry: [] },
+      }),
+      response,
+    );
+
     expect(response.status).toHaveBeenCalledWith(200);
     expect(response.json).toHaveBeenCalledWith({ success: true, data: { eventId: 'evt-1' } });
     expect(prisma.webhookEvent.create).toHaveBeenCalled();
   });
 
   it('dispara a Tawany para as mensagens processadas (todos os modos)', async () => {
+    process.env.META_APP_SECRET = 'test-secret';
     const { receiveMetaWebhook } = await import('./meta-webhook-routes');
     const { handleMetaWebhook } = await import('../logic-functions/meta-webhook');
     const { runTawanyForProcessedMessages } = await import('../lib/shadow');
@@ -116,7 +135,7 @@ describe('Meta Webhook Routes', () => {
 
     await receiveMetaWebhook(
       req({
-        headers: {},
+        headers: { 'x-hub-signature-256': 'sha256=valid' },
         body: { object: 'whatsapp_business_account', entry: [] },
       }),
       response,
@@ -131,6 +150,7 @@ describe('Meta Webhook Routes', () => {
   });
 
   it('forwards raw webhook bytes to Twenty after persistence', async () => {
+    process.env.META_APP_SECRET = 'test-secret';
     const { receiveMetaWebhook } = await import('./meta-webhook-routes');
     const { forwardWebhookToTwenty } = await import('../lib/shadow');
     const response = res();
@@ -152,6 +172,7 @@ describe('Meta Webhook Routes', () => {
   });
 
   it('deduplicates matching signatures before persisting WebhookEvent', async () => {
+    process.env.META_APP_SECRET = 'test-secret';
     const { receiveMetaWebhook } = await import('./meta-webhook-routes');
     const { prisma } = await import('../lib/deps');
     prisma.webhookEvent.findFirst.mockResolvedValueOnce({ id: 'evt-old' });
