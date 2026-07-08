@@ -1,93 +1,91 @@
-# Qara Clinic
+# QARA CRM
 
-Twenty CRM application for a Brazilian aesthetic clinic. Adds a Tawany AI
-concierge (WhatsApp/Instagram), a lead kanban, and a WhatsApp inbox on top
-of Twenty's standard CRM.
+CRM próprio da Clínica QARA (dermatologia, RJ/SP) com a **Tawany** — agente
+de IA que atende pacientes pelo WhatsApp: triagem, qualificação,
+direcionamento e agendamento, sempre sob controle humano.
 
-Built with the [Twenty SDK](https://www.npmjs.com/package/create-twenty-app)
-(`twenty-sdk/define`).
+Monorepo standalone (o projeto migrou do Twenty em 05/07/2026 — nada aqui
+depende do runtime Twenty).
 
-## What's in the box
+## Arquitetura
 
-| Module | Path | What it does |
+| App | Stack | Produção |
 | --- | --- | --- |
-| Objects | `src/objects/` | `lead`, `patient`, `conversation`, `chatMessage`, `professional`, `service`, `clinicUnit` |
-| Tawany agent | `src/agents/tawany.agent.ts` | Patient-facing AI concierge (OpenRouter) |
-| Tawany handler | `src/logic-functions/tawany-handler.ts` | DB-event LF: classifies inbound messages, replies via agent, escalates to human |
-| Summarize | `src/logic-functions/summarize-conversation.ts` | On-demand conversation summarization |
-| Skills | `src/skills/` | `tawany-persona`, `qara-classifier`, `qara-knowledge` |
-| Front-components | `src/front-components/` | `whatsapp-inbox`, `lead-kanban`, `tawany-panel` |
-| Layouts | `src/page-layouts/` + `src/navigation-menu-items/` | Inbox + Kanban pages reachable from the sidebar |
-| Commands | `src/command-menu-items/` | Cmd+K entries to open Inbox / Kanban |
-| Default role | `src/default-role.ts` | Function role used by Tawany LFs (read/update records, no hard delete) |
-| Server variables | `src/application-config.ts` | OpenRouter, Meta, AI fallback/timeout, and audit-log knobs |
+| `apps/api` | Express 5 + Prisma + Postgres, agente via OpenRouter | Render — `https://cliniqara-crm.onrender.com` |
+| `apps/web` | Next.js (App Router) + design system próprio em CSS (sem Tailwind) | Vercel — `https://web-indol-ten-37.vercel.app` |
+| `packages/shared` | Tipos compartilhados | — |
 
-## Getting Started
+### Mapa do backend (`apps/api/src`)
 
-Local Twenty dev server runs at [http://localhost:2020](http://localhost:2020).
-Login with `tim@apple.dev` / `tim@apple.dev`.
+| Área | Caminho | O que faz |
+| --- | --- | --- |
+| Fluxo da Tawany | `logic-functions/tawany-handler.ts` | Gates (opt-out, injection, conversa fechada) → loop de tools → guards → envio conforme o modo |
+| Modos de operação | `lib/shadow.ts` (`SHADOW_MODE`) | `shadow` (observa, nunca envia) · `human_approval` (sugere → aprovação) · `autopilot` (envia) |
+| Prompt e contexto | `lib/tawany/` + `lib/prompts.ts` | Persona + knowledge do banco (`KnowledgeSection`, cache 60s, fallback hardcoded) + exemplos few-shot |
+| Guards | `lib/guards/` | Prompt-injection na entrada; preço fora da tabela, conteúdo clínico, promessa de horário/resultado na saída |
+| Tools do agente | `lib/tools/` | sendWhatsApp, listProfessionals/Services, readLead, checkBotFaq, handoffToHuman etc. |
+| Bots (fluxos fixos) | `lib/bots/` + `routes/bot-routes.ts` | Respostas automáticas por palavra-chave, editáveis pela UI, com risk blocking imutável |
+| Rotas HTTP | `routes/` | auth, inbox, pipeline, dashboard, reports, appointments, tasks, tags, bots, settings, lgpd, webhooks |
+| Scheduler | `src/server.ts` + `lib/scheduler.ts` | Follow-up (`FOLLOWUP_INTERVAL_MS`) e lembrete D-1 (`ENABLE_SCHEDULER`) |
+
+### Telas (`apps/web/src/app`)
+
+Dashboard (`/`) · Inbox (3 colunas, estados Tawany/humano, feedback 👍/👎,
+modo teste) · Pipeline (kanban canônico com histórico e motivo de perda) ·
+Agenda (mês/semana/dia + .ics) · Tarefas & Atividades · Relatórios (export
+CSV) · Bots (editor com versionamento) · Conhecimento (`/settings/knowledge`)
+· IA (`/settings/ai`).
+
+## Desenvolvimento
+
+Requisitos: Node 24 (`.nvmrc`), pnpm, Docker (para o Postgres).
 
 ```bash
-yarn twenty docker:start        # start the local Twenty stack (one-time)
-yarn twenty docker:status       # check status
-yarn twenty dev                 # build + sync + watch
-yarn twenty dev --once          # one-shot sync (CI / smoke)
+pnpm install
+
+# Banco local (dev usa apps/api/.env → postgresql://postgres@localhost:5432/qara-crm)
+docker run -d --name qara-pg -e POSTGRES_HOST_AUTH_METHOD=trust \
+  -e POSTGRES_DB=qara-crm -p 5432:5432 postgres:16
+pnpm --filter @qara/api db:migrate:deploy
+pnpm --filter @qara/api db:seed             # admin@qara.local / ADMIN_PASSWORD (default admin123)
+pnpm --filter @qara/api db:seed:knowledge   # 6 seções de knowledge da Tawany
+
+pnpm --filter @qara/api dev                 # API em :4000
+pnpm --filter @qara/web dev                 # web em :3000
 ```
 
-Open the workspace, install the app, and the Tawany items appear in the
-left sidebar.
+Variáveis: copie `apps/api/.env.example` e `apps/web/.env.example`. Sem
+`OPENROUTER_API_KEY` a Tawany faz handoff em vez de quebrar.
 
-## Render Target
+## Testes
 
-The Twenty server URL can be the Render web service URL. Use the same base URL
-consistently:
+```bash
+pnpm --filter @qara/api test               # unitários (vitest)
+pnpm --filter @qara/api test:integration   # ponta a ponta com Postgres real
+                                           # (banco qara-crm-test — ver flow.integration.test.ts)
+pnpm --filter @qara/api lint               # oxlint
+pnpm --filter @qara/web build              # build de produção da web
+```
 
-- `TWENTY_DEPLOY_URL=https://<render-twenty-service>.onrender.com`
-- Meta webhook: `https://<render-twenty-service>.onrender.com/s/meta/webhook`
-- `OPENROUTER_HTTP_REFERER=https://<render-twenty-service>.onrender.com`
+CI (`.github/workflows/ci.yml`): lint + typecheck + testes da API + build
+da web em todo push/PR.
 
-Keep real secrets out of the repo. `.env.example` documents local/deploy names,
-and `docs/superpowers/2026-07-05-qara-render-ops.md` has the activation
-checklist.
+## Deploy
 
-## Useful Commands
+Render (API) e Vercel (web) deployam a `main` via integração git.
+**Após merges com migration**, rodar no shell do Render:
 
-- `yarn twenty dev` — build + sync + watch
-- `yarn twenty dev --once` — one-shot sync
-- `yarn twenty dev:build` — build manifest only
-- `yarn twenty dev:add <entity>` — scaffold a new object / field / LF / view / etc.
-- `yarn typecheck` — TS check via tsgo
-- `yarn lint` — oxlint
-- `yarn test:unit` — Vitest unit suite
-- `yarn test` — integration tests
-- `bash scripts/smoke.sh` — typecheck + tests + lint + build (use before opening a PR)
+```bash
+pnpm --filter @qara/api db:migrate:deploy
+pnpm --filter @qara/api db:seed:knowledge   # idempotente
+```
 
-## Learn More
+Webhook da Meta: `https://cliniqara-crm.onrender.com/api/webhooks/meta`
+(verify token = `META_VERIFY_TOKEN`). Checklist completo de ativação em
+[docs/superpowers/2026-07-05-qara-render-ops.md](docs/superpowers/2026-07-05-qara-render-ops.md).
 
-- [Twenty Apps documentation](https://docs.twenty.com/developers/extend/apps/getting-started/quick-start)
-- [twenty-sdk CLI reference](https://www.npmjs.com/package/twenty-sdk)
-- [Discord](https://discord.gg/cx5n4Jzs57)
+## Documentos
 
-## SDK notes (spike 2026-07-04)
-
-Validated against the local `twenty-app-dev` Docker image:
-
-- **DB-event trigger payload**: `event.properties.after` carries the FULL created record (typed via `DatabaseEventPayload<ObjectRecordCreateEvent<T>>`). There is no trigger-level filter — gate inside the handler.
-- **CoreApiClient single-record query**: `client.query({ spike: { __args: { filter: { id: { eq } } }, id: true, name: true } })` → `result.spike` is the record object itself (NOT an array).
-- **REST create**: `POST /rest/<namePlural>` with Bearer key → `data.create<Singular>`.
-- **Objects**: require `nameSingular/namePlural/labelSingular/labelPlural`, per-field `universalIdentifier`, and `labelIdentifierFieldMetadataUniversalIdentifier`. SELECT options need `{ id, value, label, position, color }` and quoted defaultValue (`"'DRAFT'"`).
-- **App config file**: `src/application-config.ts` (hyphen). Entities auto-discovered from `src/`.
-- **LF logs**: `yarn twenty dev:function:logs --functionName <name>` streams only NEW entries — attach before firing.
-- **Sync**: `yarn twenty dev --once` (one-shot) / `--dry-run` to preview.
-- **Default role**: `defineApplicationRole()` in `src/default-role.ts`. The `defaultRoleUniversalIdentifier` field on `defineApplication()` is deprecated — omit it and let the sync auto-link the role file by UUID.
-
-### Object-layer notes (2026-07-04)
-
-- SELECT/MULTI_SELECT option `value` MUST be UPPER_SNAKE_CASE (`'NOVO'`, `'LEAD_QUENTE'`); `label` stays human. `defaultValue` quotes the UPPER value: `"'NOVO'"`.
-- `message` nameSingular collides with the built-in email `message` object → ours is `chatMessage`/`chatMessages`.
-- `address` is a reserved field name → `unitAddress`.
-- Custom objects automatically receive `searchVector`, `timelineActivities`, `attachments`, `noteTargets`, `taskTargets` — do NOT declare them. Built-in Task/Note attach to custom objects out of the box (we dropped the custom `task` object for this reason).
-- Tags are MULTI_SELECT fields on lead/patient/conversation (8 fixed colored options) — replaced the custom tag object + 3 N:M join objects.
-- Relations = a pair of `defineField` files (M2O with `joinColumnName` + O2M inverse), cross-referencing UIDs; built-in targets via `STANDARD_OBJECT_UNIVERSAL_IDENTIFIERS` from `twenty-sdk/define`.
-- **Container DNS**: if LF execution fails with `EAI_AGAIN registry.yarnpkg.com`, the twenty-app-dev container lost DNS (systemd-resolved + Docker). Ephemeral fix: `docker exec -u root <container> sh -c 'printf "nameserver 8.8.8.8\n" > /etc/resolv.conf'`. Durable fix: add `{"dns": ["8.8.8.8"]}` to /etc/docker/daemon.json (needs root).
-- FULL_NAME create input is composite: `{ name: { firstName, lastName } }`.
+- [PRODUCT.md](PRODUCT.md) — princípios de produto (operação primeiro, nada fake, IA sob controle humano)
+- [docs/plano-otimizacoes.md](docs/plano-otimizacoes.md) — roadmap de otimizações em lotes
+- [docs/lgpd.md](docs/lgpd.md) — export/anonimização de dados do paciente

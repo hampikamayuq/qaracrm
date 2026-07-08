@@ -1,67 +1,77 @@
-## Base documentation
+# QARA CRM — instruções para agentes
 
-- Getting started:
-  - https://docs.twenty.com/developers/extend/apps/getting-started/quick-start.md
-  - https://docs.twenty.com/developers/extend/apps/getting-started/concepts.md
-  - https://docs.twenty.com/developers/extend/apps/getting-started/project-structure.md
-  - https://docs.twenty.com/developers/extend/apps/getting-started/local-server.md
-  - https://docs.twenty.com/developers/extend/apps/getting-started/scaffolding.md
-  - https://docs.twenty.com/developers/extend/apps/getting-started/troubleshooting.md
-- Config:
-  - https://docs.twenty.com/developers/extend/apps/config/overview.md
-  - https://docs.twenty.com/developers/extend/apps/config/application.md
-  - https://docs.twenty.com/developers/extend/apps/config/roles.md
-  - https://docs.twenty.com/developers/extend/apps/config/install-hooks.md
-  - https://docs.twenty.com/developers/extend/apps/config/public-assets.md
-- Data:
-  - https://docs.twenty.com/developers/extend/apps/data/overview.md
-  - https://docs.twenty.com/developers/extend/apps/data/objects.md
-  - https://docs.twenty.com/developers/extend/apps/data/extending-objects.md
-  - https://docs.twenty.com/developers/extend/apps/data/relations.md
-- Logic:
-  - https://docs.twenty.com/developers/extend/apps/logic/overview.md
-  - https://docs.twenty.com/developers/extend/apps/logic/logic-functions.md
-  - https://docs.twenty.com/developers/extend/apps/logic/skills-and-agents.md
-  - https://docs.twenty.com/developers/extend/apps/logic/connections.md
-- Layout:
-  - https://docs.twenty.com/developers/extend/apps/layout/overview.md
-  - https://docs.twenty.com/developers/extend/apps/layout/views.md
-  - https://docs.twenty.com/developers/extend/apps/layout/navigation-menu-items.md
-  - https://docs.twenty.com/developers/extend/apps/layout/page-layouts.md
-  - https://docs.twenty.com/developers/extend/apps/layout/front-components.md
-  - https://docs.twenty.com/developers/extend/apps/layout/command-menu-items.md
-- Operations:
-  - https://docs.twenty.com/developers/extend/apps/operations/overview.md
-  - https://docs.twenty.com/developers/extend/apps/operations/cli.md
-  - https://docs.twenty.com/developers/extend/apps/operations/testing.md
-  - https://docs.twenty.com/developers/extend/apps/operations/publishing.md
-- Rich app example: https://github.com/twentyhq/twenty/tree/main/packages/twenty-apps/examples/postcard
+Monorepo standalone: `apps/api` (Express 5 + Prisma + Postgres),
+`apps/web` (Next.js App Router), `packages/shared`. O projeto **migrou do
+Twenty em 05/07/2026** — não use `twenty-sdk`, `yarn twenty`, docs do
+Twenty nem os padrões de objects/views/logic-functions do Twenty.
+Gerenciador de pacotes: **pnpm**.
 
-## UUID requirement
+Leia `PRODUCT.md` antes de mudanças de produto/UI. Princípios: operação
+primeiro, densidade com clareza, português operacional em toda a UI,
+IA sob controle humano, **nada fake** (botão sem endpoint fica fora ou
+visivelmente desabilitado).
 
-- All generated UUIDs must be valid UUID v4.
+## Comandos
 
-## Common Pitfalls
+```bash
+pnpm --filter @qara/api test                # unitários — TODOS devem passar antes de commitar
+pnpm --filter @qara/api test:integration    # precisa de Postgres local (banco *-test)
+cd apps/api && npx tsc -p tsconfig.build.json --noEmit   # typecheck
+pnpm --filter @qara/api lint                # oxlint
+pnpm --filter @qara/web build               # build da web — deve passar antes de commitar
+pnpm --filter @qara/api dev                 # API :4000
+pnpm --filter @qara/web dev                 # web :3000
+```
 
-- Creating an object without an index view associated. Unless this is a technical object, user will need to visualize it.
-- Creating a view without a navigationMenuItem associated. This will make the view available on the left sidebar.
-- Creating a front-end component that has a scroll instead of being responsive to its fixed widget height and width, unless it is specifically meant to be used in a canvas tab.
+Postgres de dev/teste via Docker (imagem `postgres:16`, auth trust) — ver
+README. Migrations: escreva o SQL à mão em `prisma/migrations/<ts>_<nome>/`
+no padrão das existentes + `prisma generate`; use `db:migrate:deploy`
+(nunca `migrate dev` em produção).
 
-## Best practice
+## Convenções que quebram se ignoradas
 
-It's highly recommended to create new app entities using `yarn twenty dev:add`. These are the options:
+- **Estágio e especialidade do lead vivem como TAGS prefixadas**
+  (`status:<estagio>`, `pipeline:<especialidade>`) — não como colunas.
+  Helpers canônicos exportados de `apps/api/src/routes/pipeline-routes.ts`
+  (`tagsOf`, `stageFromTags`, `valueByPrefix`). Motivo de perda =
+  `status:perdido-<motivo>`.
+- **Modos da Tawany** (`SHADOW_MODE` env): `shadow` observa e NUNCA envia
+  nem consome a mensagem; `human_approval` cria `aiSuggestion` PENDING e
+  espera aprovação; `autopilot` envia. Tudo passa por `runTawanyHandler`
+  (gates de opt-out/injection/conversa fechada) — não chame `runTawany`
+  direto.
+- **Knowledge da Tawany vem do banco** (`KnowledgeSection`, cache 60s em
+  `lib/tawany/knowledge.ts`, fallback para `lib/prompts.ts` se vazio).
+  Dados operacionais novos vão no banco/seed, não hardcoded no prompt.
+- **Risk blocking dos bots é imutável** — termos de risco vivem no engine
+  (`lib/bots/engine.ts`) e são aplicados antes de qualquer matching;
+  nunca torná-los editáveis pela UI/API.
+- **Histórico/versionamento reusa o modelo `Activity`** (stage_change,
+  versões de bot, notas) — não crie tabela nova para histórico.
+- **Web sem Tailwind**: design system próprio em
+  `apps/web/src/app/globals.css` (tokens em `:root`, cor semântica:
+  Tawany = violeta `--ai`, urgência = vermelho, follow-up/teste = âmbar).
+  Não introduza classes Tailwind.
+- Respostas de API no envelope `{ success, data }` / `{ success, error }`;
+  toda rota de escrita com `authMiddleware` + validação; rotas públicas
+  só com verificação (assinatura Meta / `LEAD_WEBHOOK_SECRET`).
+- UUIDs gerados devem ser UUID v4 válidos.
 
-| Entity type          | Command                                  | Generated file                        |
-| -------------------- | ---------------------------------------- | ------------------------------------- |
-| Object               | `yarn twenty dev:add object`             | `src/objects/<name>.ts`               |
-| Field                | `yarn twenty dev:add field`              | `src/fields/<name>.ts`                |
-| Logic function       | `yarn twenty dev:add logicFunction`      | `src/logic-functions/<name>.ts`       |
-| Front component      | `yarn twenty dev:add frontComponent`     | `src/front-components/<name>.tsx`     |
-| Role                 | `yarn twenty dev:add role`               | `src/roles/<name>.ts`                 |
-| Skill                | `yarn twenty dev:add skill`              | `src/skills/<name>.ts`                |
-| Agent                | `yarn twenty dev:add agent`              | `src/agents/<name>.ts`                |
-| View                 | `yarn twenty dev:add view`               | `src/views/<name>.ts`                 |
-| Navigation menu item | `yarn twenty dev:add navigationMenuItem` | `src/navigation-menu-items/<name>.ts` |
-| Page layout          | `yarn twenty dev:add pageLayout`         | `src/page-layouts/<name>.ts`          |
+## Fluxo de trabalho
 
-This helps automatically generate required IDs etc.
+- Suíte completa + typecheck + build da web verdes antes de qualquer
+  commit. Commits convencionais (`feat:`, `fix:`, ...) em português.
+- Push direto na `main` é bloqueado — trabalhe em branch e abra PR.
+- **Deploy**: Render (API) e Vercel (web) seguem a `main`. NUNCA deploye
+  sem aprovação explícita do usuário. Merge com migration nova exige
+  `db:migrate:deploy` (+ `db:seed:knowledge` se aplicável) no banco de
+  produção — está documentado no README.
+- Produção: API `https://cliniqara-crm.onrender.com`, web
+  `https://web-indol-ten-37.vercel.app`. Webhook Meta:
+  `/api/webhooks/meta`.
+
+## Documentos vivos
+
+- `docs/plano-otimizacoes.md` — roadmap em lotes (o que fazer a seguir)
+- `docs/superpowers/2026-07-05-qara-render-ops.md` — ops/ativação
+- `docs/lgpd.md` — export/anonimização
