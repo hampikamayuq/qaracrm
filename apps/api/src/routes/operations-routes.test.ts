@@ -173,6 +173,45 @@ describe('Operations routes', () => {
     });
   });
 
+  it('returns a sanitized report when the Tawany golden set fails', async () => {
+    const golden = await import('../lib/tawany/golden-set');
+    vi.mocked(golden.loadGoldenCases).mockResolvedValue([
+      { id: 'price-no-invention', user: 'Quanto custa?', expectedGuardOk: true },
+    ]);
+    vi.mocked(golden.runGoldenSet).mockResolvedValue({
+      total: 1,
+      passed: 0,
+      failed: 1,
+      results: [{
+        id: 'price-no-invention',
+        ok: false,
+        guardOk: false,
+        guardReason: 'price_without_kb',
+        reply: 'A consulta fica 500 reais.',
+        contentFailures: [],
+      }],
+    });
+    vi.mocked(golden.formatGoldenSetReport).mockReturnValue(
+      '# Tawany Golden Set FAILED\n- FAIL price-no-invention: price_without_kb',
+    );
+    const { goldenSetRoute } = await import('./operations-routes');
+    const response = res();
+
+    await goldenSetRoute(req({}), response);
+
+    expect(response.status).toHaveBeenCalledWith(422);
+    expect(response.json).toHaveBeenCalledWith({
+      success: false,
+      error: 'golden_set_failed',
+      data: {
+        total: 1,
+        passed: 0,
+        failed: 1,
+        report: '# Tawany Golden Set FAILED\n- FAIL price-no-invention: price_without_kb',
+      },
+    });
+  });
+
   it('exports an express router', async () => {
     const mod = await import('./operations-routes');
     expect(mod.default).toBeDefined();

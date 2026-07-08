@@ -8,7 +8,6 @@ import { requireAdmin } from '../middleware/authorization';
 import { runQaraClassifier } from '../logic-functions/qara-classifier';
 import { sendWhatsAppTemplate } from '../lib/tools/sendWhatsAppTemplate';
 import {
-  assertGoldenSetPassed,
   formatGoldenSetReport,
   loadGoldenCases,
   runGoldenSet,
@@ -98,7 +97,19 @@ export const goldenSetRoute = async (_req: Request, res: Response): Promise<void
     const cases = await loadGoldenCases();
     const result = await runGoldenSet({ ai: createAiClient(), cases });
     const report = formatGoldenSetReport(result);
-    assertGoldenSetPassed(result);
+    if (result.failed > 0) {
+      res.status(422).json({
+        success: false,
+        error: 'golden_set_failed',
+        data: {
+          total: result.total,
+          passed: result.passed,
+          failed: result.failed,
+          report,
+        },
+      });
+      return;
+    }
     res.json({
       success: true,
       data: {
