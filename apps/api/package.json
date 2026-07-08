@@ -9,6 +9,7 @@
     "start": "NODE_PATH=dist node dist/src/server.js",
     "lint": "oxlint src",
     "test": "vitest run",
+    "test:golden": "tsx src/scripts/run-golden-set.ts",
     "test:integration": "DATABASE_URL=postgresql://postgres@localhost:5432/qara-crm-test JWT_SECRET=test-secret-key-at-least-32-bytes-long META_VERIFY_TOKEN=test-meta-token META_APP_SECRET=test-app-secret-32-bytes-long ENABLE_SCHEDULER=false TAWANY_DEBOUNCE_MS=0 SHADOW_MODE=human_approval vitest run --config vitest.integration.config.ts",
     "test:watch": "vitest",
     "db:generate": "prisma generate",

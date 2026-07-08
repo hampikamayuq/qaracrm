@@ -28,6 +28,12 @@ vi.mock('../logic-functions/qara-classifier', () => ({
 vi.mock('../lib/tools/sendWhatsAppTemplate', () => ({
   sendWhatsAppTemplate: { execute: vi.fn() },
 }));
+vi.mock('../lib/tawany/golden-set', () => ({
+  loadGoldenCases: vi.fn(),
+  runGoldenSet: vi.fn(),
+  formatGoldenSetReport: vi.fn(),
+  assertGoldenSetPassed: vi.fn(),
+}));
 vi.mock('../middleware/auth-middleware', () => ({
   authMiddleware: vi.fn((_req, _res, next) => next()),
 }));
@@ -126,6 +132,44 @@ describe('Operations routes', () => {
     expect(response.json).toHaveBeenCalledWith({
       success: true,
       data: [{ id: 'stage-1', name: 'Novo', leads: [{ id: 'lead-1', name: 'Maria', score: 80, tags: ['temp:quente'] }] }],
+    });
+  });
+
+  it('runs the Tawany golden set with the deployed environment ai client', async () => {
+    const golden = await import('../lib/tawany/golden-set');
+    vi.mocked(golden.loadGoldenCases).mockResolvedValue([
+      { id: 'address-basic', user: 'Onde fica?', expectedGuardOk: true },
+    ]);
+    vi.mocked(golden.runGoldenSet).mockResolvedValue({
+      total: 1,
+      passed: 1,
+      failed: 0,
+      results: [{
+        id: 'address-basic',
+        ok: true,
+        guardOk: true,
+        reply: 'Estamos em Copacabana.',
+        contentFailures: [],
+      }],
+    });
+    vi.mocked(golden.formatGoldenSetReport).mockReturnValue('# Tawany Golden Set PASSED\n- PASS address-basic');
+    const { goldenSetRoute } = await import('./operations-routes');
+    const response = res();
+
+    await goldenSetRoute(req({}), response);
+
+    expect(golden.runGoldenSet).toHaveBeenCalledWith({
+      ai: mocks.ai,
+      cases: [{ id: 'address-basic', user: 'Onde fica?', expectedGuardOk: true }],
+    });
+    expect(response.json).toHaveBeenCalledWith({
+      success: true,
+      data: {
+        total: 1,
+        passed: 1,
+        failed: 0,
+        report: '# Tawany Golden Set PASSED\n- PASS address-basic',
+      },
     });
   });
 

@@ -204,6 +204,66 @@ describe('runTawany', () => {
     expect(data.update).toHaveBeenCalledWith('aiSuggestion', 's1', { status: 'TEST_SENT' });
   });
 
+  it('modo híbrido envia resposta baixa para intenção permitida', async () => {
+    const data = makeData();
+    (data.get as ReturnType<typeof vi.fn>).mockImplementation(async (obj: string) => {
+      if (obj === 'conversation') return { id: UUID, leadId: LEAD_ID, status: 'OPEN', needsHuman: false };
+      if (obj === 'lead') return { id: LEAD_ID, name: 'Maria', phone: null, stageId: null, score: 50, intent: 'ENDERECO', source: 'INDICACAO', tags: [] };
+      return null;
+    });
+    (data.list as ReturnType<typeof vi.fn>).mockImplementation(async (obj: string) => {
+      if (obj === 'knowledgeSection') {
+        return [{ slug: '__ai_settings', content: JSON.stringify({ mode: 'hibrido', autopilotIntents: ['ENDERECO'] }) }];
+      }
+      if (obj === 'chatMessage') return [{ id: 'm1', direction: 'IN', body: 'onde fica?', sentAt: '2026-07-04T10:00:00Z' }];
+      if (obj === 'service') return [{ priceCents: 55000 }];
+      return [];
+    });
+    (data.create as ReturnType<typeof vi.fn>).mockImplementation(async (obj: string) =>
+      obj === 'aiSuggestion' ? { id: 's1' } : { id: 'm-out' },
+    );
+
+    const r = await runTawany(
+      { messageId: 'm1', conversationId: UUID },
+      { ai: makeAi(chatResult({ content: 'Estamos na Rua A, 123.', finishReason: 'stop' })), data },
+    );
+
+    expect(r.status).toBe('replied');
+    expect(data.create).toHaveBeenCalledWith('aiSuggestion', expect.objectContaining({ riskLevel: 'low' }));
+    expect(data.create).toHaveBeenCalledWith('chatMessage', expect.objectContaining({ direction: 'OUT', body: 'Estamos na Rua A, 123.' }));
+    expect(data.update).toHaveBeenCalledWith('aiSuggestion', 's1', { status: 'SENT' });
+  });
+
+  it('modo híbrido deixa preço em aprovação humana mesmo com intenção permitida', async () => {
+    const data = makeData();
+    (data.get as ReturnType<typeof vi.fn>).mockImplementation(async (obj: string) => {
+      if (obj === 'conversation') return { id: UUID, leadId: LEAD_ID, status: 'OPEN', needsHuman: false };
+      if (obj === 'lead') return { id: LEAD_ID, name: 'Maria', phone: null, stageId: null, score: 50, intent: 'PRECO', source: 'INDICACAO', tags: [] };
+      return null;
+    });
+    (data.list as ReturnType<typeof vi.fn>).mockImplementation(async (obj: string) => {
+      if (obj === 'knowledgeSection') {
+        return [{ slug: '__ai_settings', content: JSON.stringify({ mode: 'hibrido', autopilotIntents: ['PRECO'] }) }];
+      }
+      if (obj === 'chatMessage') return [{ id: 'm1', direction: 'IN', body: 'preço?', sentAt: '2026-07-04T10:00:00Z' }];
+      if (obj === 'service') return [{ priceCents: 55000 }];
+      return [];
+    });
+    (data.create as ReturnType<typeof vi.fn>).mockImplementation(async (obj: string) =>
+      obj === 'aiSuggestion' ? { id: 's1' } : { id: 'm-out' },
+    );
+
+    const r = await runTawany(
+      { messageId: 'm1', conversationId: UUID },
+      { ai: makeAi(chatResult({ content: 'A consulta custa R$ 550,00.', finishReason: 'stop' })), data },
+    );
+
+    expect(r.status).toBe('replied');
+    expect(data.create).toHaveBeenCalledWith('aiSuggestion', expect.objectContaining({ riskLevel: 'medium', status: 'PENDING' }));
+    expect(data.create).not.toHaveBeenCalledWith('chatMessage', expect.objectContaining({ direction: 'OUT' }));
+    expect(data.update).not.toHaveBeenCalledWith('aiSuggestion', 's1', { status: 'SENT' });
+  });
+
   it('passes the patient model fallback list to the ai client', async () => {
     process.env.DEFAULT_MODEL_PATIENT_FALLBACK = 'z-ai/glm-5.2';
     const data = makeData();

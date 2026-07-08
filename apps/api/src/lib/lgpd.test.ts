@@ -35,15 +35,14 @@ describe('LGPD exportLeadData', () => {
 });
 
 describe('LGPD anonymizeLead', () => {
-  it('replaces PII with synthetic values and clears conversation content', async () => {
+  it('replaces lead PII and clears conversation content without erasing patient registration data', async () => {
     const get = vi.fn().mockResolvedValue({ id: 'L1' });
     const list = vi
       .fn()
       .mockResolvedValueOnce([{ id: 'C1' }])
       .mockResolvedValueOnce([{ id: 'M1' }])
       .mockResolvedValueOnce([{ id: 'AS1' }])
-      .mockResolvedValueOnce([{ id: 'A1' }])
-      .mockResolvedValueOnce([{ id: 'P1' }]);
+      .mockResolvedValueOnce([{ id: 'A1' }]);
     const update = vi.fn().mockResolvedValue({});
     const { anonymizeLead } = await import('./lgpd');
 
@@ -57,14 +56,14 @@ describe('LGPD anonymizeLead', () => {
     expect(update).toHaveBeenCalledWith('chatMessage', 'M1', { body: '[anonimizado]', mediaUrl: null });
     expect(update).toHaveBeenCalledWith('aiSuggestion', 'AS1', { body: '[anonimizado]', originalBody: null });
     expect(update).toHaveBeenCalledWith('appointment', 'A1', { notes: null });
-    expect(update).toHaveBeenCalledWith('patient', 'P1', expect.objectContaining({ phone: null, email: null }));
+    expect(update).not.toHaveBeenCalledWith('patient', expect.any(String), expect.anything());
     expect(result).toEqual({
       leadUpdated: true,
       conversationsAnonymized: 1,
       messagesAnonymized: 1,
       suggestionsAnonymized: 1,
       appointmentsAnonymized: 1,
-      patientsAnonymized: 1,
+      patientsAnonymized: 0,
     });
   });
 });

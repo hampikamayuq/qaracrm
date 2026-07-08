@@ -63,4 +63,36 @@ describe('LGPD routes', () => {
 
     expect(response.status).toHaveBeenCalledWith(400);
   });
+
+  it('requires explicit confirmation before anonymizing', async () => {
+    const get = vi.fn().mockResolvedValue({ id: 'L1' });
+    const update = vi.fn();
+    const { anonymizeLeadRoute } = await import('./lgpd-routes');
+    const response = res();
+
+    await anonymizeLeadRoute(req({ body: { leadId: 'L1' }, userRole: 'admin' }), response, api({ get, update }));
+
+    expect(response.status).toHaveBeenCalledWith(400);
+    expect(response.json).toHaveBeenCalledWith({ success: false, error: 'confirmAnonymize=true required' });
+    expect(update).not.toHaveBeenCalled();
+  });
+
+  it('anonymizes only when explicitly confirmed', async () => {
+    const get = vi.fn().mockResolvedValue({ id: 'L1' });
+    const list = vi.fn()
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([]);
+    const update = vi.fn().mockResolvedValue({});
+    const { anonymizeLeadRoute } = await import('./lgpd-routes');
+    const response = res();
+
+    await anonymizeLeadRoute(
+      req({ body: { leadId: 'L1', confirmAnonymize: true }, userRole: 'admin' }),
+      response,
+      api({ get, list, update }),
+    );
+
+    expect(update).toHaveBeenCalledWith('lead', 'L1', expect.objectContaining({ phone: null, email: null }));
+    expect(response.json).toHaveBeenCalledWith(expect.objectContaining({ success: true }));
+  });
 });

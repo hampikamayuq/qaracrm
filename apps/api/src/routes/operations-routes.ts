@@ -4,8 +4,15 @@ import { prisma } from '../lib/deps';
 import { createAiClient } from '../lib/ai-client';
 import { createPrismaDataApi } from '../lib/prisma-data-api';
 import { authMiddleware } from '../middleware/auth-middleware';
+import { requireAdmin } from '../middleware/authorization';
 import { runQaraClassifier } from '../logic-functions/qara-classifier';
 import { sendWhatsAppTemplate } from '../lib/tools/sendWhatsAppTemplate';
+import {
+  assertGoldenSetPassed,
+  formatGoldenSetReport,
+  loadGoldenCases,
+  runGoldenSet,
+} from '../lib/tawany/golden-set';
 
 const router = Router();
 const data = createPrismaDataApi(prisma);
@@ -86,8 +93,29 @@ export const pipelineRoute = async (_req: Request, res: Response): Promise<void>
   }
 };
 
+export const goldenSetRoute = async (_req: Request, res: Response): Promise<void> => {
+  try {
+    const cases = await loadGoldenCases();
+    const result = await runGoldenSet({ ai: createAiClient(), cases });
+    const report = formatGoldenSetReport(result);
+    assertGoldenSetPassed(result);
+    res.json({
+      success: true,
+      data: {
+        total: result.total,
+        passed: result.passed,
+        failed: result.failed,
+        report,
+      },
+    });
+  } catch (error) {
+    jsonError(res, 500, (error as Error).message);
+  }
+};
+
 router.post('/follow-up', authMiddleware, followUpRoute);
 router.post('/classify', authMiddleware, classifyRoute);
+router.post('/golden-set', authMiddleware, requireAdmin, goldenSetRoute);
 router.get('/pipeline', authMiddleware, pipelineRoute);
 
 export default router;

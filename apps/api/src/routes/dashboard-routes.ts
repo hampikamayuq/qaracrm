@@ -253,11 +253,23 @@ export const getTawanyRoute = async (req: Request, res: Response): Promise<void>
 
     const runs = await prisma.aiRunLog.findMany({
       where: { layer: 'tawany', createdAt: { gte: start } },
-      select: { createdAt: true, reason: true, success: true, latencyMs: true, fallbackUsed: true },
+      select: {
+        createdAt: true,
+        reason: true,
+        success: true,
+        latencyMs: true,
+        fallbackUsed: true,
+        promptTokens: true,
+        completionTokens: true,
+        totalTokens: true,
+        estimatedCostCents: true,
+      },
     });
 
     const stats = tawanyStats(runs);
     const decided = stats.respostas + stats.handoffs;
+    const tokens = runs.reduce((sum, run) => sum + (run.totalTokens ?? 0), 0);
+    const estimatedCostCents = runs.reduce((sum, run) => sum + (run.estimatedCostCents ?? 0), 0);
 
     res.json({
       success: true,
@@ -270,6 +282,8 @@ export const getTawanyRoute = async (req: Request, res: Response): Promise<void>
         latenciaMediaMs: stats.latenciaMediaMs,
         fallbacks: stats.fallbacks,
         total: stats.total,
+        tokens,
+        estimatedCostCents,
       },
     });
   } catch (error) {

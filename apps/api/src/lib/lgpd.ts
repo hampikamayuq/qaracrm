@@ -124,26 +124,12 @@ export const anonymizeLead = async (leadId: string, data: DataApi): Promise<Anon
     await data.update('appointment', appointmentId, { notes: null });
   }
 
-  const patients = await data.list('patient', {
-    filter: { leadId: { eq: leadId } },
-    select: { id: true },
-  });
-  for (const patient of patients) {
-    const patientId = asId(patient);
-    if (!patientId) continue;
-    await data.update('patient', patientId, {
-      name: `ANON-${randomUUID()}`,
-      phone: null,
-      email: null,
-    });
-  }
-
   return {
     leadUpdated: true,
     conversationsAnonymized: conversations.length,
     messagesAnonymized,
     suggestionsAnonymized,
     appointmentsAnonymized: appointments.length,
-    patientsAnonymized: patients.length,
+    patientsAnonymized: 0,
   };
 };

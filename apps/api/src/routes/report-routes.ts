@@ -2,6 +2,7 @@ import { Router } from 'express';
 import type { Request, Response } from 'express';
 import { prisma } from '../lib/deps';
 import { authMiddleware } from '../middleware/auth-middleware';
+import { requireReportExportRole } from '../middleware/authorization';
 import {
   DAY_MS,
   buildDailySeries,
@@ -341,6 +342,6 @@ export const exportReportCsvRoute = async (req: Request, res: Response): Promise
 router.get('/comercial', authMiddleware, reportRoute('comercial'));
 router.get('/atendimento', authMiddleware, reportRoute('atendimento'));
 router.get('/tawany', authMiddleware, reportRoute('tawany'));
-router.get('/:tipo/export.csv', authMiddleware, exportReportCsvRoute);
+router.get('/:tipo/export.csv', authMiddleware, requireReportExportRole, exportReportCsvRoute);
 
 export default router;

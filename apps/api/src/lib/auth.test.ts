@@ -15,6 +15,8 @@ describe('auth utilities', () => {
     expect(typeof token).toBe('string');
 
     const payload = verifyToken(token);
+    expect(payload).not.toBeNull();
+    if (!payload) throw new Error('expected token payload');
     expect(payload.userId).toBe('u1');
     expect(payload.role).toBe('admin');
     expect(payload.exp).toBeDefined();

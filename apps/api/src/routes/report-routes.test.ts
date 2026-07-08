@@ -27,10 +27,15 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('../lib/deps', () => ({ prisma: mocks.prisma }));
 vi.mock('../lib/auth', () => ({
-  verifyToken: vi.fn((token: string) => (token === 'good-token' ? { userId: 'u1', role: 'ADMIN' } : null)),
+  verifyToken: vi.fn((token: string) => {
+    if (token === 'good-token') return { userId: 'u1', role: 'ADMIN' };
+    if (token === 'reception-token') return { userId: 'u2', role: 'recepcao' };
+    return null;
+  }),
 }));
 
 const AUTH = { Authorization: 'Bearer good-token' };
+const RECEPTION_AUTH = { Authorization: 'Bearer reception-token' };
 
 // Data fixa para janelas de período determinísticas (só o relógio de Date,
 // timers reais para o supertest não travar).
@@ -83,6 +88,15 @@ describe('Report routes', () => {
       expect(res.status).toBe(400);
       expect(res.body.success).toBe(false);
     }
+  });
+
+  it('bloqueia export CSV para usuário sem papel financeiro/admin/marketing', async () => {
+    const app = await makeApp();
+
+    const res = await request(app).get('/api/reports/comercial/export.csv').set(RECEPTION_AUTH);
+
+    expect(res.status).toBe(403);
+    expect(mocks.prisma.lead.findMany).not.toHaveBeenCalled();
   });
 
   it('retorna 400 para custom com from > to', async () => {

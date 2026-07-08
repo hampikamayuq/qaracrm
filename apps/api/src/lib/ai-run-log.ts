@@ -10,6 +10,10 @@ export type AiRunLogInput = {
   reason?: string | null;
   conversationId?: string | null;
   messageId?: string | null;
+  promptTokens?: number;
+  completionTokens?: number;
+  totalTokens?: number;
+  estimatedCostCents?: number;
 };
 
 export const recordAiRun = async (
@@ -27,6 +31,10 @@ export const recordAiRun = async (
       ...(input.reason ? { reason: input.reason.slice(0, 500) } : {}),
       ...(input.conversationId ? { conversationId: input.conversationId } : {}),
       ...(input.messageId ? { messageId: input.messageId } : {}),
+      ...(typeof input.promptTokens === 'number' ? { promptTokens: input.promptTokens } : {}),
+      ...(typeof input.completionTokens === 'number' ? { completionTokens: input.completionTokens } : {}),
+      ...(typeof input.totalTokens === 'number' ? { totalTokens: input.totalTokens } : {}),
+      ...(typeof input.estimatedCostCents === 'number' ? { estimatedCostCents: input.estimatedCostCents } : {}),
       createdAt: new Date().toISOString(),
     });
   } catch (e) {

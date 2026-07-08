@@ -53,6 +53,10 @@ export const anonymizeLeadRoute = async (
     jsonError(res, 400, 'leadId required');
     return;
   }
+  if (req.body?.confirmAnonymize !== true) {
+    jsonError(res, 400, 'confirmAnonymize=true required');
+    return;
+  }
 
   try {
     const result = await anonymizeLead(leadId, api);

@@ -22,6 +22,10 @@ describe('recordAiRun', () => {
       reason: 'replied',
       conversationId: 'conv1',
       messageId: 'msg1',
+      promptTokens: 100,
+      completionTokens: 30,
+      totalTokens: 130,
+      estimatedCostCents: 7,
     });
 
     expect(create).toHaveBeenCalledWith('aiRunLog', expect.objectContaining({
@@ -34,6 +38,10 @@ describe('recordAiRun', () => {
       reason: 'replied',
       conversationId: 'conv1',
       messageId: 'msg1',
+      promptTokens: 100,
+      completionTokens: 30,
+      totalTokens: 130,
+      estimatedCostCents: 7,
     }));
   });
 

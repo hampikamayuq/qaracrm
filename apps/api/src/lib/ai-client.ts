@@ -68,6 +68,7 @@ type OpenRouterResponse = {
 
 const DEFAULT_MAX_OUTPUT_TOKENS = 600;
 const DEFAULT_MAX_INPUT_CHARS = 12_000;
+export const DEFAULT_AI_TIMEOUT_MS = 30_000;
 const TRUNCATION_MARKER = '\n[...truncated, message exceeded cap]';
 
 const parsePositiveInt = (value: string | undefined, fallback: number): number => {
@@ -95,7 +96,7 @@ export const createAiClient = (overrides?: {
   const baseUrl =
     overrides?.baseUrl ?? process.env.OPENROUTER_BASE_URL ?? 'https://openrouter.ai/api/v1';
   const timeoutMs =
-    overrides?.timeoutMs ?? Number.parseInt(process.env.AI_TIMEOUT_MS ?? '', 10);
+    overrides?.timeoutMs ?? parsePositiveInt(process.env.AI_TIMEOUT_MS, DEFAULT_AI_TIMEOUT_MS);
   const defaultMaxOutputTokens = parsePositiveInt(
     process.env.AI_MAX_OUTPUT_TOKENS,
     DEFAULT_MAX_OUTPUT_TOKENS,

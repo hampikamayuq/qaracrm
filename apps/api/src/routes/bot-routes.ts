@@ -3,6 +3,7 @@ import type { Request, Response } from 'express';
 import type { Prisma } from '@prisma/client';
 import { prisma } from '../lib/deps';
 import { authMiddleware } from '../middleware/auth-middleware';
+import { requireAdmin } from '../middleware/authorization';
 import {
   botBlockedByRisk,
   parseBotFlow,
@@ -378,13 +379,13 @@ router.get('/', authMiddleware, listBotsRoute);
 router.get('/risk-terms', authMiddleware, riskTermsRoute);
 router.get('/:id/versions', authMiddleware, listBotVersionsRoute);
 router.get('/:id', authMiddleware, getBotRoute);
-router.post('/', authMiddleware, createBotRoute);
-router.post('/import', authMiddleware, importBotRoute);
+router.post('/', authMiddleware, requireAdmin, createBotRoute);
+router.post('/import', authMiddleware, requireAdmin, importBotRoute);
 router.post('/test', authMiddleware, testBotRoute);
-router.post('/:id/duplicate', authMiddleware, duplicateBotRoute);
-router.post('/:id/revert', authMiddleware, revertBotRoute);
-router.put('/:id', authMiddleware, updateBotRoute);
-router.patch('/:id', authMiddleware, toggleBotRoute);
-router.delete('/:id', authMiddleware, deleteBotRoute);
+router.post('/:id/duplicate', authMiddleware, requireAdmin, duplicateBotRoute);
+router.post('/:id/revert', authMiddleware, requireAdmin, revertBotRoute);
+router.put('/:id', authMiddleware, requireAdmin, updateBotRoute);
+router.patch('/:id', authMiddleware, requireAdmin, toggleBotRoute);
+router.delete('/:id', authMiddleware, requireAdmin, deleteBotRoute);
 
 export default router;

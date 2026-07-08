@@ -56,4 +56,19 @@ describe('createDebounce', () => {
     expect(debounce.isOptOut('Quero agendar um horario')).toBe(false);
     expect(debounce.isOptOut('Pará de Minas')).toBe(false);
   });
+
+  it('trailing mode flushes only the last message after the quiet window', async () => {
+    const onFlush = vi.fn();
+    const debounce = createDebounce(20_000);
+
+    expect(debounce.check('conv-1', 'msg-1', 'oi', onFlush)).toEqual({ status: 'defer' });
+    expect(debounce.check('conv-1', 'msg-2', 'quero agendar', onFlush)).toEqual({ status: 'defer' });
+
+    await vi.advanceTimersByTimeAsync(19_999);
+    expect(onFlush).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(1);
+    expect(onFlush).toHaveBeenCalledTimes(1);
+    expect(onFlush).toHaveBeenCalledWith({ conversationId: 'conv-1', messageId: 'msg-2', text: 'quero agendar' });
+  });
 });

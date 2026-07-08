@@ -1,5 +1,10 @@
 import type { DataApi } from 'src/lib/data';
+import { modelWithFallback, type AiClient } from 'src/lib/ai-client';
+import { loadAiSettings } from 'src/lib/ai-settings';
 import { daysSince, FOLLOWUP_THRESHOLD_DAYS } from 'src/lib/followup/categorize';
+import { validateReply } from 'src/lib/guards/reply-validator';
+import { classifyTawanyRisk } from 'src/lib/tawany/risk';
+import { sendWhatsApp } from 'src/lib/tools/sendWhatsApp';
 import { stageFromTags, tagsOf } from 'src/routes/pipeline-routes';
 
 const FOLLOWUP_DUE_OFFSET_DAYS = 1; // dá 24h para a Tawany antes de escalar
@@ -9,10 +14,18 @@ const CLOSED_STAGES = new Set(['perdido', 'alta-manutencao', 'atendido']);
 
 type LeadLike = {
   id: string;
+  intent?: string | null;
+  score?: number | null;
   tags?: unknown;
   updatedAt?: string | Date | null;
   nextActionAt?: string | Date | null;
   assignedToId?: string | null;
+};
+
+type ConversationLike = {
+  id: string;
+  leadId?: string | null;
+  status?: string | null;
 };
 
 const tomorrow = (now: Date): string => {
@@ -34,12 +47,13 @@ export type FollowupResult = {
 export const runFollowupEngine = async (
   now: Date,
   data: DataApi,
+  deps: { ai?: AiClient } = {},
 ): Promise<FollowupResult> => {
   const result: FollowupResult = { leadsScanned: 0, tasksCreated: 0, errors: 0 };
 
   const leads = (await data.list('lead', {
     filter: { optedOut: { eq: false } },
-    select: { id: true, tags: true, updatedAt: true, nextActionAt: true, assignedToId: true },
+    select: { id: true, intent: true, score: true, tags: true, updatedAt: true, nextActionAt: true, assignedToId: true },
     limit: 500,
   })) as LeadLike[];
   result.leadsScanned = leads.length;
@@ -72,12 +86,98 @@ export const runFollowupEngine = async (
       });
       result.tasksCreated++;
       await data.update('lead', lead.id, { nextActionAt: tomorrow(now) });
+      if (deps.ai) {
+        await createIntelligentFollowup(lead, data, deps.ai);
+      }
     } catch {
       result.errors++;
     }
   }
 
   return result;
+};
+
+const normalizedIntent = (intent: string | null | undefined): string => (
+  typeof intent === 'string' ? intent.trim().toUpperCase() : ''
+);
+
+const shouldSendFollowup = (
+  mode: string,
+  riskLevel: 'low' | 'medium' | 'high',
+  intent: string | null | undefined,
+  autopilotIntents: string[],
+): boolean => {
+  if (mode === 'autopilot') return true;
+  if (mode !== 'hibrido' || riskLevel !== 'low') return false;
+  return autopilotIntents.includes(normalizedIntent(intent));
+};
+
+const createIntelligentFollowup = async (
+  lead: LeadLike,
+  data: DataApi,
+  ai: AiClient,
+): Promise<void> => {
+  const conversations = (await data.list('conversation', {
+    filter: { leadId: { eq: lead.id }, status: { eq: 'OPEN' } },
+    select: { id: true, leadId: true, status: true },
+    limit: 1,
+  })) as ConversationLike[];
+  const conversation = conversations[0];
+  if (!conversation?.id) return;
+
+  const model = modelWithFallback(
+    process.env.DEFAULT_MODEL_PATIENT,
+    process.env.DEFAULT_MODEL_PATIENT_FALLBACK,
+    'minimax/minimax-m3',
+  );
+  const response = await ai.chat({
+    model,
+    system: [
+      'Voce e Tawany, assistente de atendimento da Qara Clinic.',
+      'Redija um follow-up curto, acolhedor e sem inventar preco, diagnostico, disponibilidade ou conduta medica.',
+      'Nao inclua dados sensiveis do paciente.',
+    ].join(' '),
+    messages: [
+      {
+        role: 'user',
+        content: `Crie uma mensagem de follow-up para um lead com intencao ${normalizedIntent(lead.intent) || 'NAO_INFORMADA'}.`,
+      },
+    ],
+  });
+  const body = (response.content ?? '').trim();
+  if (!body) return;
+
+  const guard = validateReply(body, { knownPrices: [] });
+  if (!guard.ok) return;
+
+  const riskLevel = classifyTawanyRisk(body, {
+    lead: {
+      id: lead.id,
+      name: '',
+      phone: null,
+      stage: null,
+      score: lead.score ?? 0,
+      intent: lead.intent ?? null,
+      tags: [],
+    },
+  });
+  const suggestion = await data.create('aiSuggestion', {
+    conversationId: conversation.id,
+    model: response.modelUsed ?? model,
+    body,
+    riskLevel,
+    status: 'PENDING',
+    promptVersion: process.env.TAWANY_PROMPT_VERSION ?? 'v1',
+  });
+
+  const settings = await loadAiSettings(data);
+  if (
+    shouldSendFollowup(settings.mode, riskLevel, lead.intent, settings.autopilotIntents) &&
+    typeof suggestion.id === 'string'
+  ) {
+    await sendWhatsApp.execute({ conversationId: conversation.id, text: body }, data);
+    await data.update('aiSuggestion', suggestion.id, { status: 'SENT' });
+  }
 };
 
 // ponytail: o wrapper defineLogicFunction (cron Twenty) foi removido — o

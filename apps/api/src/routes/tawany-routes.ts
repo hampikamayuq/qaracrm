@@ -99,7 +99,23 @@ export const approveSuggestionRoute = async (req: Request, res: Response): Promi
       return;
     }
 
-    await sendWhatsApp.execute({ conversationId: current.conversationId, text: finalBody }, data);
+    try {
+      await sendWhatsApp.execute({ conversationId: current.conversationId, text: finalBody }, data);
+    } catch (error) {
+      await prisma.aiSuggestion.update({
+        where: { id: suggestionId },
+        data: {
+          status: 'PENDING',
+          approvedById: null,
+          decidedAt: null,
+          humanEdited,
+          ...(humanEdited ? { originalBody: current.body, body: finalBody } : {}),
+        },
+      });
+      console.error('[tawany] approved suggestion send failed:', (error as Error).message);
+      jsonError(res, 502, 'Failed to send approved suggestion');
+      return;
+    }
     await prisma.aiSuggestion.update({
       where: { id: suggestionId },
       data: { status: 'SENT' },

@@ -20,6 +20,18 @@ describe('validateReply', () => {
     if (!r.ok) expect(r.reason).toMatch(/price/);
   });
 
+  it('fails on price-like text when no known prices are available', () => {
+    const r = validateReply('A consulta fica 500 reais.', { knownPrices: [] });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.reason).toMatch(/price/);
+  });
+
+  it('fails on CPF-like personal data in the reply', () => {
+    const r = validateReply('O CPF dela é 123.456.789-09.', { knownPrices });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.reason).toBe('pii_cpf');
+  });
+
   it('passes a reply with multiple known prices', () => {
     const r = validateReply('RJ R$ 650, SP R$ 800, ou tele R$ 650.', { knownPrices });
     expect(r.ok).toBe(true);

@@ -8,6 +8,31 @@ export const metaGraphBreaker = new CircuitBreaker('meta-graph', {
   cooldownMs: 30_000,
 });
 
+const sendWindows = new Map<string, { startedAt: number; count: number }>();
+const parsePositiveInt = (value: string | undefined, fallback: number): number => {
+  if (!value) return fallback;
+  const parsed = Number.parseInt(value.replaceAll('_', ''), 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+};
+
+export const resetSendWhatsAppRateLimit = (): void => {
+  sendWindows.clear();
+};
+
+const assertSendRateLimit = (conversationId: string): void => {
+  const max = parsePositiveInt(process.env.SEND_WHATSAPP_RATE_LIMIT_PER_MINUTE, 30);
+  const now = Date.now();
+  const existing = sendWindows.get(conversationId);
+  if (!existing || now - existing.startedAt >= 60_000) {
+    sendWindows.set(conversationId, { startedAt: now, count: 1 });
+    return;
+  }
+  if (existing.count >= max) {
+    throw new Error('rate_limited:sendWhatsApp');
+  }
+  existing.count++;
+};
+
 export const sendWhatsApp = {
   name: 'sendWhatsApp',
   description: 'Envia mensagem WhatsApp para uma conversa via Meta Cloud API.',
@@ -24,6 +49,7 @@ export const sendWhatsApp = {
     if (!conv) return JSON.stringify({ ok: false, error: 'conversation_not_found' });
 
     const to = typeof conv.externalId === 'string' ? conv.externalId : '';
+    assertSendRateLimit(args.conversationId);
     
     // In test mode, never send to Meta - just record in CRM
     const isTestMode = ctx.testMode === true;

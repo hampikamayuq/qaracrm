@@ -8,7 +8,7 @@ import { updateLead } from './updateLead';
 import { updateConversation } from './updateConversation';
 import { assignTag } from './assignTag';
 import { createActivity } from './createActivity';
-import { metaGraphBreaker, sendWhatsApp } from './sendWhatsApp';
+import { metaGraphBreaker, resetSendWhatsAppRateLimit, sendWhatsApp } from './sendWhatsApp';
 import { handoffToHuman } from './handoffToHuman';
 import { tawanyTools, ALL_TOOLS } from './index';
 
@@ -167,6 +167,21 @@ describe('write tools', () => {
     expect(JSON.parse(r)).toMatchObject({ ok: false, error: 'conversation_not_found' });
   });
 
+  it('sendWhatsApp rate-limits repeated sends per conversation', async () => {
+    process.env.SEND_WHATSAPP_RATE_LIMIT_PER_MINUTE = '2';
+    resetSendWhatsAppRateLimit();
+    const get = vi.fn().mockResolvedValue({ id: UUID, channel: 'WHATSAPP', externalId: '5511999998888' });
+    const ctx = api({ get });
+    try {
+      await sendWhatsApp.execute({ conversationId: UUID, text: 'Olá 1' }, ctx);
+      await sendWhatsApp.execute({ conversationId: UUID, text: 'Olá 2' }, ctx);
+      await expect(sendWhatsApp.execute({ conversationId: UUID, text: 'Olá 3' }, ctx)).rejects.toThrow('rate_limited');
+    } finally {
+      delete process.env.SEND_WHATSAPP_RATE_LIMIT_PER_MINUTE;
+      resetSendWhatsAppRateLimit();
+    }
+  });
+
   it('handoffToHuman sets needsHuman + status', async () => {
     const update = vi.fn().mockResolvedValue({ id: 'c1' });
     await handoffToHuman.execute({ conversationId: UUID, reason: 'urgencia' }, api({ update }));
@@ -179,11 +194,11 @@ describe('write tools', () => {
 });
 
 describe('tawanyTools index', () => {
-  it('exports 12 LLM-callable tools with OpenAI-compatible schema', () => {
+  it('exports 14 LLM-callable tools with OpenAI-compatible schema', () => {
     // sendWhatsApp is now INTERNAL only (handler-side, not model-callable) to
     // prevent the model from sending a free-text reply AND calling sendWhatsApp
     // in the same iteration (double-send).
-    expect(ALL_TOOLS).toHaveLength(12);
+    expect(ALL_TOOLS).toHaveLength(14);
     for (const entry of tawanyTools.schema) {
       expect(entry.type).toBe('function');
       expect(entry.function.parameters).toHaveProperty('properties');

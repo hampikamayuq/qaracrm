@@ -1,9 +1,32 @@
 {
   "extends": "./tsconfig.json",
   "compilerOptions": {
-    "composite": true,
+    "module": "CommonJS",
+    "moduleResolution": "Node",
     "types": ["vitest/globals", "node"]
   },
-  "include": ["src/**/*.ts", "src/**/*.tsx"],
-  "exclude": ["node_modules", "dist"]
+  "include": ["src/**/*.ts"],
+  "exclude": [
+    "node_modules",
+    "dist",
+    "src/**/*.integration.test.ts",
+    "src/**/*.integration-test.ts",
+    "src/__tests__/**",
+    "src/agents/**",
+    "src/application-config.ts",
+    "src/command-menu-items/**",
+    "src/default-role.ts",
+    "src/fields/**",
+    "src/front-components/**",
+    "src/logic-functions/meta-webhook-verify.ts",
+    "src/logic-functions/meta-webhook-verify.test.ts",
+    "src/logic-functions/post-install-seed.ts",
+    "src/logic-functions/universal-webhook.ts",
+    "src/navigation-menu-items/**",
+    "src/objects/**",
+    "src/page-layouts/**",
+    "src/roles/**",
+    "src/skills/**",
+    "src/views/**"
+  ]
 }
