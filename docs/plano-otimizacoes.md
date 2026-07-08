@@ -143,11 +143,28 @@ Ordem exata. 👤 = você (dashboard/1 clique) · 🤖 = agente (automatizável)
 
 ### 1.1 Lembrete de consulta D-1 (P)
 **Por quê:** reduz falta (no-show) — maior ROI de clínica. Já implementado.
-**Passos:** (1) aprovar os templates HSM na Meta (Business Manager →
-WhatsApp → Message Templates, textos em `src/lib/templates/hsm-messages.ts`);
-(2) `ENABLE_SCHEDULER=true` na API; (3) acompanhar 1 semana nos logs/feed.
+
+> ⚠️ **Efeito colateral conhecido**: `ENABLE_SCHEDULER=true` liga DOIS jobs
+> (`lib/scheduler.ts`): o D-1 **e** o `runFollowUpJob`, que envia
+> `HSM_FOLLOW_UP_TEMPLATE` para **toda conversa OPEN sem mensagem há 48h+**
+> e a marca `PENDING_PATIENT`. Ligar a flag com backlog de conversas
+> antigas = rajada de follow-ups não planejados.
+
+**Passos:**
+1. **Antes de tudo — separar as flags (P, código):** dividir em
+   `ENABLE_D1_REMINDERS` e `ENABLE_FOLLOWUP_HSM` (gate por job em
+   `runScheduledJobs`), com teste. Alternativa mínima aceitável: triar e
+   resolver/fechar as conversas OPEN paradas há 48h+ no inbox ANTES de
+   ligar a flag única — mas a separação é barata e elimina o risco.
+2. Aprovar os templates HSM na Meta (Business Manager → WhatsApp →
+   Message Templates, textos em `src/lib/templates/hsm-messages.ts`) —
+   ambos os templates, se o follow-up HSM também for desejado.
+3. Ligar `ENABLE_D1_REMINDERS=true` (o follow-up HSM só quando a operação
+   decidir, ciente do comportamento de 48h).
+4. Acompanhar 1 semana nos logs/feed.
+
 **Aceite:** consulta amanhã → paciente recebe hoje; sem duplicados
-(`reminderD1Sent`).
+(`reminderD1Sent`); **nenhum follow-up HSM disparado sem decisão explícita**.
 
 ### 1.2 Backup agendado (P)
 Cron no host com `scripts/backup-db.sh` (pg_dump + retenção 30), diário,
