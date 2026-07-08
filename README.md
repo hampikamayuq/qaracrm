@@ -43,28 +43,41 @@ Requisitos: Node 24 (`.nvmrc`), pnpm, Docker (para o Postgres).
 ```bash
 pnpm install
 
-# Banco local (dev usa apps/api/.env → postgresql://postgres@localhost:5432/qara-crm)
+# 1. Variáveis de ambiente (o Prisma lê DATABASE_URL de apps/api/.env)
+cp apps/api/.env.example apps/api/.env
+cp apps/web/.env.example apps/web/.env.local
+
+# 2. Banco local — auth trust aceita o DATABASE_URL do .env.example e o
+#    do test:integration (que conecta sem senha)
 docker run -d --name qara-pg -e POSTGRES_HOST_AUTH_METHOD=trust \
   -e POSTGRES_DB=qara-crm -p 5432:5432 postgres:16
 pnpm --filter @qara/api db:migrate:deploy
 pnpm --filter @qara/api db:seed             # admin@qara.local / ADMIN_PASSWORD (default admin123)
 pnpm --filter @qara/api db:seed:knowledge   # 6 seções de knowledge da Tawany
 
+# 3. Servidores
 pnpm --filter @qara/api dev                 # API em :4000
 pnpm --filter @qara/web dev                 # web em :3000
 ```
 
-Variáveis: copie `apps/api/.env.example` e `apps/web/.env.example`. Sem
-`OPENROUTER_API_KEY` a Tawany faz handoff em vez de quebrar.
+Sem `OPENROUTER_API_KEY` a Tawany faz handoff em vez de quebrar.
 
 ## Testes
 
 ```bash
 pnpm --filter @qara/api test               # unitários (vitest)
-pnpm --filter @qara/api test:integration   # ponta a ponta com Postgres real
-                                           # (banco qara-crm-test — ver flow.integration.test.ts)
 pnpm --filter @qara/api lint               # oxlint
 pnpm --filter @qara/web build              # build de produção da web
+```
+
+Integração (ponta a ponta com Postgres real) usa o banco `qara-crm-test`
+— crie e migre uma vez antes da primeira rodada:
+
+```bash
+docker exec qara-pg psql -U postgres -c 'CREATE DATABASE "qara-crm-test"'
+DATABASE_URL=postgresql://postgres@localhost:5432/qara-crm-test \
+  pnpm --filter @qara/api db:migrate:deploy
+pnpm --filter @qara/api test:integration
 ```
 
 CI (`.github/workflows/ci.yml`): lint + typecheck + testes da API + build
