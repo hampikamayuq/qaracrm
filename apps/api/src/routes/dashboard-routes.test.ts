@@ -257,11 +257,13 @@ describe('Dashboard routes', () => {
       success: true,
       latencyMs: null,
       fallbackUsed: false,
+      totalTokens: 0,
+      estimatedCostCents: 0,
       ...over,
     });
     mocks.prisma.aiRunLog.findMany.mockResolvedValue([
-      run({ createdAt: at('2026-07-07T09:00:00Z'), latencyMs: 1000 }),
-      run({ createdAt: at('2026-07-07T10:00:00Z'), latencyMs: 2000 }),
+      run({ createdAt: at('2026-07-07T09:00:00Z'), latencyMs: 1000, totalTokens: 100, estimatedCostCents: 3 }),
+      run({ createdAt: at('2026-07-07T10:00:00Z'), latencyMs: 2000, totalTokens: 200, estimatedCostCents: 4 }),
       run({}),
       run({ success: false, reason: 'guard_failed: price_not_in_kb: 500' }),
       run({ success: false, reason: 'guard_failed: price_not_in_kb: 500' }),
@@ -285,6 +287,8 @@ describe('Dashboard routes', () => {
     expect(data.latenciaMediaMs).toBe(1500);
     expect(data.fallbacks).toBe(1);
     expect(data.total).toBe(8);
+    expect(data.tokens).toBe(300);
+    expect(data.estimatedCostCents).toBe(7);
     expect(data.perDay).toHaveLength(7);
     expect(data.perDay[6]).toEqual({ date: '2026-07-07', count: 2 });
     expect(data.perDay[5]).toEqual({ date: '2026-07-06', count: 1 });

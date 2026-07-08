@@ -1,5 +1,5 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { createAiClient } from './ai-client';
+import { afterEach, describe, it, expect, beforeEach, vi } from 'vitest';
+import { createAiClient, DEFAULT_AI_TIMEOUT_MS } from './ai-client';
 
 describe('ai-client', () => {
   const originalFetch = global.fetch;
@@ -7,6 +7,11 @@ describe('ai-client', () => {
   beforeEach(() => {
     process.env.OPENROUTER_API_KEY = 'test-key';
     process.env.OPENROUTER_BASE_URL = 'https://openrouter.ai/api/v1';
+  });
+
+  afterEach(() => {
+    delete process.env.AI_TIMEOUT_MS;
+    global.fetch = originalFetch;
   });
 
   it('returns parsed content from OpenRouter', async () => {
@@ -304,5 +309,30 @@ describe('ai-client', () => {
       delete process.env.AI_MAX_INPUT_CHARS;
       global.fetch = originalFetch;
     }
+  });
+
+  it('uses a default timeout when AI_TIMEOUT_MS is unset or invalid', async () => {
+    for (const raw of [undefined, '', 'abc', '-1']) {
+      if (raw === undefined) delete process.env.AI_TIMEOUT_MS;
+      else process.env.AI_TIMEOUT_MS = raw;
+      const fetchMock = vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          choices: [{ message: { content: 'ok' }, finish_reason: 'stop' }],
+        }),
+      });
+      global.fetch = fetchMock as unknown as typeof fetch;
+
+      const client = createAiClient();
+      await client.chat({
+        model: 'minimax/minimax-m3',
+        system: 'sys',
+        messages: [{ role: 'user', content: 'q' }],
+      });
+
+      const [, init] = fetchMock.mock.calls[0];
+      expect(init.signal).toBeInstanceOf(AbortSignal);
+    }
+    expect(DEFAULT_AI_TIMEOUT_MS).toBe(30_000);
   });
 });

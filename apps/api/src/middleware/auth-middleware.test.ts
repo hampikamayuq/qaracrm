@@ -31,7 +31,7 @@ describe('authMiddleware', () => {
 
     await authMiddleware(req, {} as Response, (() => { nextCalled = true; }) as NextFunction);
     expect(nextCalled).toBe(true);
-    expect((req as Record<string, unknown>).userId).toBe('u1');
+    expect((req as unknown as Record<string, unknown>).userId).toBe('u1');
   });
 
   it('blocks missing Authorization header', async () => {

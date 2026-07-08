@@ -3,6 +3,9 @@ import { sendWhatsAppTemplate } from './tools/sendWhatsAppTemplate';
 import { HSM_D1_REMINDER_TEMPLATE, HSM_FOLLOW_UP_TEMPLATE } from './templates/hsm-messages';
 
 export type SchedulerHandle = { stop(): void };
+export type SchedulerJobs = {
+  processPendingMetaWebhookEvents?: (options?: { now?: Date }) => Promise<unknown>;
+};
 
 const SAO_PAULO_UTC_OFFSET_HOURS = 3;
 const DEFAULT_INTERVAL_MS = 60_000;
@@ -96,16 +99,25 @@ export const runFollowUpJob = async (
   return { checked: conversations.length, sent };
 };
 
-export const runSchedulerTick = async (data: DataApi, now = new Date()): Promise<void> => {
+export const runSchedulerTick = async (
+  data: DataApi,
+  now = new Date(),
+  jobs: SchedulerJobs = {},
+): Promise<void> => {
+  await jobs.processPendingMetaWebhookEvents?.({ now });
   await runFollowUpJob(data, now);
   await runD1ReminderJob(data, now);
 };
 
-export const startScheduler = (data: DataApi, intervalMs = DEFAULT_INTERVAL_MS): SchedulerHandle | undefined => {
+export const startScheduler = (
+  data: DataApi,
+  intervalMs = DEFAULT_INTERVAL_MS,
+  jobs: SchedulerJobs = {},
+): SchedulerHandle | undefined => {
   if (process.env.ENABLE_SCHEDULER !== 'true') return undefined;
 
   const timer = setInterval(() => {
-    void runSchedulerTick(data).catch((error) => {
+    void runSchedulerTick(data, new Date(), jobs).catch((error) => {
       console.error('[scheduler] tick failed:', (error as Error).message);
     });
   }, intervalMs);

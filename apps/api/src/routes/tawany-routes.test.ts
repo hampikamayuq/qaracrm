@@ -153,6 +153,34 @@ describe('Tawany routes', () => {
     });
   });
 
+  it('keeps suggestion retryable when WhatsApp send fails after approval', async () => {
+    const { sendWhatsApp } = await import('../lib/tools/sendWhatsApp');
+    mocks.prisma.aiSuggestion.findUnique.mockResolvedValue({
+      body: 'original',
+      status: 'PENDING',
+      conversationId: 'c1',
+    });
+    mocks.prisma.aiSuggestion.updateMany.mockResolvedValue({ count: 1 });
+    vi.mocked(sendWhatsApp.execute).mockRejectedValue(new Error('Meta down'));
+    const { approveSuggestionRoute } = await import('./tawany-routes');
+    const response = res();
+
+    await approveSuggestionRoute(req({ body: { suggestionId: 's1', body: 'edited' }, userId: 'u1' }), response);
+
+    expect(mocks.prisma.aiSuggestion.update).toHaveBeenCalledWith({
+      where: { id: 's1' },
+      data: expect.objectContaining({
+        status: 'PENDING',
+        decidedAt: null,
+        body: 'edited',
+        originalBody: 'original',
+        humanEdited: true,
+      }),
+    });
+    expect(response.status).toHaveBeenCalledWith(502);
+    expect(response.json).toHaveBeenCalledWith({ success: false, error: 'Failed to send approved suggestion' });
+  });
+
   it('rejects a pending suggestion atomically', async () => {
     mocks.prisma.aiSuggestion.updateMany.mockResolvedValue({ count: 1 });
     const { rejectSuggestionRoute } = await import('./tawany-routes');

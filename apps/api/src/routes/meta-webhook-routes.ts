@@ -7,9 +7,76 @@ import { handleMetaWebhook } from '../logic-functions/meta-webhook';
 import { verifyMetaSignature } from '../lib/meta-signature';
 import { isDuplicateWebhook } from '../lib/webhook-dedup';
 import { forwardWebhookToTwenty, runTawanyForProcessedMessages } from '../lib/shadow';
+import type { Debouncer } from '../lib/debounce';
 
 const router: Router = Router();
 const data = createPrismaDataApi(prisma);
+
+const PENDING_WEBHOOK_AGE_MS = 2 * 60 * 1000;
+const PENDING_WEBHOOK_LIMIT = 25;
+
+const immediateDebounce: Debouncer = {
+  check: () => ({ status: 'process' }),
+  isOptOut: (text: string) => {
+    const normalized = text.trim().toLowerCase();
+    return /(^|\s)(parar|pare|sair|cancelar|descadastrar|stop|nao quero|não quero)([\s.!?]|$)/i.test(normalized);
+  },
+};
+
+const dispatchProcessedMessages = async (
+  processedMessages: Array<{ conversationId: string; messageId: string }>,
+): Promise<void> => {
+  await runTawanyForProcessedMessages(processedMessages, {
+    createAi: createAiClient,
+    data,
+  });
+};
+
+type PendingSweepOptions = {
+  now?: Date;
+  olderThanMs?: number;
+  limit?: number;
+};
+
+export const processPendingMetaWebhookEvents = async (
+  options: PendingSweepOptions = {},
+): Promise<{ scanned: number; processed: number; failed: number }> => {
+  const now = options.now ?? new Date();
+  const olderThanMs = options.olderThanMs ?? PENDING_WEBHOOK_AGE_MS;
+  const limit = options.limit ?? PENDING_WEBHOOK_LIMIT;
+  const cutoff = new Date(now.getTime() - olderThanMs);
+  const events = await prisma.webhookEvent.findMany({
+    where: {
+      source: 'meta',
+      processed: false,
+      createdAt: { lt: cutoff },
+    },
+    orderBy: { createdAt: 'asc' },
+    take: limit,
+  });
+
+  let processed = 0;
+  let failed = 0;
+  for (const event of events) {
+    try {
+      const result = await handleMetaWebhook(event.payload, data, immediateDebounce);
+      await prisma.webhookEvent.update({
+        where: { id: event.id },
+        data: { processed: true, error: null },
+      });
+      await dispatchProcessedMessages(result.processedMessages);
+      processed++;
+    } catch (error) {
+      failed++;
+      await prisma.webhookEvent.update({
+        where: { id: event.id },
+        data: { processed: true, error: (error as Error).message.slice(0, 500) },
+      });
+    }
+  }
+
+  return { scanned: events.length, processed, failed };
+};
 
 // Meta verification endpoint (GET)
 export const verifyMetaWebhook = (req: Request, res: Response): void => {
@@ -74,15 +141,15 @@ export const receiveMetaWebhook = async (req: Request, res: Response): Promise<v
     // [BLOQUEANTE] Process async: don't block the HTTP response
     setImmediate(async () => {
       try {
-        const result = await handleMetaWebhook(req.body, data);
+        const result = await handleMetaWebhook(req.body, data, undefined, async (message) => {
+          await dispatchProcessedMessages([message]);
+        });
         await prisma.webhookEvent.update({
           where: { id: webhookEvent.id },
-          data: { processed: true },
+          data: { processed: true, error: null },
         });
-        void runTawanyForProcessedMessages(result.processedMessages, {
-          createAi: createAiClient,
-          data,
-        }).catch((err) => console.error('[tawany] webhook run failed:', (err as Error).message));
+        void dispatchProcessedMessages(result.processedMessages)
+          .catch((err) => console.error('[tawany] webhook run failed:', (err as Error).message));
       } catch (err) {
         console.error('[meta-webhook] async processing error:', (err as Error).message);
         await prisma.webhookEvent.update({

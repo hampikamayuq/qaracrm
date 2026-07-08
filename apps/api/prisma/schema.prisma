@@ -288,6 +288,10 @@ model AiRunLog {
   reason         String?
   conversationId String?
   messageId      String?
+  promptTokens   Int?
+  completionTokens Int?
+  totalTokens    Int?
+  estimatedCostCents Int?
   createdAt      DateTime @default(now())
 
   @@index([layer, createdAt])

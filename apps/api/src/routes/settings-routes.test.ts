@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
     knowledgeSection: {
       findMany: vi.fn(),
       updateMany: vi.fn(),
+      upsert: vi.fn(),
     },
     user: {
       findMany: vi.fn(),
@@ -22,13 +23,18 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('../lib/deps', () => ({ prisma: mocks.prisma }));
 vi.mock('../lib/auth', () => ({
-  verifyToken: vi.fn((token: string) => (token === 'good-token' ? { userId: 'u1', role: 'ADMIN' } : null)),
+  verifyToken: vi.fn((token: string) => {
+    if (token === 'good-token') return { userId: 'u1', role: 'ADMIN' };
+    if (token === 'reception-token') return { userId: 'u2', role: 'recepcao' };
+    return null;
+  }),
 }));
 vi.mock('../lib/tawany/knowledge', () => ({
   invalidateKnowledgeCache: mocks.invalidateKnowledgeCache,
 }));
 
 const AUTH = { Authorization: 'Bearer good-token' };
+const RECEPTION_AUTH = { Authorization: 'Bearer reception-token' };
 
 const makeApp = async () => {
   const { default: router } = await import('./settings-routes');
@@ -87,6 +93,19 @@ describe('Settings routes', () => {
     expect(mocks.prisma.knowledgeSection.updateMany).not.toHaveBeenCalled();
   });
 
+  it('PUT /knowledge/:slug bloqueia usuário não-admin', async () => {
+    const app = await makeApp();
+
+    const res = await request(app)
+      .put('/api/settings/knowledge/tags')
+      .set(RECEPTION_AUTH)
+      .send({ content: 'novo conteúdo' });
+
+    expect(res.status).toBe(403);
+    expect(mocks.prisma.knowledgeSection.updateMany).not.toHaveBeenCalled();
+    expect(mocks.invalidateKnowledgeCache).not.toHaveBeenCalled();
+  });
+
   it('PUT /knowledge/:slug grava content + updatedById e invalida o cache', async () => {
     mocks.prisma.knowledgeSection.updateMany.mockResolvedValue({ count: 1 });
     const app = await makeApp();
@@ -115,14 +134,44 @@ describe('Settings routes', () => {
   });
 
   it('GET /ai devolve shadowMode e promptVersion', async () => {
+    mocks.prisma.knowledgeSection.findMany.mockResolvedValue([]);
     const app = await makeApp();
 
     const res = await request(app).get('/api/settings/ai').set(AUTH);
 
     expect(res.status).toBe(200);
     expect(res.body.data).toEqual({
+      mode: expect.stringMatching(/^(shadow|human_approval|autopilot|recomendacoes|hibrido)$/),
       shadowMode: expect.stringMatching(/^(shadow|human_approval|autopilot)$/),
       promptVersion: expect.any(String),
+      autopilotIntents: expect.any(Array),
+    });
+  });
+
+  it('PUT /ai salva modo híbrido e intents permitidas somente para admin', async () => {
+    mocks.prisma.knowledgeSection.upsert.mockResolvedValue({ id: 'cfg' });
+    const app = await makeApp();
+
+    const forbidden = await request(app)
+      .put('/api/settings/ai')
+      .set(RECEPTION_AUTH)
+      .send({ mode: 'hibrido', autopilotIntents: ['ENDERECO'] });
+    expect(forbidden.status).toBe(403);
+
+    const res = await request(app)
+      .put('/api/settings/ai')
+      .set(AUTH)
+      .send({ mode: 'hibrido', autopilotIntents: ['ENDERECO', 'HORARIO'] });
+
+    expect(res.status).toBe(200);
+    expect(mocks.prisma.knowledgeSection.upsert).toHaveBeenCalledWith(expect.objectContaining({
+      where: { slug: '__ai_settings' },
+      create: expect.objectContaining({ slug: '__ai_settings' }),
+      update: expect.objectContaining({ updatedById: 'u1' }),
+    }));
+    expect(JSON.parse(mocks.prisma.knowledgeSection.upsert.mock.calls[0][0].update.content)).toEqual({
+      mode: 'hibrido',
+      autopilotIntents: ['ENDERECO', 'HORARIO'],
     });
   });
 });

@@ -7,6 +7,7 @@ vi.mock('../lib/deps', () => ({
     webhookEvent: {
       create: vi.fn().mockResolvedValue({ id: 'evt-1' }),
       findFirst: vi.fn().mockResolvedValue(null),
+      findMany: vi.fn().mockResolvedValue([]),
       update: vi.fn().mockResolvedValue({}),
     },
   },
@@ -154,7 +155,15 @@ describe('Meta Webhook Routes', () => {
   it('deduplicates matching signatures before persisting WebhookEvent', async () => {
     const { receiveMetaWebhook } = await import('./meta-webhook-routes');
     const { prisma } = await import('../lib/deps');
-    prisma.webhookEvent.findFirst.mockResolvedValueOnce({ id: 'evt-old' });
+    vi.mocked(prisma.webhookEvent.findFirst).mockResolvedValueOnce({
+      id: 'evt-old',
+      source: 'meta',
+      payload: {},
+      signature: 'sha256=abc',
+      processed: true,
+      error: null,
+      createdAt: new Date('2026-07-08T00:00:00.000Z'),
+    });
     const response = res();
 
     await receiveMetaWebhook(
@@ -207,5 +216,41 @@ describe('Meta Webhook Routes', () => {
     );
 
     expect(response.sendStatus).toHaveBeenCalledWith(403);
+  });
+
+  it('sweeps pending webhook events and dispatches Tawany for processed messages', async () => {
+    const { processPendingMetaWebhookEvents } = await import('./meta-webhook-routes');
+    const { prisma } = await import('../lib/deps');
+    const { handleMetaWebhook } = await import('../logic-functions/meta-webhook');
+    const { runTawanyForProcessedMessages } = await import('../lib/shadow');
+    vi.mocked(prisma.webhookEvent.findMany).mockResolvedValueOnce([
+      {
+        id: 'evt-pending',
+        source: 'meta',
+        payload: { object: 'whatsapp_business_account', entry: [] },
+        signature: null,
+        processed: false,
+        error: null,
+        createdAt: new Date('2026-07-08T00:00:00.000Z'),
+      },
+    ]);
+    vi.mocked(handleMetaWebhook).mockResolvedValueOnce({
+      processedMessages: [{ conversationId: 'conv-1', messageId: 'msg-1' }],
+    });
+
+    const result = await processPendingMetaWebhookEvents({ now: new Date('2026-07-08T00:05:00.000Z') });
+
+    expect(result).toEqual({ scanned: 1, processed: 1, failed: 0 });
+    expect(prisma.webhookEvent.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({ processed: false }),
+    }));
+    expect(prisma.webhookEvent.update).toHaveBeenCalledWith({
+      where: { id: 'evt-pending' },
+      data: { processed: true, error: null },
+    });
+    expect(runTawanyForProcessedMessages).toHaveBeenCalledWith(
+      [{ conversationId: 'conv-1', messageId: 'msg-1' }],
+      expect.objectContaining({ data: expect.anything() }),
+    );
   });
 });

@@ -79,4 +79,15 @@ describe('scheduler', () => {
     expect(update).toHaveBeenCalledWith('conversation', 'c-old', { status: 'PENDING_PATIENT' });
     expect(result).toEqual({ checked: 1, sent: 1 });
   });
+
+  it('runs pending Meta webhook sweep as part of the scheduler tick', async () => {
+    const list = vi.fn().mockResolvedValue([]);
+    const processPendingMetaWebhookEvents = vi.fn().mockResolvedValue({ scanned: 0, processed: 0, failed: 0 });
+    const { runSchedulerTick } = await import('./scheduler');
+    const now = new Date('2026-07-05T12:00:00.000Z');
+
+    await runSchedulerTick(api({ list }), now, { processPendingMetaWebhookEvents });
+
+    expect(processPendingMetaWebhookEvents).toHaveBeenCalledWith({ now });
+  });
 });

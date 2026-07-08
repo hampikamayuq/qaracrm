@@ -2,8 +2,16 @@ import { Router } from 'express';
 import type { Request, Response } from 'express';
 import { prisma } from '../lib/deps';
 import { authMiddleware } from '../middleware/auth-middleware';
+import { requireAdmin } from '../middleware/authorization';
 import { invalidateKnowledgeCache } from '../lib/tawany/knowledge';
 import { getShadowMode } from '../lib/shadow';
+import {
+  AI_SETTINGS_SLUG,
+  parseAiSettings,
+  parseAiSettingsContent,
+  serializeAiSettings,
+  type AiRuntimeSettings,
+} from '../lib/ai-settings';
 
 const router = Router();
 
@@ -77,11 +85,19 @@ export const updateKnowledgeRoute = async (req: Request, res: Response): Promise
 // GET informativo para /settings/ai: modo de envio atual e versão do prompt.
 export const aiSettingsRoute = async (_req: Request, res: Response): Promise<void> => {
   try {
+    const rows = await prisma.knowledgeSection.findMany({
+      where: { slug: AI_SETTINGS_SLUG },
+      take: 1,
+      select: { content: true },
+    });
+    const settings = parseAiSettingsContent(rows[0]?.content);
     res.json({
       success: true,
       data: {
+        mode: settings.mode,
         shadowMode: getShadowMode(),
         promptVersion: process.env.TAWANY_PROMPT_VERSION ?? 'v1',
+        autopilotIntents: settings.autopilotIntents,
       },
     });
   } catch (error) {
@@ -89,8 +105,38 @@ export const aiSettingsRoute = async (_req: Request, res: Response): Promise<voi
   }
 };
 
+export const updateAiSettingsRoute = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const parsed = parseAiSettings(req.body);
+    const requested = req.body && typeof req.body === 'object' ? req.body as Partial<AiRuntimeSettings> : {};
+    if (requested.mode !== undefined && parsed.mode !== requested.mode) {
+      jsonError(res, 400, 'invalid mode');
+      return;
+    }
+    const content = serializeAiSettings(parsed);
+    await prisma.knowledgeSection.upsert({
+      where: { slug: AI_SETTINGS_SLUG },
+      create: {
+        slug: AI_SETTINGS_SLUG,
+        title: 'AI settings',
+        content,
+        sortOrder: 10_000,
+        updatedById: req.userId ?? null,
+      },
+      update: {
+        content,
+        updatedById: req.userId ?? null,
+      },
+    });
+    res.json({ success: true, data: parsed });
+  } catch (error) {
+    jsonError(res, 500, (error as Error).message);
+  }
+};
+
 router.get('/knowledge', authMiddleware, listKnowledgeRoute);
-router.put('/knowledge/:slug', authMiddleware, updateKnowledgeRoute);
+router.put('/knowledge/:slug', authMiddleware, requireAdmin, updateKnowledgeRoute);
 router.get('/ai', authMiddleware, aiSettingsRoute);
+router.put('/ai', authMiddleware, requireAdmin, updateAiSettingsRoute);
 
 export default router;

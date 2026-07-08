@@ -1,6 +1,7 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { DataApi } from '../lib/data';
 import { handleMetaWebhook } from './meta-webhook';
+import { createDebounce } from '../lib/debounce';
 
 // Auth + HMAC now handled by meta-webhook-routes.ts — this file tests only event processing.
 
@@ -53,6 +54,10 @@ const processDebounce = () => ({
 describe('handleMetaWebhook — inbound messages', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   it('creates a lead + conversation + IN message for a new sender', async () => {
@@ -155,6 +160,58 @@ describe('handleMetaWebhook — inbound messages', () => {
       expect.objectContaining({ conversationId: 'conv-9', agentHandled: true }),
     );
     expect(mocks.sendWhatsApp.execute).not.toHaveBeenCalled();
+  });
+
+  it('with trailing debounce processes only the last rapid message after the quiet window', async () => {
+    vi.useFakeTimers();
+    const secondBody = {
+      object: 'whatsapp_business_account',
+      entry: [
+        {
+          changes: [
+            {
+              value: {
+                messages: [
+                  {
+                    id: 'wamid.IN2',
+                    from: '5511999998888',
+                    timestamp: '1751650005',
+                    type: 'text',
+                    text: { body: 'quero agendar botox' },
+                  },
+                ],
+              },
+            },
+          ],
+        },
+      ],
+    };
+    const list = vi
+      .fn()
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ id: 'conv-9', leadId: 'lead-1' }])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ id: 'conv-9', leadId: 'lead-1' }]);
+    const create = vi
+      .fn()
+      .mockResolvedValueOnce({ id: 'msg-1' })
+      .mockResolvedValueOnce({ id: 'msg-2' });
+    const update = vi.fn().mockResolvedValue({ id: 'updated' });
+    const onProcessed = vi.fn();
+    const debounce = createDebounce(20_000);
+
+    const first = await handleMetaWebhook(waBody, api({ list, create, update }), debounce, onProcessed);
+    const second = await handleMetaWebhook(secondBody, api({ list, create, update }), debounce, onProcessed);
+
+    expect(first.processedMessages).toEqual([]);
+    expect(second.processedMessages).toEqual([]);
+    expect(onProcessed).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(20_000);
+
+    expect(onProcessed).toHaveBeenCalledTimes(1);
+    expect(onProcessed).toHaveBeenCalledWith({ conversationId: 'conv-9', messageId: 'msg-2' });
+    expect(update).toHaveBeenCalledWith('chatMessage', 'msg-2', { agentHandled: false });
   });
 
   it('marks opt-out leads and sends the confirmation without logging the body', async () => {

@@ -28,10 +28,15 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('../lib/deps', () => ({ prisma: mocks.prisma }));
 vi.mock('../lib/auth', () => ({
-  verifyToken: vi.fn((token: string) => (token === 'good-token' ? { userId: 'u1', role: 'ADMIN' } : null)),
+  verifyToken: vi.fn((token: string) => {
+    if (token === 'good-token') return { userId: 'u1', role: 'ADMIN' };
+    if (token === 'reception-token') return { userId: 'u2', role: 'recepcao' };
+    return null;
+  }),
 }));
 
 const AUTH = { Authorization: 'Bearer good-token' };
+const RECEPTION_AUTH = { Authorization: 'Bearer reception-token' };
 const STEPS = { rules: [{ terms: ['preço'], responses: ['A consulta custa R$ 550.'] }] };
 
 const makeApp = async () => {
@@ -83,6 +88,22 @@ describe('Bot routes', () => {
     expect(res.body.data).toHaveLength(2);
     expect(res.body.data[0]).toMatchObject({ id: 'b1', name: 'FAQ', active: true, rules: 1 });
     expect(res.body.data[1]).toMatchObject({ id: 'b2', rules: 0 });
+  });
+
+  it('bloqueia mutações de bot para usuário não-admin', async () => {
+    const app = await makeApp();
+
+    expect((await request(app).post('/api/bots').set(RECEPTION_AUTH).send({ name: 'FAQ', rules: [{ terms: ['oi'], responses: ['olá'] }] })).status).toBe(403);
+    expect((await request(app).post('/api/bots/import').set(RECEPTION_AUTH).send({ flow: {} })).status).toBe(403);
+    expect((await request(app).post('/api/bots/b1/duplicate').set(RECEPTION_AUTH)).status).toBe(403);
+    expect((await request(app).post('/api/bots/b1/revert').set(RECEPTION_AUTH).send({ versionId: 'v1' })).status).toBe(403);
+    expect((await request(app).put('/api/bots/b1').set(RECEPTION_AUTH).send({ name: 'FAQ', rules: [{ terms: ['oi'], responses: ['olá'] }] })).status).toBe(403);
+    expect((await request(app).patch('/api/bots/b1').set(RECEPTION_AUTH).send({ active: false })).status).toBe(403);
+    expect((await request(app).delete('/api/bots/b1').set(RECEPTION_AUTH)).status).toBe(403);
+    expect(mocks.prisma.bot.create).not.toHaveBeenCalled();
+    expect(mocks.prisma.bot.update).not.toHaveBeenCalled();
+    expect(mocks.prisma.bot.updateMany).not.toHaveBeenCalled();
+    expect(mocks.prisma.bot.deleteMany).not.toHaveBeenCalled();
   });
 
   it('POST /import cria bot novo a partir de um fluxo válido', async () => {

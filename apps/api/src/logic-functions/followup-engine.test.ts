@@ -74,4 +74,44 @@ describe('runFollowupEngine', () => {
     expect(r.errors).toBe(1);
     expect(r.tasksCreated).toBe(1);
   });
+
+  it('cria sugestão inteligente e respeita gating híbrido antes de enviar', async () => {
+    const data = makeData([
+      { id: 'l1', tags: ['status:qualificado'], updatedAt: OLD, assignedToId: 'u1', intent: 'FOLLOWUP' },
+    ]).data;
+    const list = vi.fn(async (object: string) => {
+      if (object === 'lead') return [{ id: 'l1', tags: ['status:qualificado'], updatedAt: OLD, assignedToId: 'u1', intent: 'FOLLOWUP' }];
+      if (object === 'task') return [];
+      if (object === 'conversation') return [{ id: 'c1', leadId: 'l1', status: 'OPEN' }];
+      if (object === 'knowledgeSection') return [{ content: JSON.stringify({ mode: 'hibrido', autopilotIntents: ['FOLLOWUP'] }) }];
+      return [];
+    });
+    const create = vi.fn(async (object: string) => object === 'aiSuggestion' ? { id: 's1' } : { id: 'task-1' });
+    const update = vi.fn(async () => ({}));
+    const get = vi.fn(async (object: string, id: string) => {
+      if (object === 'conversation' && id === 'c1') {
+        return { id: 'c1', channel: 'WHATSAPP', externalId: '5511999998888' };
+      }
+      return null;
+    });
+    const ai = {
+      chat: vi.fn().mockResolvedValue({ content: 'Oi! Posso te ajudar a seguir com o atendimento?', finishReason: 'stop', toolCalls: [], usage: { promptTokens: 1, completionTokens: 1, totalTokens: 2 } }),
+    };
+
+    const r = await runFollowupEngine(NOW, { ...data, get, list, create, update }, { ai: ai as never });
+
+    expect(r.tasksCreated).toBe(1);
+    expect(create).toHaveBeenCalledWith('aiSuggestion', expect.objectContaining({
+      conversationId: 'c1',
+      body: 'Oi! Posso te ajudar a seguir com o atendimento?',
+      riskLevel: 'low',
+      status: 'PENDING',
+    }));
+    expect(create).toHaveBeenCalledWith('chatMessage', expect.objectContaining({
+      conversationId: 'c1',
+      direction: 'OUT',
+      body: 'Oi! Posso te ajudar a seguir com o atendimento?',
+    }));
+    expect(update).toHaveBeenCalledWith('aiSuggestion', 's1', { status: 'SENT' });
+  });
 });

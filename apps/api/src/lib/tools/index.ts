@@ -13,6 +13,7 @@ import { assignTag } from './assignTag';
 import { createActivity } from './createActivity';
 import { sendWhatsApp } from './sendWhatsApp';
 import { handoffToHuman } from './handoffToHuman';
+import { bookAppointment, checkAvailability } from './appointmentTools';
 
 export type TawanyTool = {
   name: string;
@@ -33,6 +34,8 @@ export const ALL_TOOLS: TawanyTool[] = [
   updateConversation,
   assignTag,
   createActivity,
+  checkAvailability,
+  bookAppointment,
   handoffToHuman,
 ];
 

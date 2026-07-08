@@ -5,10 +5,13 @@ import { validateReply } from 'src/lib/guards/reply-validator';
 import { detectInjection } from 'src/lib/guards/prompt-injection';
 import { handoff } from 'src/lib/handoff';
 import { recordAiRun } from 'src/lib/ai-run-log';
+import { captureExplicitPatientProfile } from 'src/lib/patient-profile';
 import { truncateToContextWindow } from 'src/lib/ai/context-window';
 import { buildTawanyContext, N_RECENT } from 'src/lib/tawany/context';
 import { isAutopilotMode } from 'src/lib/shadow';
 import { buildMessages, buildSystemPrompt } from 'src/lib/tawany/prompt-builder';
+import { loadAiSettings, type AiRuntimeSettings } from 'src/lib/ai-settings';
+import { classifyTawanyRisk, type TawanyRiskLevel } from 'src/lib/tawany/risk';
 import { runQaraClassifier } from './qara-classifier';
 import { runLeadScorer } from 'src/lib/lead-score/orchestrator';
 import { runLeadsNovosFlow } from './leads-novos-flow';
@@ -45,16 +48,44 @@ const resolveSendMode = (deps: { testMode?: boolean; sendMode?: TawanySendMode }
   return isAutopilotMode() ? 'send' : 'suggest_only';
 };
 
+const usageLog = (res: { usage?: { promptTokens: number; completionTokens: number; totalTokens: number } }) => ({
+  promptTokens: res.usage?.promptTokens ?? 0,
+  completionTokens: res.usage?.completionTokens ?? 0,
+  totalTokens: res.usage?.totalTokens ?? 0,
+  estimatedCostCents: 0,
+});
+
+const decideRuntimeSendMode = (
+  deps: { testMode?: boolean; sendMode?: TawanySendMode },
+  settings: AiRuntimeSettings,
+  riskLevel: TawanyRiskLevel,
+  intent: string | null | undefined,
+): TawanySendMode => {
+  if (deps.sendMode) return deps.sendMode;
+  if (deps.testMode) return 'test';
+  if (settings.mode === 'autopilot') return 'send';
+  if (settings.mode === 'hibrido') {
+    const normalizedIntent = typeof intent === 'string' ? intent.trim().toUpperCase() : '';
+    return riskLevel === 'low' && settings.autopilotIntents.includes(normalizedIntent)
+      ? 'send'
+      : 'suggest_only';
+  }
+  return 'suggest_only';
+};
+
 export const runTawany = async (
   params: TawanyHandlerParams,
   deps: TawanyDeps,
 ): Promise<TawanyResult> => {
   const { ai, data } = deps;
-  const sendMode = resolveSendMode(deps);
+  const explicitSendMode = resolveSendMode(deps);
   let totalToolCalls = 0;
 
   try {
     const tawanyCtx = await buildTawanyContext(params.conversationId, data);
+    const aiSettings = deps.sendMode || deps.testMode
+      ? null
+      : await loadAiSettings(data);
     const system = buildSystemPrompt(tawanyCtx);
     const messages = buildMessages(tawanyCtx);
 
@@ -89,6 +120,7 @@ export const runTawany = async (
           reason: 'tool_calls',
           conversationId: params.conversationId,
           messageId: params.messageId,
+          ...usageLog(res),
         });
         messages.push({ role: 'assistant', content: res.content, tool_calls: res.toolCalls });
         for (const call of res.toolCalls) {
@@ -122,17 +154,22 @@ export const runTawany = async (
           reason: `guard_failed: ${guard.reason}`,
           conversationId: params.conversationId,
           messageId: params.messageId,
+          ...usageLog(res),
         });
         await handoff(params.conversationId, `guard_failed: ${guard.reason}`.slice(0, 200), data);
         return { status: 'handoff', content: '', toolCalls: totalToolCalls };
       }
 
+      const riskLevel = classifyTawanyRisk(reply, tawanyCtx);
+      const sendMode = aiSettings
+        ? decideRuntimeSendMode(deps, aiSettings, riskLevel, tawanyCtx.lead?.intent)
+        : explicitSendMode;
       const suggestion = await data.create('aiSuggestion', {
         conversationId: params.conversationId,
         messageId: params.messageId,
         model: res.modelUsed,
         body: reply,
-        riskLevel: 'low',
+        riskLevel,
         status: 'PENDING',
         promptVersion: process.env.TAWANY_PROMPT_VERSION ?? 'v1',
       });
@@ -162,6 +199,7 @@ export const runTawany = async (
         reason: 'replied',
         conversationId: params.conversationId,
         messageId: params.messageId,
+        ...usageLog(res),
       });
       return { status: 'replied', content: reply, toolCalls: totalToolCalls };
     }
@@ -290,6 +328,15 @@ export const runTawanyHandler = async (
         reason: 'prompt_injection',
       }));
       return { status: 'handoff', toolCalls: 0, reason: 'prompt_injection' };
+    }
+
+    try {
+      await captureExplicitPatientProfile(
+        { conversationId: message.conversationId, text: message.body },
+        deps.data,
+      );
+    } catch (e) {
+      console.error('[tawany-handler] patient profile capture failed:', (e as Error).message);
     }
 
     let ai: AiClient;
