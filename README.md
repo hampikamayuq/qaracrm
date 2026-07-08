@@ -4,8 +4,7 @@ CRM próprio da Clínica QARA (dermatologia, RJ/SP) com a **Tawany** — agente
 de IA que atende pacientes pelo WhatsApp: triagem, qualificação,
 direcionamento e agendamento, sempre sob controle humano.
 
-Monorepo standalone (o projeto migrou do Twenty em 05/07/2026 — nada aqui
-depende do runtime Twenty).
+Monorepo standalone.
 
 ## Arquitetura
 
