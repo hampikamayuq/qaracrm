@@ -26,7 +26,10 @@ export type GoldenSetResult = {
   }>;
 };
 
-const DEFAULT_FIXTURE_PATH = path.join(__dirname, 'golden-cases.json');
+const DEFAULT_FIXTURE_PATHS = [
+  path.join(process.cwd(), 'src/lib/tawany/golden-cases.json'),
+  path.join(__dirname, 'golden-cases.json'),
+];
 
 const expectedGuardOk = (item: GoldenCase): boolean =>
   item.expectedGuardOk ?? item.shouldPass ?? true;
@@ -55,8 +58,20 @@ const evaluateContent = (reply: string, item: GoldenCase): string[] => {
   return failures;
 };
 
-export const loadGoldenCases = async (fixturePath = DEFAULT_FIXTURE_PATH): Promise<GoldenCase[]> => {
-  const raw = await readFile(fixturePath, 'utf8');
+const readFirstExisting = async (fixturePaths: string[]): Promise<string> => {
+  let lastError: unknown = null;
+  for (const fixturePath of fixturePaths) {
+    try {
+      return await readFile(fixturePath, 'utf8');
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error('golden_cases_not_found');
+};
+
+export const loadGoldenCases = async (fixturePath?: string): Promise<GoldenCase[]> => {
+  const raw = await readFirstExisting(fixturePath ? [fixturePath] : DEFAULT_FIXTURE_PATHS);
   const parsed = JSON.parse(raw) as unknown;
   if (!Array.isArray(parsed)) {
     throw new Error('golden_cases_invalid: expected array');
