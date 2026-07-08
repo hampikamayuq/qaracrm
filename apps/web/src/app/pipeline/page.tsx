@@ -2,7 +2,7 @@
 
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { CalendarClock, Clock3, Flame, RefreshCw, X } from 'lucide-react';
+import { CalendarClock, Clock3, Flame, MessageCircle, RefreshCw, X } from 'lucide-react';
 import { api, type PipelineLead, type TimelineItem } from '@/lib/api';
 import { LOSS_REASONS, lossLabel } from '@/lib/pipeline-meta';
 import { FilterMenu } from '../filter-menu';
@@ -157,11 +157,24 @@ const LeadCard = ({
   onClick: (lead: PipelineLead) => void;
 }) => {
   const temp = leadTemp(lead);
+  // status:/pipeline: são redundantes no card (a coluna e o chip de especialidade já mostram)
+  const visibleTags = lead.tags.filter((t) => !t.startsWith('status:') && !t.startsWith('pipeline:'));
   return (
     <article className={`lead-card ${lead.isStalled ? 'lead-card-stalled' : ''}`} onClick={() => onClick(lead)}>
       <div className="card-head">
         <span className="lead-name">{lead.name?.firstName || '(sem nome)'} {lead.name?.lastName || ''}</span>
-        <span className={`chip ${scoreClass(lead.score)}`}>{lead.score}</span>
+        <span className="card-head-actions">
+          <a
+            className="icon-btn"
+            href={`/inbox?lead=${lead.id}`}
+            title="Abrir conversa no inbox"
+            aria-label="Abrir conversa no inbox"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <MessageCircle size={14} />
+          </a>
+          <span className={`chip ${scoreClass(lead.score)}`}>{lead.score}</span>
+        </span>
       </div>
       {lead.whatsapp?.primaryPhoneNumber && (
         <div className="faint">{lead.whatsapp.primaryPhoneNumber}</div>
@@ -184,10 +197,10 @@ const LeadCard = ({
       {lead.stage === 'perdido' && lead.lostReason ? (
         <div className="chips"><span className="chip chip-danger">{lossLabel(lead.lostReason)}</span></div>
       ) : null}
-      {lead.tags.length > 0 ? (
+      {visibleTags.length > 0 ? (
         <div className="chips">
-          {lead.tags.slice(0, 4).map((tag) => <TagChip key={tag} tag={tag} />)}
-          {lead.tags.length > 4 && <span className="faint">+{lead.tags.length - 4}</span>}
+          {visibleTags.slice(0, 4).map((tag) => <TagChip key={tag} tag={tag} />)}
+          {visibleTags.length > 4 && <span className="faint">+{visibleTags.length - 4}</span>}
         </div>
       ) : null}
       <StageSelect

@@ -1351,6 +1351,12 @@ select {
   margin-bottom: 0;
 }
 
+.card-head-actions {
+  align-items: center;
+  display: inline-flex;
+  gap: 6px;
+}
+
 .lead-card-meta {
   align-items: center;
   display: flex;
