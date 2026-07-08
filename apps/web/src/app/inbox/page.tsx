@@ -19,6 +19,9 @@ const statusLabel = (status: string) => (
     : status === 'RESOLVED' ? 'Resolvida'
     : status === 'PENDING' ? 'Pendente'
     : status === 'CLOSED' ? 'Fechada'
+    : status === 'NEEDS_HUMAN' ? 'Precisa de humano'
+    : status === 'PENDING_HUMAN' ? 'Aguardando humano'
+    : status === 'PENDING_PATIENT' ? 'Aguardando paciente'
     : status
 );
 
