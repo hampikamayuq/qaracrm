@@ -33,17 +33,21 @@ export const receiveMetaWebhook = async (req: Request, res: Response): Promise<v
     const rawBytes = (req as unknown as { rawBody?: Buffer }).rawBody;
     const rawBody = rawBytes ? rawBytes.toString('utf-8') : JSON.stringify(req.body);
 
-    // Verify HMAC signature if secret is configured
-    if (process.env.META_APP_SECRET) {
-      if (!signature) {
-        res.sendStatus(403);
-        return;
-      }
-      const valid = verifyMetaSignature(rawBody, signature, process.env.META_APP_SECRET);
-      if (!valid) {
-        res.sendStatus(403);
-        return;
-      }
+    // Fail-closed: sem META_APP_SECRET o webhook rejeita tudo — antes ele
+    // aceitava qualquer POST anônimo quando o secret não estava configurado.
+    if (!process.env.META_APP_SECRET) {
+      console.error('[meta-webhook] META_APP_SECRET não configurado — rejeitando webhook');
+      res.sendStatus(403);
+      return;
+    }
+    if (!signature) {
+      res.sendStatus(403);
+      return;
+    }
+    const valid = verifyMetaSignature(rawBody, signature, process.env.META_APP_SECRET);
+    if (!valid) {
+      res.sendStatus(403);
+      return;
     }
 
     // Signature-based dedup (5-min window)
