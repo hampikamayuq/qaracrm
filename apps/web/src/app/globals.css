@@ -873,6 +873,36 @@ select {
   padding: 8px 12px;
 }
 
+/* ---------------- pacientes ---------------- */
+
+.patients-grid {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: minmax(280px, 360px) minmax(400px, 1fr);
+  height: calc(100dvh - 148px);
+  min-height: 420px;
+}
+
+@media (max-width: 860px) {
+  .patients-grid {
+    grid-template-columns: 1fr;
+    height: auto;
+  }
+}
+
+.field-check {
+  align-items: center;
+  cursor: pointer;
+  display: flex;
+  flex-direction: row;
+  gap: 8px;
+}
+
+.field-check input {
+  height: 15px;
+  width: 15px;
+}
+
 /* ---------------- inbox ---------------- */
 
 .inbox-grid {
@@ -3298,5 +3328,88 @@ a.chip {
   .budget-amounts {
     justify-items: start;
     text-align: left;
+  }
+}
+
+/* ---------------- pagamentos ---------------- */
+
+.payment-balance-box {
+  align-items: center;
+  background: var(--surface-2);
+  border: 1px solid var(--surface-3);
+  border-radius: 12px;
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+  padding: 12px 14px;
+}
+
+.payment-balance-label {
+  color: var(--text-2);
+  font-size: 12px;
+}
+
+.payment-balance-value {
+  font-size: 20px;
+  font-weight: 700;
+}
+
+.payment-balance-quitado .payment-balance-value {
+  color: var(--ok);
+}
+
+.payment-form {
+  align-items: end;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: 1fr 1fr auto;
+}
+
+.payment-list {
+  display: grid;
+  gap: 8px;
+}
+
+.payment-row {
+  align-items: center;
+  background: var(--surface-2);
+  border: 1px solid var(--surface-3);
+  border-radius: 10px;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: auto 1fr auto;
+  padding: 10px 12px;
+}
+
+.payment-amount {
+  font-weight: 650;
+}
+
+.payment-meta {
+  color: var(--text-2);
+  display: flex;
+  flex-wrap: wrap;
+  font-size: 12px;
+  gap: 4px 8px;
+}
+
+.payment-actions {
+  display: flex;
+  gap: 6px;
+  justify-self: end;
+}
+
+@media (max-width: 640px) {
+  .payment-form {
+    grid-template-columns: 1fr;
+  }
+
+  .payment-row {
+    grid-template-columns: 1fr;
+    justify-items: start;
+  }
+
+  .payment-actions {
+    justify-self: start;
   }
 }

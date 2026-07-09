@@ -78,6 +78,11 @@ Leitura:
 - `list_quick_replies` — GET `/api/quick-replies` (respostas rápidas
   cadastradas; `search` filtra por atalho/título/conteúdo, `active`
   default `true`).
+- `list_patients` — GET `/api/patients` (pacientes cadastrados; `search`
+  filtra por nome/telefone, com paginação `page`/`pageSize`).
+- `patient_timeline` — GET `/api/patients/:id` (detalhe do paciente com
+  dados cadastrais, lead de origem, consultas, orçamentos e a timeline
+  unificada).
 
 Escritas seguras:
 

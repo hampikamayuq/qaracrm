@@ -20,7 +20,13 @@ const api = (over: Partial<DataApi> = {}): DataApi => ({
   ...over,
 });
 
-const D1_ENV_KEYS = ['APPOINTMENT_CONFIRM_BUTTONS', 'META_ACCESS_TOKEN', 'META_PHONE_NUMBER_ID'] as const;
+const D1_ENV_KEYS = [
+  'APPOINTMENT_CONFIRM_BUTTONS',
+  'META_ACCESS_TOKEN',
+  'META_PHONE_NUMBER_ID',
+  'NPS_ENABLED',
+  'NPS_TEMPLATE',
+] as const;
 const savedD1Env: Record<string, string | undefined> = {};
 
 describe('scheduler', () => {
@@ -203,5 +209,125 @@ describe('scheduler', () => {
     await runSchedulerTick(api({ list }), now, { processPendingMetaWebhookEvents });
 
     expect(processPendingMetaWebhookEvents).toHaveBeenCalledWith({ now });
+  });
+
+  describe('runNpsJob', () => {
+    it('does nothing when NPS_ENABLED is not "true" (default off)', async () => {
+      const list = vi.fn();
+      const { runNpsJob } = await import('./scheduler');
+
+      const result = await runNpsJob(api({ list }), new Date('2026-07-05T12:00:00.000Z'));
+
+      expect(list).not.toHaveBeenCalled();
+      expect(mocks.sendWhatsAppTemplate.execute).not.toHaveBeenCalled();
+      expect(result).toEqual({ checked: 0, sent: 0 });
+    });
+
+    it('gets eligible appointments in the Sao Paulo "yesterday" window, excluding cancelled/no-show', async () => {
+      process.env.NPS_ENABLED = 'true';
+      const list = vi.fn().mockResolvedValue([]);
+      const { getNpsAppointments } = await import('./scheduler');
+
+      await getNpsAppointments(api({ list }), new Date('2026-07-05T12:00:00.000Z'));
+
+      expect(list).toHaveBeenCalledWith('appointment', {
+        filter: {
+          scheduledAt: { gte: '2026-07-04T03:00:00.000Z', lt: '2026-07-05T03:00:00.000Z' },
+          status: { notIn: ['CANCELLED', 'NO_SHOW'] },
+          npsSentAt: { eq: null },
+        },
+        select: { id: true, scheduledAt: true, leadId: true, patientId: true, status: true },
+      });
+    });
+
+    it('sends the NPS template with the patient name and marks npsSentAt', async () => {
+      process.env.NPS_ENABLED = 'true';
+      const list = vi
+        .fn()
+        .mockResolvedValueOnce([{ id: 'a1', leadId: 'l1', patientId: 'p1', scheduledAt: '2026-07-04T14:00:00.000Z' }])
+        .mockResolvedValueOnce([{ id: 'c1', channel: 'WHATSAPP', externalId: '5511999998888' }]);
+      const get = vi.fn().mockResolvedValue({ name: 'Maria Silva' });
+      const update = vi.fn().mockResolvedValue({ id: 'a1' });
+      const { runNpsJob } = await import('./scheduler');
+
+      const result = await runNpsJob(api({ list, get, update }), new Date('2026-07-05T12:00:00.000Z'));
+
+      expect(get).toHaveBeenCalledWith('patient', 'p1', { name: true });
+      expect(mocks.sendWhatsAppTemplate.execute).toHaveBeenCalledWith(
+        expect.objectContaining({
+          conversationId: 'c1',
+          templateName: 'qara_nps_pos_consulta',
+          parameters: ['Maria Silva'],
+        }),
+        expect.any(Object),
+      );
+      expect(update).toHaveBeenCalledWith('appointment', 'a1', { npsSentAt: expect.any(String) });
+      expect(result).toEqual({ checked: 1, sent: 1 });
+    });
+
+    it('falls back to the lead name when the appointment has no patientId', async () => {
+      process.env.NPS_ENABLED = 'true';
+      const list = vi
+        .fn()
+        .mockResolvedValueOnce([{ id: 'a1', leadId: 'l1', scheduledAt: '2026-07-04T14:00:00.000Z' }])
+        .mockResolvedValueOnce([{ id: 'c1', channel: 'WHATSAPP', externalId: '5511999998888' }]);
+      const get = vi.fn().mockResolvedValue({ name: 'Joao Lead' });
+      const update = vi.fn().mockResolvedValue({ id: 'a1' });
+      const { runNpsJob } = await import('./scheduler');
+
+      await runNpsJob(api({ list, get, update }), new Date('2026-07-05T12:00:00.000Z'));
+
+      expect(get).toHaveBeenCalledWith('lead', 'l1', { name: true });
+      expect(mocks.sendWhatsAppTemplate.execute).toHaveBeenCalledWith(
+        expect.objectContaining({ parameters: ['Joao Lead'] }),
+        expect.any(Object),
+      );
+    });
+
+    it('honors a custom NPS_TEMPLATE name', async () => {
+      process.env.NPS_ENABLED = 'true';
+      process.env.NPS_TEMPLATE = 'custom_nps_template';
+      const list = vi
+        .fn()
+        .mockResolvedValueOnce([{ id: 'a1', leadId: 'l1', scheduledAt: '2026-07-04T14:00:00.000Z' }])
+        .mockResolvedValueOnce([{ id: 'c1', channel: 'WHATSAPP', externalId: '5511999998888' }]);
+      const update = vi.fn().mockResolvedValue({ id: 'a1' });
+      const { runNpsJob } = await import('./scheduler');
+
+      await runNpsJob(api({ list, update }), new Date('2026-07-05T12:00:00.000Z'));
+
+      expect(mocks.sendWhatsAppTemplate.execute).toHaveBeenCalledWith(
+        expect.objectContaining({ templateName: 'custom_nps_template' }),
+        expect.any(Object),
+      );
+    });
+
+    it('skips Instagram conversations (no send, no npsSentAt update)', async () => {
+      process.env.NPS_ENABLED = 'true';
+      const list = vi
+        .fn()
+        .mockResolvedValueOnce([{ id: 'a1', leadId: 'l1', scheduledAt: '2026-07-04T14:00:00.000Z' }])
+        .mockResolvedValueOnce([{ id: 'c-ig', channel: 'INSTAGRAM' }]);
+      const update = vi.fn().mockResolvedValue({ id: 'a1' });
+      const { runNpsJob } = await import('./scheduler');
+
+      const result = await runNpsJob(api({ list, update }), new Date('2026-07-05T12:00:00.000Z'));
+
+      expect(mocks.sendWhatsAppTemplate.execute).not.toHaveBeenCalled();
+      expect(update).not.toHaveBeenCalled();
+      expect(result).toEqual({ checked: 1, sent: 0 });
+    });
+
+    it('is wired into the scheduler tick', async () => {
+      process.env.NPS_ENABLED = 'true';
+      const list = vi.fn().mockResolvedValue([]);
+      const { runSchedulerTick } = await import('./scheduler');
+
+      await runSchedulerTick(api({ list }), new Date('2026-07-05T12:00:00.000Z'));
+
+      expect(list).toHaveBeenCalledWith('appointment', expect.objectContaining({
+        filter: expect.objectContaining({ npsSentAt: { eq: null } }),
+      }));
+    });
   });
 });

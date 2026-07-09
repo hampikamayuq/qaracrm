@@ -4,6 +4,7 @@ import { defaultDebounce, type Debouncer } from '../lib/debounce';
 import { parseMetaEvent, type MetaInboundMessage, type MetaStatusUpdate } from '../lib/meta-parse';
 import { sendWhatsApp } from '../lib/tools/sendWhatsApp';
 import { runAppointmentConfirmationForInbound } from './appointment-confirmation';
+import { runNpsCaptureForInbound } from './nps-capture';
 
 const OPT_OUT_CONFIRMATION =
   'Você foi removido da nossa lista de contatos. Se mudar de ideia, é só enviar uma mensagem.';
@@ -125,6 +126,20 @@ const ingestMessage = async (
     } catch (err) {
       console.error('[meta-webhook] appointment confirmation failed (non-fatal):', (err as Error).message);
     }
+    // Captura da pesquisa NPS pós-consulta (LEVA 2B) tem precedência sobre
+    // bots e a Tawany, mas cede pra confirmação de agendamento acima: se o
+    // paciente respondeu um botão de confirmação, não é nota NPS.
+    if (!handled) {
+      try {
+        handled = (await runNpsCaptureForInbound({
+          conversationId: ready.conversationId,
+          messageType: msg.messageType,
+          text: ready.text,
+        }, data)).handled;
+      } catch (err) {
+        console.error('[meta-webhook] nps capture failed (non-fatal):', (err as Error).message);
+      }
+    }
     if (!handled) {
       try {
         handled = (await runBotsForInbound({ conversationId: ready.conversationId, text: ready.text }, data)) !== null;
@@ -177,6 +192,19 @@ export const handleMetaWebhook = async (
       }, data)).handled;
     } catch (err) {
       console.error('[meta-webhook] appointment confirmation failed (non-fatal):', (err as Error).message);
+    }
+    // Captura da pesquisa NPS pós-consulta (LEVA 2B) tem precedência sobre
+    // bots e a Tawany, mas cede pra confirmação de agendamento acima.
+    if (!handled) {
+      try {
+        handled = (await runNpsCaptureForInbound({
+          conversationId: processed.conversationId,
+          messageType: msg.messageType,
+          text: msg.text,
+        }, data)).handled;
+      } catch (err) {
+        console.error('[meta-webhook] nps capture failed (non-fatal):', (err as Error).message);
+      }
     }
     // Bots determinísticos têm precedência sobre a Tawany: se um fluxo
     // importado casa, ele responde e a mensagem não segue para a IA.

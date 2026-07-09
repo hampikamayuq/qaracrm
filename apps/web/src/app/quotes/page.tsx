@@ -2,8 +2,16 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
-import { Check, FileText, Plus, RefreshCw, Send, X } from 'lucide-react';
-import { api, type Budget, type BudgetStatus, type PipelineLead } from '@/lib/api';
+import { Banknote, Check, FileText, Plus, RefreshCw, Send, Wallet, X } from 'lucide-react';
+import {
+  api,
+  type Budget,
+  type BudgetStatus,
+  type Payment,
+  type PaymentMethod,
+  type PaymentStatus,
+  type PipelineLead,
+} from '@/lib/api';
 import { FilterMenu } from '../filter-menu';
 
 const STATUS_META: Record<BudgetStatus, { label: string; chip: string }> = {
@@ -14,6 +22,35 @@ const STATUS_META: Record<BudgetStatus, { label: string; chip: string }> = {
   EXPIRED: { label: 'Expirado', chip: 'chip-warning' },
 };
 const STATUSES = Object.keys(STATUS_META) as BudgetStatus[];
+
+// Orçamento só recebe pagamento depois de enviado — mesma regra da API
+// (payment-routes.ts). Só nesses estados o formulário de registro aparece.
+const BUDGET_ACCEPTS_PAYMENT: BudgetStatus[] = ['SENT', 'ACCEPTED'];
+
+// Métodos expostos na UI (pt-BR) → valor aceito pela API (Payment.method).
+// Sem DEBIT/OTHER: o produto pede só os quatro métodos usados na clínica.
+const PAYMENT_METHOD_META: Record<PaymentMethod, string> = {
+  PIX: 'Pix',
+  CREDIT: 'Cartão',
+  CASH: 'Dinheiro',
+  BANK_TRANSFER: 'Transferência',
+  DEBIT: 'Débito',
+  OTHER: 'Outro',
+};
+const PAYMENT_METHOD_OPTIONS: PaymentMethod[] = ['PIX', 'CREDIT', 'CASH', 'BANK_TRANSFER'];
+
+const PAYMENT_STATUS_META: Record<PaymentStatus, { label: string; chip: string }> = {
+  PENDING: { label: 'Pendente', chip: 'chip-warning' },
+  PAID: { label: 'Pago', chip: 'chip-ok' },
+  PARTIALLY_PAID: { label: 'Parcial', chip: 'chip-info' },
+  CANCELED: { label: 'Cancelado', chip: 'chip-danger' },
+  REFUNDED: { label: 'Reembolsado', chip: 'chip-danger' },
+};
+
+const settledAmount = (payments: Payment[]): number =>
+  payments
+    .filter((p) => p.status === 'PAID' || p.status === 'PARTIALLY_PAID')
+    .reduce((sum, p) => sum + Number(p.amount), 0);
 
 const brl = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
 const money = (value: string | number | null): string =>
@@ -37,6 +74,7 @@ const BudgetRow = ({
   onAccept,
   onReject,
   onEdit,
+  onOpenPayments,
 }: {
   budget: Budget;
   busy: boolean;
@@ -44,6 +82,7 @@ const BudgetRow = ({
   onAccept: (b: Budget) => void;
   onReject: (b: Budget) => void;
   onEdit: (b: Budget) => void;
+  onOpenPayments: (b: Budget) => void;
 }) => {
   const meta = STATUS_META[budget.status];
   const expires = formatDate(budget.expiresAt);
@@ -93,7 +132,199 @@ const BudgetRow = ({
             </button>
           </>
         ) : null}
+        {budget.status === 'SENT' || budget.status === 'ACCEPTED' || budget.totalPaid > 0 ? (
+          <button type="button" className="btn" disabled={busy} onClick={() => onOpenPayments(budget)}>
+            <Wallet size={14} /> Pagamentos
+          </button>
+        ) : null}
       </div>
+    </div>
+  );
+};
+
+// ---------------- drawer de pagamentos ----------------
+
+const PaymentsDrawer = ({
+  open,
+  budget,
+  onClose,
+  onChanged,
+}: {
+  open: boolean;
+  budget: Budget | null;
+  onClose: () => void;
+  onChanged: () => void;
+}) => {
+  const [payments, setPayments] = useState<Payment[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [amount, setAmount] = useState('');
+  const [method, setMethod] = useState<PaymentMethod>('PIX');
+  const [saving, setSaving] = useState(false);
+  const [busyPaymentId, setBusyPaymentId] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    if (!budget) return;
+    setLoading(true);
+    try {
+      setPayments(await api.getPayments({ budgetId: budget.id }));
+    } finally {
+      setLoading(false);
+    }
+  }, [budget]);
+
+  useEffect(() => {
+    if (!open) return;
+    setError(null);
+    setAmount('');
+    setMethod('PIX');
+    load();
+  }, [open, load]);
+
+  if (!open || !budget) return null;
+
+  const totalPaid = settledAmount(payments);
+  const balance = Math.max(Number(budget.amount) - totalPaid, 0);
+  const quitado = balance <= 0 && totalPaid > 0;
+  const canRegister = BUDGET_ACCEPTS_PAYMENT.includes(budget.status);
+
+  const submit = async () => {
+    const amountNum = Number(amount);
+    if (!amount || Number.isNaN(amountNum) || amountNum <= 0) {
+      setError('Informe um valor válido');
+      return;
+    }
+    setSaving(true);
+    setError(null);
+    try {
+      const res = await api.createPayment({ budgetId: budget.id, amount: amountNum, method });
+      if (!res.success) {
+        setError(res.error ?? 'Falha ao registrar o pagamento');
+        return;
+      }
+      setAmount('');
+      await load();
+      onChanged();
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const runPaymentAction = async (id: string, status: 'PAID' | 'CANCELED') => {
+    setBusyPaymentId(id);
+    try {
+      const res = await api.updatePayment(id, { status });
+      if (res.success) {
+        await load();
+        onChanged();
+      }
+    } finally {
+      setBusyPaymentId(null);
+    }
+  };
+
+  return (
+    <div className="drawer-root" onClick={onClose} role="dialog" aria-modal="true" aria-labelledby="payments-drawer-title">
+      <div className="drawer-backdrop" />
+      <aside className="drawer" onClick={(e) => e.stopPropagation()}>
+        <header className="drawer-head">
+          <h2 id="payments-drawer-title">Pagamentos — {budget.title}</h2>
+          <button onClick={onClose} className="icon-btn" type="button" aria-label="Fechar">
+            <X size={17} />
+          </button>
+        </header>
+        <div className="drawer-body">
+          <div className={`payment-balance-box ${quitado ? 'payment-balance-quitado' : ''}`}>
+            <div>
+              <div className="payment-balance-label">Saldo restante</div>
+              <div className="payment-balance-value">{money(balance)}</div>
+            </div>
+            {quitado ? <span className="chip chip-ok">Quitado</span> : null}
+          </div>
+
+          {canRegister ? (
+            <div className="drawer-section">
+              <h3>Registrar pagamento</h3>
+              <div className="payment-form">
+                <label className="field">
+                  <span className="muted">Valor (R$)</span>
+                  <input
+                    className="input"
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={amount}
+                    onChange={(e) => setAmount(e.target.value)}
+                    placeholder="0,00"
+                  />
+                </label>
+                <label className="field">
+                  <span className="muted">Método</span>
+                  <select className="select" value={method} onChange={(e) => setMethod(e.target.value as PaymentMethod)}>
+                    {PAYMENT_METHOD_OPTIONS.map((m) => (
+                      <option key={m} value={m}>{PAYMENT_METHOD_META[m]}</option>
+                    ))}
+                  </select>
+                </label>
+                <button type="button" className="btn btn-primary" disabled={saving} onClick={submit}>
+                  <Banknote size={14} /> {saving ? 'Salvando…' : 'Registrar'}
+                </button>
+              </div>
+              {error ? <div className="error">{error}</div> : null}
+            </div>
+          ) : (
+            <div className="muted">
+              Orçamento em {STATUS_META[budget.status].label.toLowerCase()} não recebe pagamentos — envie ou aceite o orçamento primeiro.
+            </div>
+          )}
+
+          <div className="drawer-section">
+            <h3>Histórico</h3>
+            {loading ? (
+              <div className="muted">Carregando…</div>
+            ) : payments.length === 0 ? (
+              <div className="muted">Nenhum pagamento registrado.</div>
+            ) : (
+              <div className="payment-list">
+                {payments.map((p) => {
+                  const meta = PAYMENT_STATUS_META[p.status];
+                  const date = formatDate(p.paidAt) ?? formatDate(p.createdAt);
+                  return (
+                    <div key={p.id} className="payment-row">
+                      <span className="payment-amount">{money(p.amount)}</span>
+                      <span className="payment-meta">
+                        <span className={`chip ${meta.chip}`}>{meta.label}</span>
+                        <span>{PAYMENT_METHOD_META[p.method]}</span>
+                        {date ? <span>{date}</span> : null}
+                      </span>
+                      {p.status === 'PENDING' || p.status === 'PARTIALLY_PAID' ? (
+                        <div className="payment-actions">
+                          <button
+                            type="button"
+                            className="btn"
+                            disabled={busyPaymentId === p.id}
+                            onClick={() => runPaymentAction(p.id, 'PAID')}
+                          >
+                            Marcar pago
+                          </button>
+                          <button
+                            type="button"
+                            className="btn"
+                            disabled={busyPaymentId === p.id}
+                            onClick={() => runPaymentAction(p.id, 'CANCELED')}
+                          >
+                            Cancelar
+                          </button>
+                        </div>
+                      ) : null}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </div>
+      </aside>
     </div>
   );
 };
@@ -287,6 +518,7 @@ export default function QuotesPage() {
   const [busyId, setBusyId] = useState<string | null>(null);
   const [editing, setEditing] = useState<Budget | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [paymentsBudget, setPaymentsBudget] = useState<Budget | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -318,8 +550,9 @@ export default function QuotesPage() {
     }
   };
 
-  const openCreate = () => { setEditing(null); setDrawerOpen(true); };
-  const openEdit = (b: Budget) => { setEditing(b); setDrawerOpen(true); };
+  const openCreate = () => { setEditing(null); setDrawerOpen(true); setPaymentsBudget(null); };
+  const openEdit = (b: Budget) => { setEditing(b); setDrawerOpen(true); setPaymentsBudget(null); };
+  const openPayments = (b: Budget) => { setPaymentsBudget(b); setDrawerOpen(false); };
 
   return (
     <main className="page page-tight">
@@ -372,6 +605,7 @@ export default function QuotesPage() {
               onAccept={(b) => runAction(b.id, () => api.acceptBudget(b.id))}
               onReject={(b) => runAction(b.id, () => api.rejectBudget(b.id))}
               onEdit={openEdit}
+              onOpenPayments={openPayments}
             />
           ))}
         </div>
@@ -383,6 +617,13 @@ export default function QuotesPage() {
         leads={sortedLeads}
         onClose={() => setDrawerOpen(false)}
         onSaved={() => { setDrawerOpen(false); load(); }}
+      />
+
+      <PaymentsDrawer
+        open={paymentsBudget !== null}
+        budget={paymentsBudget}
+        onClose={() => setPaymentsBudget(null)}
+        onChanged={load}
       />
     </main>
   );

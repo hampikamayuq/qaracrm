@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
     execute: vi.fn().mockResolvedValue(JSON.stringify({ ok: true, sent: false })),
   },
   appointmentConfirmation: vi.fn().mockResolvedValue({ handled: false }),
+  npsCapture: vi.fn().mockResolvedValue({ handled: false }),
 }));
 
 vi.mock('../lib/tools/sendWhatsApp', () => ({
@@ -18,6 +19,10 @@ vi.mock('../lib/tools/sendWhatsApp', () => ({
 
 vi.mock('./appointment-confirmation', () => ({
   runAppointmentConfirmationForInbound: mocks.appointmentConfirmation,
+}));
+
+vi.mock('./nps-capture', () => ({
+  runNpsCaptureForInbound: mocks.npsCapture,
 }));
 
 const api = (over: Partial<DataApi> = {}): DataApi => ({
@@ -333,6 +338,96 @@ describe('handleMetaWebhook — appointment confirmation interception', () => {
       { conversationId: 'conv-9', messageType: 'BUTTON', buttonPayload: 'some_other_flow' },
       expect.any(Object),
     );
+    expect(result.processedMessages).toEqual([{ conversationId: 'conv-9', messageId: 'msg-2' }]);
+  });
+});
+
+describe('handleMetaWebhook — NPS capture interception', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.appointmentConfirmation.mockResolvedValue({ handled: false });
+    mocks.npsCapture.mockResolvedValue({ handled: false });
+  });
+
+  const numericBody = {
+    object: 'whatsapp_business_account',
+    entry: [
+      {
+        changes: [
+          {
+            value: {
+              messages: [
+                {
+                  id: 'wamid.NPS1',
+                  from: '5511999998888',
+                  timestamp: '1751650000',
+                  type: 'text',
+                  text: { body: '9' },
+                },
+              ],
+            },
+          },
+        ],
+      },
+    ],
+  };
+
+  it('does not forward a numeric reply to Tawany when the NPS capture handles it', async () => {
+    mocks.npsCapture.mockResolvedValueOnce({ handled: true });
+    const list = vi
+      .fn()
+      .mockResolvedValueOnce([]) // dedup
+      .mockResolvedValueOnce([{ id: 'conv-9', leadId: 'lead-1' }]); // existing conversation
+    const create = vi.fn().mockResolvedValue({ id: 'msg-2' });
+
+    const result = await handleMetaWebhook(numericBody, api({ list, create }), processDebounce());
+
+    expect(mocks.npsCapture).toHaveBeenCalledWith(
+      { conversationId: 'conv-9', messageType: 'TEXT', text: '9' },
+      expect.any(Object),
+    );
+    // A Tawany (dispatchada pela rota a partir de processedMessages) não deve
+    // ser acionada quando a captura NPS já tratou a nota.
+    expect(result.processedMessages).toEqual([]);
+  });
+
+  it('runs the NPS capture only after appointment confirmation (which wins when handled)', async () => {
+    mocks.appointmentConfirmation.mockResolvedValueOnce({ handled: true });
+    const list = vi
+      .fn()
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ id: 'conv-9', leadId: 'lead-1' }]);
+    const create = vi.fn().mockResolvedValue({ id: 'msg-2' });
+
+    const result = await handleMetaWebhook(numericBody, api({ list, create }), processDebounce());
+
+    expect(mocks.npsCapture).not.toHaveBeenCalled();
+    expect(result.processedMessages).toEqual([]);
+  });
+
+  it('forwards the message normally when the NPS capture does not handle it', async () => {
+    const list = vi
+      .fn()
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ id: 'conv-9', leadId: 'lead-1' }]);
+    const create = vi.fn().mockResolvedValue({ id: 'msg-2' });
+
+    const result = await handleMetaWebhook(numericBody, api({ list, create }), processDebounce());
+
+    expect(mocks.npsCapture).toHaveBeenCalled();
+    expect(result.processedMessages).toEqual([{ conversationId: 'conv-9', messageId: 'msg-2' }]);
+  });
+
+  it('continues to bots/Tawany when the NPS capture throws (non-fatal)', async () => {
+    mocks.npsCapture.mockRejectedValueOnce(new Error('boom'));
+    const list = vi
+      .fn()
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ id: 'conv-9', leadId: 'lead-1' }]);
+    const create = vi.fn().mockResolvedValue({ id: 'msg-2' });
+
+    const result = await handleMetaWebhook(numericBody, api({ list, create }), processDebounce());
+
     expect(result.processedMessages).toEqual([{ conversationId: 'conv-9', messageId: 'msg-2' }]);
   });
 });

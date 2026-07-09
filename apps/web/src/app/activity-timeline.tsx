@@ -4,6 +4,7 @@ import {
   ArrowRightLeft,
   Bot,
   CalendarDays,
+  FileText,
   KanbanSquare,
   ListTodo,
   MessageSquare,
@@ -24,6 +25,7 @@ const TYPE_META: Record<TimelineItem['type'], { icon: LucideIcon; tone: string }
   messages: { icon: MessageSquare, tone: 'tl-muted' },
   suggestion: { icon: Sparkles, tone: 'tl-ai' },
   bot: { icon: Bot, tone: 'tl-info' },
+  budget: { icon: FileText, tone: 'tl-info' },
 };
 
 const itemTone = (item: TimelineItem): string => {

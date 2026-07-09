@@ -56,7 +56,7 @@ export type PipelineLead = {
 
 export type TimelineItem = {
   id: string;
-  type: 'stage_change' | 'pipeline_change' | 'note' | 'task' | 'appointment' | 'messages' | 'suggestion' | 'bot';
+  type: 'stage_change' | 'pipeline_change' | 'note' | 'task' | 'appointment' | 'messages' | 'suggestion' | 'bot' | 'budget';
   at: string;
   title: string;
   detail?: string;
@@ -144,6 +144,85 @@ export type BudgetInput = {
   expiresAt?: string | null;
   notes?: string | null;
   leadId?: string | null;
+};
+
+// ---------------- pagamentos ----------------
+
+export type PaymentMethod = 'CASH' | 'PIX' | 'DEBIT' | 'CREDIT' | 'BANK_TRANSFER' | 'OTHER';
+
+export type PaymentStatus = 'PENDING' | 'PAID' | 'PARTIALLY_PAID' | 'CANCELED' | 'REFUNDED';
+
+// amount/cardFee chegam como string (Decimal do Prisma serializado em JSON).
+export type Payment = {
+  id: string;
+  budgetId: string | null;
+  amount: string;
+  method: PaymentMethod;
+  installments: number;
+  cardFee: string | null;
+  paidAt: string | null;
+  status: PaymentStatus;
+  createdAt: string;
+};
+
+export type PaymentInput = {
+  budgetId: string;
+  amount: number;
+  method: PaymentMethod;
+  installments?: number;
+  cardFee?: number | null;
+  status?: 'PENDING' | 'PAID' | 'PARTIALLY_PAID';
+  paidAt?: string | null;
+};
+
+// ---------------- pacientes ----------------
+
+export type Patient = {
+  id: string;
+  name: string;
+  phone: string | null;
+  email: string | null;
+  cpf: string | null;
+  birthDate: string | null;
+  preferredChannel: string | null;
+  lgpdConsent: boolean;
+  notesAdministrative: string | null;
+  leadId: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type PatientDetail = Patient & {
+  lead: { id: string; name: string; stage: string } | null;
+  appointments: Array<{
+    id: string;
+    scheduledAt: string;
+    status: string;
+    value: string | null;
+    professional: { name: string } | null;
+    service: { name: string } | null;
+  }>;
+  budgets: Array<{
+    id: string;
+    title: string;
+    amount: string;
+    status: BudgetStatus;
+    sentAt: string | null;
+    respondedAt: string | null;
+    createdAt: string;
+  }>;
+  timeline: TimelineItem[];
+};
+
+export type PatientInput = {
+  name: string;
+  phone?: string | null;
+  email?: string | null;
+  cpf?: string | null;
+  birthDate?: string | null;
+  preferredChannel?: string | null;
+  lgpdConsent?: boolean;
+  notesAdministrative?: string | null;
 };
 
 export type Pipeline = {
@@ -731,6 +810,45 @@ export const api = {
 
   rejectBudget(id: string): Promise<ApiResponse<Budget>> {
     return this.post(`/budgets/${id}/reject`, {});
+  },
+
+  // ---------------- pagamentos ----------------
+
+  async getPayments(opts: { budgetId?: string; status?: string } = {}): Promise<Payment[]> {
+    const res = await this.get<Payment[]>(`/payments${qs(opts)}`);
+    return res.data ?? [];
+  },
+
+  createPayment(input: PaymentInput): Promise<ApiResponse<Payment>> {
+    return this.post('/payments', input);
+  },
+
+  updatePayment(id: string, input: { status: 'PAID' | 'CANCELED'; paidAt?: string | null }): Promise<ApiResponse<Payment>> {
+    return this.fetch(`/payments/${id}`, { method: 'PATCH', body: JSON.stringify(input) });
+  },
+
+  // ---------------- pacientes ----------------
+
+  async getPatients(opts: { search?: string; page?: number; pageSize?: number } = {}): Promise<{ items: Patient[]; total: number; page: number }> {
+    const res = await this.get<{ items: Patient[]; total: number; page: number }>(`/patients${qs(opts)}`);
+    return res.data ?? { items: [], total: 0, page: 1 };
+  },
+
+  async getPatient(id: string): Promise<PatientDetail | null> {
+    const res = await this.get<PatientDetail>(`/patients/${id}`);
+    return res.data ?? null;
+  },
+
+  createPatient(input: PatientInput): Promise<ApiResponse<Patient>> {
+    return this.post('/patients', input);
+  },
+
+  updatePatient(id: string, input: Partial<PatientInput>): Promise<ApiResponse<Patient>> {
+    return this.fetch(`/patients/${id}`, { method: 'PATCH', body: JSON.stringify(input) });
+  },
+
+  convertLeadToPatient(leadId: string): Promise<ApiResponse<Patient & { alreadyConverted?: boolean }>> {
+    return this.post(`/patients/convert-from-lead/${leadId}`, {});
   },
 
   async getActivityFeed(period: FeedPeriod): Promise<TimelineItem[]> {

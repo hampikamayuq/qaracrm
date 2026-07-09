@@ -243,6 +243,34 @@ server.registerTool(
   tool(({ search, active }) => api.get<QuickReply[]>(`/api/quick-replies${buildQuery({ search, active })}`)),
 );
 
+server.registerTool(
+  'list_patients',
+  {
+    description:
+      'Lista pacientes cadastrados (GET /api/patients). Busca por nome (ILIKE) ou telefone via `search`, ' +
+      'com paginação (page/pageSize). Devolve { items, total, page }.',
+    inputSchema: {
+      search: z.string().optional().describe('Busca por nome ou telefone'),
+      page: z.number().int().positive().optional(),
+      pageSize: z.number().int().positive().max(100).optional(),
+    },
+    annotations: READ,
+  },
+  tool(({ search, page, pageSize }) => api.get(`/api/patients${buildQuery({ search, page, pageSize })}`)),
+);
+
+server.registerTool(
+  'patient_timeline',
+  {
+    description:
+      'Detalhe de um paciente com timeline (GET /api/patients/:id): dados cadastrais, lead de origem, consultas, ' +
+      'orçamentos e a timeline unificada (consultas, orçamentos, mensagens agregadas por dia, tarefas, notas e conversão).',
+    inputSchema: { patientId: z.string() },
+    annotations: READ,
+  },
+  tool(({ patientId }) => api.get(`/api/patients/${encodeURIComponent(patientId)}`)),
+);
+
 // =========================== Escritas seguras ============================
 
 server.registerTool(

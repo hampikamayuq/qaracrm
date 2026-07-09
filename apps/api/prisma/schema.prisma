@@ -261,6 +261,9 @@ model Appointment {
   status            String           @default("SCHEDULED") // SCHEDULED | CONFIRMED | DONE | NO_SHOW | CANCELLED
   value             Decimal?
   reminderD1Sent    Boolean          @default(false)
+  npsSentAt         DateTime?
+  npsScore          Int?
+  npsRespondedAt    DateTime?
   notes             String?
   createdAt         DateTime         @default(now())
   updatedAt         DateTime         @updatedAt
