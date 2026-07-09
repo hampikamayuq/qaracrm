@@ -11,6 +11,10 @@ const mocks = vi.hoisted(() => ({
   },
   appointmentConfirmation: vi.fn().mockResolvedValue({ handled: false }),
   npsCapture: vi.fn().mockResolvedValue({ handled: false }),
+  downloadWhatsAppMedia: vi.fn(),
+  downloadDirectMedia: vi.fn(),
+  isAudioTranscriptionEnabled: vi.fn().mockReturnValue(false),
+  transcribeAudio: vi.fn(),
 }));
 
 vi.mock('../lib/tools/sendWhatsApp', () => ({
@@ -23,6 +27,16 @@ vi.mock('./appointment-confirmation', () => ({
 
 vi.mock('./nps-capture', () => ({
   runNpsCaptureForInbound: mocks.npsCapture,
+}));
+
+vi.mock('../lib/media-client', () => ({
+  downloadWhatsAppMedia: mocks.downloadWhatsAppMedia,
+  downloadDirectMedia: mocks.downloadDirectMedia,
+}));
+
+vi.mock('../lib/transcription-client', () => ({
+  isAudioTranscriptionEnabled: mocks.isAudioTranscriptionEnabled,
+  transcribeAudio: mocks.transcribeAudio,
 }));
 
 const api = (over: Partial<DataApi> = {}): DataApi => ({
@@ -429,6 +443,141 @@ describe('handleMetaWebhook — NPS capture interception', () => {
     const result = await handleMetaWebhook(numericBody, api({ list, create }), processDebounce());
 
     expect(result.processedMessages).toEqual([{ conversationId: 'conv-9', messageId: 'msg-2' }]);
+  });
+});
+
+describe('handleMetaWebhook — audio transcription (LEVA 3)', () => {
+  const waAudioBody = {
+    object: 'whatsapp_business_account',
+    entry: [
+      {
+        changes: [
+          {
+            value: {
+              messages: [
+                {
+                  id: 'wamid.AUD1',
+                  from: '5511999998888',
+                  timestamp: '1751650000',
+                  type: 'audio',
+                  audio: { id: 'MEDIA-1', voice: true },
+                },
+              ],
+            },
+          },
+        ],
+      },
+    ],
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.appointmentConfirmation.mockResolvedValue({ handled: false });
+    mocks.npsCapture.mockResolvedValue({ handled: false });
+    mocks.isAudioTranscriptionEnabled.mockReturnValue(false);
+    mocks.downloadWhatsAppMedia.mockResolvedValue({ base64: 'QUJD', mimeType: 'audio/ogg', sizeBytes: 3 });
+    mocks.transcribeAudio.mockResolvedValue({ ok: false, text: '' });
+  });
+
+  it('transcribes the audio and stores the marked text when the gate is on', async () => {
+    mocks.isAudioTranscriptionEnabled.mockReturnValue(true);
+    mocks.transcribeAudio.mockResolvedValue({ ok: true, text: 'quero agendar botox' });
+    const list = vi
+      .fn()
+      .mockResolvedValueOnce([]) // dedup
+      .mockResolvedValueOnce([{ id: 'conv-9', leadId: 'lead-1' }]); // existing conversation
+    const create = vi.fn().mockResolvedValue({ id: 'msg-a' });
+
+    const result = await handleMetaWebhook(waAudioBody, api({ list, create }), processDebounce());
+
+    expect(mocks.downloadWhatsAppMedia).toHaveBeenCalledWith('MEDIA-1');
+    expect(mocks.transcribeAudio).toHaveBeenCalledWith(
+      { base64: 'QUJD', mimeType: 'audio/ogg' },
+      expect.objectContaining({ conversationId: 'conv-9' }),
+    );
+    expect(create).toHaveBeenCalledWith(
+      'chatMessage',
+      expect.objectContaining({
+        conversationId: 'conv-9',
+        body: '🎤 (áudio transcrito): quero agendar botox',
+      }),
+    );
+    // Transcribed text flows to bots/NPS (as text) and on to Tawany dispatch.
+    expect(mocks.npsCapture).toHaveBeenCalledWith(
+      expect.objectContaining({ text: '🎤 (áudio transcrito): quero agendar botox' }),
+      expect.any(Object),
+    );
+    expect(result.processedMessages).toEqual([{ conversationId: 'conv-9', messageId: 'msg-a' }]);
+  });
+
+  it('keeps the [áudio] placeholder and never downloads when the gate is off', async () => {
+    const list = vi
+      .fn()
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ id: 'conv-9', leadId: 'lead-1' }]);
+    const create = vi.fn().mockResolvedValue({ id: 'msg-a' });
+
+    await handleMetaWebhook(waAudioBody, api({ list, create }), processDebounce());
+
+    expect(mocks.downloadWhatsAppMedia).not.toHaveBeenCalled();
+    expect(mocks.transcribeAudio).not.toHaveBeenCalled();
+    expect(create).toHaveBeenCalledWith(
+      'chatMessage',
+      expect.objectContaining({ body: '[áudio]' }),
+    );
+  });
+
+  it('keeps the placeholder when transcription fails (non-fatal degradation)', async () => {
+    mocks.isAudioTranscriptionEnabled.mockReturnValue(true);
+    mocks.transcribeAudio.mockResolvedValue({ ok: false, text: '' });
+    const list = vi
+      .fn()
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ id: 'conv-9', leadId: 'lead-1' }]);
+    const create = vi.fn().mockResolvedValue({ id: 'msg-a' });
+
+    await handleMetaWebhook(waAudioBody, api({ list, create }), processDebounce());
+
+    expect(create).toHaveBeenCalledWith(
+      'chatMessage',
+      expect.objectContaining({ body: '[áudio]' }),
+    );
+  });
+
+  it('keeps the placeholder when the media download throws (non-fatal)', async () => {
+    mocks.isAudioTranscriptionEnabled.mockReturnValue(true);
+    mocks.downloadWhatsAppMedia.mockRejectedValue(new Error('boom'));
+    const list = vi
+      .fn()
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ id: 'conv-9', leadId: 'lead-1' }]);
+    const create = vi.fn().mockResolvedValue({ id: 'msg-a' });
+
+    await handleMetaWebhook(waAudioBody, api({ list, create }), processDebounce());
+
+    expect(mocks.transcribeAudio).not.toHaveBeenCalled();
+    expect(create).toHaveBeenCalledWith(
+      'chatMessage',
+      expect.objectContaining({ body: '[áudio]' }),
+    );
+  });
+
+  it('does not touch media/transcription for a normal text message even with the gate on', async () => {
+    mocks.isAudioTranscriptionEnabled.mockReturnValue(true);
+    const list = vi
+      .fn()
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ id: 'conv-9', leadId: 'lead-1' }]);
+    const create = vi.fn().mockResolvedValue({ id: 'msg-a' });
+
+    await handleMetaWebhook(waBody, api({ list, create }), processDebounce());
+
+    expect(mocks.downloadWhatsAppMedia).not.toHaveBeenCalled();
+    expect(mocks.transcribeAudio).not.toHaveBeenCalled();
+    expect(create).toHaveBeenCalledWith(
+      'chatMessage',
+      expect.objectContaining({ body: 'Oi, quero agendar' }),
+    );
   });
 });
 

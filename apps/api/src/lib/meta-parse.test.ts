@@ -177,6 +177,35 @@ describe('parseMetaEvent — WhatsApp', () => {
     expect(messages[0].text).toBe('minha pele');
   });
 
+  it('parses an audio note into the [áudio] placeholder + a whatsapp audio ref', () => {
+    const body = {
+      ...waText,
+      entry: [
+        {
+          changes: [
+            {
+              value: {
+                messages: [
+                  {
+                    id: 'wamid.AUD1',
+                    from: '551177776666',
+                    timestamp: '1751650000',
+                    type: 'audio',
+                    audio: { id: 'MEDIA-XYZ', voice: true },
+                  },
+                ],
+              },
+            },
+          ],
+        },
+      ],
+    };
+    const { messages } = parseMetaEvent(body);
+    expect(messages[0].text).toBe('[áudio]');
+    expect(messages[0].messageType).toBe('TEXT');
+    expect(messages[0].audio).toEqual({ source: 'whatsapp', mediaId: 'MEDIA-XYZ', voice: true });
+  });
+
   it('parses delivery statuses', () => {
     const { messages, statuses } = parseMetaEvent(waStatuses);
     expect(messages).toEqual([]);
@@ -253,6 +282,31 @@ describe('parseMetaEvent — Instagram', () => {
   it('ignores echoes of our own outbound (is_echo)', () => {
     const { messages } = parseMetaEvent(igEcho);
     expect(messages).toEqual([]);
+  });
+
+  it('parses an IG audio attachment into the [áudio] placeholder + a direct-url audio ref', () => {
+    const igAudio = {
+      object: 'instagram',
+      entry: [
+        {
+          id: 'ig-page-1',
+          messaging: [
+            {
+              sender: { id: 'IGSID-42' },
+              recipient: { id: 'ig-page-1' },
+              timestamp: 1751650000000,
+              message: {
+                mid: 'mid.AUD1',
+                attachments: [{ type: 'audio', payload: { url: 'https://cdn.ig/a.m4a' } }],
+              },
+            },
+          ],
+        },
+      ],
+    };
+    const { messages } = parseMetaEvent(igAudio);
+    expect(messages[0].text).toBe('[áudio]');
+    expect(messages[0].audio).toEqual({ source: 'instagram', url: 'https://cdn.ig/a.m4a' });
   });
 });
 

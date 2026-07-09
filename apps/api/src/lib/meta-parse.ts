@@ -1,6 +1,13 @@
 export type MetaChannel = 'WHATSAPP' | 'INSTAGRAM';
 export type MetaMessageType = 'TEXT' | 'BUTTON' | 'LIST' | 'IMAGE' | 'DOCUMENT';
 
+// Referência para baixar o áudio depois (o parse é síncrono e puro; o download
+// + transcrição acontecem no pipeline de ingestão). WhatsApp entrega só o media
+// id (baixar em 2 etapas com Bearer); Instagram já entrega a url direta.
+export type MetaAudioRef =
+  | { source: 'whatsapp'; mediaId: string; voice: boolean }
+  | { source: 'instagram'; url: string };
+
 export type MetaInboundMessage = {
   channel: MetaChannel;
   externalId: string;
@@ -12,7 +19,13 @@ export type MetaInboundMessage = {
   // ou interactive.button_reply.id (botões de sessão). Usado para intercepções
   // determinísticas (ex.: confirmação do lembrete D-1) sem depender do texto.
   buttonPayload?: string;
+  // Presente quando a mensagem é uma nota de voz/áudio. O pipeline usa isto para
+  // baixar e transcrever; sem transcrição, o `text` fica no placeholder [áudio].
+  audio?: MetaAudioRef;
 };
+
+// Placeholder exibido no Inbox quando o áudio não é (ou não pôde ser) transcrito.
+export const AUDIO_PLACEHOLDER = '[áudio]';
 
 export type MetaDeliveryStatus = 'SENT' | 'DELIVERED' | 'READ' | 'FAILED';
 export type MetaStatusUpdate = { externalId: string; status: MetaDeliveryStatus };
@@ -34,9 +47,20 @@ const STATUS_MAP: Record<string, MetaDeliveryStatus> = {
 // WhatsApp Cloud API.
 const waContent = (
   msg: Rec,
-): { text: string; messageType: MetaMessageType; buttonPayload?: string } => {
+): { text: string; messageType: MetaMessageType; buttonPayload?: string; audio?: MetaAudioRef } => {
   const type = asStr(msg.type);
   if (type === 'text') return { text: asStr(asRec(msg.text).body), messageType: 'TEXT' };
+  if (type === 'audio') {
+    // Nota de voz (voice:true) ou arquivo de áudio: guardamos o media id para
+    // o pipeline baixar + transcrever. Enquanto isso, placeholder no corpo.
+    const audio = asRec(msg.audio);
+    const mediaId = asStr(audio.id);
+    return {
+      text: AUDIO_PLACEHOLDER,
+      messageType: 'TEXT',
+      ...(mediaId ? { audio: { source: 'whatsapp', mediaId, voice: Boolean(audio.voice) } } : {}),
+    };
+  }
   if (type === 'button') {
     // Clique em botão quick-reply de um template HSM aprovado.
     const btn = asRec(msg.button);
@@ -76,7 +100,7 @@ const parseWhatsApp = (body: Rec): ParsedMetaEvent => {
         const id = asStr(msg.id);
         const from = asStr(msg.from);
         if (!id || !from) continue;
-        const { text, messageType, buttonPayload } = waContent(msg);
+        const { text, messageType, buttonPayload, audio } = waContent(msg);
         messages.push({
           channel: 'WHATSAPP',
           externalId: id,
@@ -85,6 +109,7 @@ const parseWhatsApp = (body: Rec): ParsedMetaEvent => {
           sentAt: new Date(Number(asStr(msg.timestamp)) * 1000).toISOString(),
           messageType,
           ...(buttonPayload ? { buttonPayload } : {}),
+          ...(audio ? { audio } : {}),
         });
       }
     }
@@ -104,13 +129,22 @@ const parseInstagram = (body: Rec): ParsedMetaEvent => {
       const mid = asStr(msg.mid);
       const from = asStr(asRec(e.sender).id);
       if (!mid || !from) continue;
+      // Anexo de áudio: o webhook do IG entrega attachments[].payload.url direto.
+      const audioAtt = asArr(msg.attachments)
+        .map(asRec)
+        .find((a) => asStr(a.type) === 'audio' && asStr(asRec(a.payload).url));
+      const audio: MetaAudioRef | undefined = audioAtt
+        ? { source: 'instagram', url: asStr(asRec(audioAtt.payload).url) }
+        : undefined;
+      const text = asStr(msg.text) || (audio ? AUDIO_PLACEHOLDER : '[anexo]');
       messages.push({
         channel: 'INSTAGRAM',
         externalId: mid,
         from,
-        text: asStr(msg.text) || '[anexo]',
+        text,
         sentAt: new Date(Number(e.timestamp) || Date.now()).toISOString(),
         messageType: 'TEXT',
+        ...(audio ? { audio } : {}),
       });
     }
   }

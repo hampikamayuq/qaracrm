@@ -2,6 +2,8 @@ import { type DataApi } from '../lib/data';
 import { runBotsForInbound } from '../lib/bots/runner';
 import { defaultDebounce, type Debouncer } from '../lib/debounce';
 import { parseMetaEvent, type MetaInboundMessage, type MetaStatusUpdate } from '../lib/meta-parse';
+import { downloadDirectMedia, downloadWhatsAppMedia } from '../lib/media-client';
+import { isAudioTranscriptionEnabled, transcribeAudio } from '../lib/transcription-client';
 import { sendWhatsApp } from '../lib/tools/sendWhatsApp';
 import { runAppointmentConfirmationForInbound } from './appointment-confirmation';
 import { runNpsCaptureForInbound } from './nps-capture';
@@ -65,6 +67,36 @@ const findOrCreateConversation = async (
   return { id: created.id as string, leadId };
 };
 
+// Transcreve nota de voz/áudio inbound ANTES de gravar a mensagem e de liberar
+// o debounce, para que o corpo já vire texto e siga o fluxo normal (Tawany,
+// bots, NPS, Inbox) como se fosse texto do paciente. Mutação in-place de
+// `msg.text`. Só roda quando a mensagem é áudio e o gate está ligado; qualquer
+// falha é não-fatal e degrada para o placeholder ([áudio]). Não adiciona
+// latência a mensagens de texto (retorna cedo se não houver `msg.audio`).
+const maybeTranscribeAudio = async (
+  msg: MetaInboundMessage,
+  data: DataApi,
+  conversationId: string,
+): Promise<void> => {
+  if (!msg.audio || !isAudioTranscriptionEnabled()) return;
+  try {
+    const media =
+      msg.audio.source === 'whatsapp'
+        ? await downloadWhatsAppMedia(msg.audio.mediaId)
+        : await downloadDirectMedia(msg.audio.url);
+    const result = await transcribeAudio(
+      { base64: media.base64, mimeType: media.mimeType },
+      { data, conversationId },
+    );
+    if (result.ok && result.text) {
+      msg.text = `🎤 (áudio transcrito): ${result.text}`;
+    }
+  } catch (err) {
+    // Nunca logamos o conteúdo; só a natureza do erro.
+    console.error('[meta-webhook] audio transcription failed (non-fatal):', (err as Error).message);
+  }
+};
+
 const ingestMessage = async (
   msg: MetaInboundMessage,
   data: DataApi,
@@ -79,6 +111,8 @@ const ingestMessage = async (
   if (dup.length > 0) return null; // Meta retry — já processada
 
   const conversation = await findOrCreateConversation(msg, data);
+  // Áudio -> texto antes de gravar/debounce, para fluir como texto do paciente.
+  await maybeTranscribeAudio(msg, data, conversation.id);
   const optout = debounce.isOptOut(msg.text);
   const immediateGate = !onProcessedMessage && !optout
     ? debounce.check(conversation.id, msg.externalId, msg.text)
