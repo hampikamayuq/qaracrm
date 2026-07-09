@@ -5,11 +5,19 @@ import { z } from 'zod';
 import { prisma } from '../lib/deps';
 import { authMiddleware } from '../middleware/auth-middleware';
 import { STAGE_LABELS, stageFromTags, tagsOf, type UiStage } from './pipeline-routes';
+import { logger } from '../lib/logger';
 
 const router = Router();
 
 const jsonError = (res: Response, status: number, error: string): void => {
   res.status(status).json({ success: false, error });
+};
+
+// Erro inesperado (500): loga o detalhe no servidor e devolve mensagem
+// genérica — dados de paciente nunca vazam detalhe interno na resposta.
+const serverError = (res: Response, error: unknown, where: string): void => {
+  logger.error({ where, error: (error as Error).message }, 'erro interno na rota de pacientes');
+  jsonError(res, 500, 'erro interno');
 };
 
 const paramStr = (value: unknown): string => (typeof value === 'string' ? value : '');
@@ -100,7 +108,7 @@ export const listPatientsRoute = async (req: Request, res: Response): Promise<vo
 
     res.json({ success: true, data: { items, total, page } });
   } catch (error) {
-    jsonError(res, 500, (error as Error).message);
+    serverError(res, error, 'GET /patients');
   }
 };
 
@@ -339,7 +347,7 @@ export const getPatientRoute = async (req: Request, res: Response): Promise<void
       },
     });
   } catch (error) {
-    jsonError(res, 500, (error as Error).message);
+    serverError(res, error, 'GET /patients/:id');
   }
 };
 
@@ -368,7 +376,7 @@ export const createPatientRoute = async (req: Request, res: Response): Promise<v
     });
     res.status(201).json({ success: true, data: patient });
   } catch (error) {
-    jsonError(res, 500, (error as Error).message);
+    serverError(res, error, 'POST /patients');
   }
 };
 
@@ -398,7 +406,7 @@ export const updatePatientRoute = async (req: Request, res: Response): Promise<v
     const patient = await prisma.patient.findUnique({ where: { id: paramStr(req.params.id) }, select: PATIENT_SELECT });
     res.json({ success: true, data: patient });
   } catch (error) {
-    jsonError(res, 500, (error as Error).message);
+    serverError(res, error, 'PATCH /patients/:id');
   }
 };
 
@@ -483,7 +491,7 @@ export const convertFromLeadRoute = async (req: Request, res: Response): Promise
 
     res.status(201).json({ success: true, data: patient });
   } catch (error) {
-    jsonError(res, 500, (error as Error).message);
+    serverError(res, error, 'POST /patients/convert-from-lead/:leadId');
   }
 };
 

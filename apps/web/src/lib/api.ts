@@ -418,7 +418,7 @@ export type DashboardResponseTime = {
 
 // ---------------- relatórios ----------------
 
-export type ReportTipo = 'comercial' | 'atendimento' | 'tawany';
+export type ReportTipo = 'comercial' | 'atendimento' | 'tawany' | 'financeiro';
 
 // period preset OU from/to (YYYY-MM-DD, máx. 366 dias) — from/to tem precedência.
 export type ReportParams = { period?: DashboardPeriod; from?: string; to?: string };
@@ -456,6 +456,40 @@ export type ReportTawany = {
   fallbacks: number;
   porDia: DashboardDailyPoint[];
   comparativo: { respostas: number; handoffs: number; taxaResolucaoPct: number | null };
+};
+
+// valores monetários já chegam calculados como number (o backend agrega o
+// Decimal do Prisma e arredonda) — nada de parsing de string aqui.
+export type ReportFinanceiro = {
+  orcamentos: {
+    total: number;
+    porStatus: Array<{ status: BudgetStatus; label: string; count: number; valor: number }>;
+    taxaAceitacaoPct: number | null;
+    tempoMedioRespostaHoras: number | null;
+    valorMedio: number | null;
+    comparativo: { total: number; taxaAceitacaoPct: number | null; valorMedio: number | null };
+  };
+  pagamentos: {
+    totalRecebido: number;
+    porMetodo: Array<{ method: string; valor: number }>;
+    pendente: number;
+    comparativo: { totalRecebido: number };
+  };
+  nps: {
+    enviados: number;
+    respondidos: number;
+    taxaRespostaPct: number | null;
+    notaMedia: number | null;
+    distribuicao: { detratores: number; neutros: number; promotores: number };
+    npsClassico: number | null;
+    comparativo: {
+      enviados: number;
+      respondidos: number;
+      taxaRespostaPct: number | null;
+      notaMedia: number | null;
+      npsClassico: number | null;
+    };
+  };
 };
 
 const getToken = (): string | null => {

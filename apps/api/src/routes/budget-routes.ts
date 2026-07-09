@@ -3,12 +3,20 @@ import type { Request, Response } from 'express';
 import { z } from 'zod';
 import { prisma } from '../lib/deps';
 import { authMiddleware } from '../middleware/auth-middleware';
-import { requireReportExportRole } from '../middleware/authorization';
+import { hasReportExportRole, requireReportExportRole } from '../middleware/authorization';
+import { logger } from '../lib/logger';
 
 const router = Router();
 
 const jsonError = (res: Response, status: number, error: string): void => {
   res.status(status).json({ success: false, error });
+};
+
+// Erro inesperado (500): loga o detalhe no servidor e devolve mensagem
+// genérica ao cliente — nunca vaza detalhe interno na resposta.
+const serverError = (res: Response, error: unknown, where: string): void => {
+  logger.error({ where, error: (error as Error).message }, 'erro interno na rota de orçamentos');
+  jsonError(res, 500, 'erro interno');
 };
 
 const paramStr = (value: unknown): string => (typeof value === 'string' ? value : '');
@@ -32,10 +40,21 @@ const BUDGET_INCLUDE = {
   service: { select: { id: true, name: true } },
 } as const;
 
+// A LISTA não expõe o telefone do lead (ACHADO 2 — minimização de dados
+// pessoais/LGPD): a recepção precisa operar orçamentos, mas o telefone só é
+// necessário no detalhe (GET /:id). Só id + name na listagem.
+const BUDGET_LIST_INCLUDE = {
+  lead: { select: { id: true, name: true } },
+  patient: { select: { id: true, name: true } },
+  service: { select: { id: true, name: true } },
+} as const;
+
 // Saldo derivado na leitura: amount − pagamentos liquidados (PAID/PARTIALLY_PAID).
 // Mesma regra do serviço legado (budget.service.js). Nunca gravado.
 type PaymentLike = { amount: unknown; status: string };
-const settledAmount = (payments: PaymentLike[]): number =>
+// Exportado para o relatório financeiro reusar a mesma regra de saldo
+// (pagamentos pendentes de orçamentos aceitos) sem duplicar a lógica.
+export const settledAmount = (payments: PaymentLike[]): number =>
   payments
     .filter((p) => p.status === 'PAID' || p.status === 'PARTIALLY_PAID')
     .reduce((sum, p) => sum + Number(p.amount), 0);
@@ -88,11 +107,11 @@ export const listBudgetsRoute = async (req: Request, res: Response): Promise<voi
       where: { ...(status ? { status } : {}), ...(leadId ? { leadId } : {}) },
       orderBy: { createdAt: 'desc' },
       take: 200,
-      include: { ...BUDGET_INCLUDE, payments: { select: { amount: true, status: true } } },
+      include: { ...BUDGET_LIST_INCLUDE, payments: { select: { amount: true, status: true } } },
     });
     res.json({ success: true, data: budgets.map(withBalance) });
   } catch (error) {
-    jsonError(res, 500, (error as Error).message);
+    serverError(res, error, 'GET /budgets');
   }
 };
 
@@ -108,7 +127,7 @@ export const getBudgetRoute = async (req: Request, res: Response): Promise<void>
     }
     res.json({ success: true, data: withBalance(budget) });
   } catch (error) {
-    jsonError(res, 500, (error as Error).message);
+    serverError(res, error, 'GET /budgets/:id');
   }
 };
 
@@ -136,7 +155,7 @@ export const createBudgetRoute = async (req: Request, res: Response): Promise<vo
     });
     res.status(201).json({ success: true, data: withBalance(budget) });
   } catch (error) {
-    jsonError(res, 500, (error as Error).message);
+    serverError(res, error, 'POST /budgets');
   }
 };
 
@@ -147,6 +166,21 @@ export const updateBudgetRoute = async (req: Request, res: Response): Promise<vo
       jsonError(res, 400, parsed.error.issues[0]?.message ?? 'payload inválido');
       return;
     }
+    const id = paramStr(req.params.id);
+    const existing = await prisma.budget.findUnique({ where: { id } });
+    if (!existing) {
+      jsonError(res, 404, 'Orçamento não encontrado');
+      return;
+    }
+
+    // Gate dependente do estado (ACHADO 1): a recepção pode editar rascunhos,
+    // mas mexer num orçamento já enviado/aceito é ato financeiro — exige papel
+    // financeiro/admin/marketing.
+    if (existing.status !== 'DRAFT' && !hasReportExportRole(req.userRole)) {
+      jsonError(res, 403, 'forbidden');
+      return;
+    }
+
     const input = parsed.data;
     const data: Record<string, unknown> = {};
     if (input.title !== undefined) data.title = input.title;
@@ -159,18 +193,40 @@ export const updateBudgetRoute = async (req: Request, res: Response): Promise<vo
     if (input.patientId !== undefined) data.patientId = input.patientId ?? null;
     if (input.serviceId !== undefined) data.serviceId = input.serviceId ?? null;
 
-    const result = await prisma.budget.updateMany({ where: { id: paramStr(req.params.id) }, data });
-    if (result.count === 0) {
-      jsonError(res, 404, 'Orçamento não encontrado');
-      return;
+    // Trilha (ACHADO 1): alteração de valor/entrada do orçamento é ato
+    // financeiro — registra de→para por campo no Activity do lead.
+    const changes: Array<{ field: string; from: number | null; to: number | null }> = [];
+    if (input.amount !== undefined && Number(input.amount) !== Number(existing.amount)) {
+      changes.push({ field: 'amount', from: Number(existing.amount), to: Number(input.amount) });
     }
-    const budget = await prisma.budget.findUnique({
-      where: { id: paramStr(req.params.id) },
+    if (input.entryAmount !== undefined) {
+      const from = existing.entryAmount === null ? null : Number(existing.entryAmount);
+      const to = input.entryAmount ?? null;
+      if (from !== to) changes.push({ field: 'entryAmount', from, to });
+    }
+
+    const budget = await prisma.budget.update({
+      where: { id },
+      data,
       include: { ...BUDGET_INCLUDE, payments: true },
     });
-    res.json({ success: true, data: budget ? withBalance(budget) : null });
+
+    if (changes.length > 0 && existing.leadId) {
+      await prisma.activity.create({
+        data: {
+          targetType: 'lead',
+          targetId: existing.leadId,
+          type: 'BUDGET_UPDATED',
+          title: 'Orçamento alterado',
+          body: JSON.stringify({ budgetId: id, changes }),
+          userId: req.userId ?? null,
+        },
+      });
+    }
+
+    res.json({ success: true, data: withBalance(budget) });
   } catch (error) {
-    jsonError(res, 500, (error as Error).message);
+    serverError(res, error, 'PATCH /budgets/:id');
   }
 };
 
@@ -231,7 +287,7 @@ const transitionRoute = (action: keyof typeof TRANSITIONS) =>
 
       res.json({ success: true, data: withBalance(updated) });
     } catch (error) {
-      jsonError(res, 500, (error as Error).message);
+      serverError(res, error, `POST /budgets/:id/${action}`);
     }
   };
 
@@ -280,7 +336,7 @@ export const exportBudgetsCsvRoute = async (req: Request, res: Response): Promis
     // BOM para o Excel abrir UTF-8 direto — mesmo padrão do export de relatórios.
     res.send(`﻿${lines.join('\n')}`);
   } catch (error) {
-    jsonError(res, 500, (error as Error).message);
+    serverError(res, error, 'GET /budgets/export.csv');
   }
 };
 

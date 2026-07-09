@@ -90,10 +90,29 @@ export const runAppointmentConfirmationForInbound = async (
   const appointmentId = (confirmMatch ?? rescheduleMatch)?.[1] ?? '';
   if (!appointmentId) return { handled: false };
 
-  const appointment = await data.get('appointment', appointmentId, { id: true });
+  const appointment = await data.get('appointment', appointmentId, { id: true, leadId: true });
   if (!appointment) {
     console.warn(
       JSON.stringify({ event: 'appointment_confirmation_unknown_appointment', appointmentId }),
+    );
+    return { handled: false };
+  }
+
+  // IDOR (ACHADO 3): o appointmentId vem do payload do botão, controlado pelo
+  // remetente. Antes de qualquer side effect, validar que o agendamento
+  // pertence ao lead da conversa de origem — mesmo padrão de nps-capture.ts
+  // (leadId derivado da conversationId). Se não pertencer: log + not handled,
+  // sem confirmar/remarcar o agendamento de outra pessoa.
+  const conversation = await data.get('conversation', input.conversationId, { id: true, leadId: true });
+  const conversationLeadId = typeof conversation?.leadId === 'string' ? conversation.leadId : '';
+  const appointmentLeadId = typeof appointment.leadId === 'string' ? appointment.leadId : '';
+  if (!conversationLeadId || appointmentLeadId !== conversationLeadId) {
+    console.warn(
+      JSON.stringify({
+        event: 'appointment_confirmation_foreign_appointment',
+        appointmentId,
+        conversationId: input.conversationId,
+      }),
     );
     return { handled: false };
   }

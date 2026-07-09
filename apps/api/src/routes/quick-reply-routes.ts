@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { prisma } from '../lib/deps';
 import { authMiddleware } from '../middleware/auth-middleware';
 import { requireAdmin } from '../middleware/authorization';
+import { logger } from '../lib/logger';
 
 const router = Router();
 
@@ -11,14 +12,20 @@ const jsonError = (res: Response, status: number, error: string): void => {
   res.status(status).json({ success: false, error });
 };
 
+// Erro inesperado (500): loga o detalhe no servidor e devolve mensagem genérica.
+const serverError = (res: Response, error: unknown, where: string): void => {
+  logger.error({ where, error: (error as Error).message }, 'erro interno na rota de respostas rápidas');
+  jsonError(res, 500, 'erro interno');
+};
+
 const paramStr = (value: unknown): string => (typeof value === 'string' ? value : '');
 
 // ---------------------------------------------------------------- validação
 
 const createSchema = z.object({
-  shortcut: z.string().trim().min(1, 'shortcut obrigatório'),
-  title: z.string().trim().min(1, 'title obrigatório'),
-  content: z.string().trim().min(1, 'content obrigatório'),
+  shortcut: z.string().trim().min(1, 'shortcut obrigatório').max(50, 'shortcut muito longo'),
+  title: z.string().trim().min(1, 'title obrigatório').max(120, 'title muito longo'),
+  content: z.string().trim().min(1, 'content obrigatório').max(2000, 'content muito longo'),
   active: z.boolean().optional(),
 });
 
@@ -58,7 +65,7 @@ export const listQuickRepliesRoute = async (req: Request, res: Response): Promis
     });
     res.json({ success: true, data: quickReplies });
   } catch (error) {
-    jsonError(res, 500, (error as Error).message);
+    serverError(res, error, 'GET /quick-replies');
   }
 };
 
@@ -80,7 +87,7 @@ export const createQuickReplyRoute = async (req: Request, res: Response): Promis
     });
     res.status(201).json({ success: true, data: quickReply });
   } catch (error) {
-    jsonError(res, 500, (error as Error).message);
+    serverError(res, error, 'POST /quick-replies');
   }
 };
 
@@ -106,7 +113,7 @@ export const updateQuickReplyRoute = async (req: Request, res: Response): Promis
     const quickReply = await prisma.quickReply.findUnique({ where: { id: paramStr(req.params.id) } });
     res.json({ success: true, data: quickReply });
   } catch (error) {
-    jsonError(res, 500, (error as Error).message);
+    serverError(res, error, 'PATCH /quick-replies/:id');
   }
 };
 
@@ -119,7 +126,7 @@ export const deleteQuickReplyRoute = async (req: Request, res: Response): Promis
     }
     res.json({ success: true, data: { deleted: true } });
   } catch (error) {
-    jsonError(res, 500, (error as Error).message);
+    serverError(res, error, 'DELETE /quick-replies/:id');
   }
 };
 

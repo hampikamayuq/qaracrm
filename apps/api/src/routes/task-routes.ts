@@ -53,6 +53,16 @@ export const createTaskRoute = async (req: Request, res: Response): Promise<void
       jsonError(res, 400, 'title required');
       return;
     }
+    // Limites razoáveis (ACHADO 7): título curto, descrição de campo longo.
+    if (title.length > 200) {
+      jsonError(res, 400, 'title muito longo (máx. 200)');
+      return;
+    }
+    const description = typeof req.body?.description === 'string' ? req.body.description : null;
+    if (description !== null && description.length > 2000) {
+      jsonError(res, 400, 'description muito longa (máx. 2000)');
+      return;
+    }
     const priority = typeof req.body?.priority === 'string' && PRIORITIES.has(req.body.priority)
       ? req.body.priority
       : 'MEDIUM';
@@ -73,7 +83,7 @@ export const createTaskRoute = async (req: Request, res: Response): Promise<void
     const task = await prisma.task.create({
       data: {
         title,
-        description: typeof req.body?.description === 'string' ? req.body.description : null,
+        description,
         priority,
         dueAt,
         conversationId,

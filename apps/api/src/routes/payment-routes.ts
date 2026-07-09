@@ -3,11 +3,21 @@ import type { Request, Response } from 'express';
 import { z } from 'zod';
 import { prisma } from '../lib/deps';
 import { authMiddleware } from '../middleware/auth-middleware';
+import { requireReportExportRole } from '../middleware/authorization';
+import { logger } from '../lib/logger';
+import { settledAmount } from './budget-routes';
 
 const router = Router();
 
 const jsonError = (res: Response, status: number, error: string): void => {
   res.status(status).json({ success: false, error });
+};
+
+// Erro inesperado (500): loga o detalhe no servidor e devolve mensagem
+// genérica ao cliente — nunca vaza stack/detalhe de dados de saúde na resposta.
+const serverError = (res: Response, error: unknown, where: string): void => {
+  logger.error({ where, error: (error as Error).message }, 'erro interno na rota de pagamentos');
+  jsonError(res, 500, 'erro interno');
 };
 
 const paramStr = (value: unknown): string => (typeof value === 'string' ? value : '');
@@ -98,15 +108,22 @@ export const createPaymentRoute = async (req: Request, res: Response): Promise<v
       ? toDateOrNull(input.paidAt)
       : status === 'PENDING' ? null : new Date();
 
-    // Soma liquidada ANTES deste pagamento — usada para detectar a transição
+    // Soma liquidada ANTES deste pagamento (PAID/PARTIALLY_PAID) — mesma regra
+    // de saldo do budget-routes (settledAmount). Serve para (a) validar que o
+    // novo pagamento não excede o saldo restante e (b) detectar a transição
     // "acabou de quitar" sem disparar Activity de novo em pagamentos extras.
-    const priorSettled = isSettled(status)
-      ? await prisma.payment.findMany({
-          where: { budgetId: input.budgetId, status: { in: ['PAID', 'PARTIALLY_PAID'] } },
-          select: { amount: true },
-        })
-      : [];
-    const priorTotal = priorSettled.reduce((sum, p) => sum + Number(p.amount), 0);
+    const priorPayments = await prisma.payment.findMany({
+      where: { budgetId: input.budgetId, status: { in: ['PAID', 'PARTIALLY_PAID'] } },
+      select: { amount: true, status: true },
+    });
+    const priorTotal = settledAmount(priorPayments);
+    const budgetAmount = Number(budget.amount);
+    const remaining = budgetAmount - priorTotal;
+    // Tolerância de 1 centavo para arredondamentos; acima disso é overpayment.
+    if (input.amount > remaining + 0.01) {
+      jsonError(res, 422, `Valor excede o saldo restante do orçamento (${remaining.toFixed(2)})`);
+      return;
+    }
 
     const payment = await prisma.payment.create({
       data: {
@@ -120,26 +137,45 @@ export const createPaymentRoute = async (req: Request, res: Response): Promise<v
       },
     });
 
-    if (isSettled(status) && budget.leadId) {
-      const newTotal = priorTotal + Number(payment.amount);
-      const amount = Number(budget.amount);
-      if (priorTotal < amount && newTotal >= amount) {
-        await prisma.activity.create({
-          data: {
-            targetType: 'lead',
-            targetId: budget.leadId,
-            type: 'BUDGET_PAID',
-            title: 'Orçamento quitado',
-            body: JSON.stringify({ budgetId: budget.id, title: budget.title, amount }),
-            userId: req.userId ?? null,
-          },
-        });
+    // Trilha: toda criação de pagamento vira Activity no lead do orçamento.
+    if (budget.leadId) {
+      await prisma.activity.create({
+        data: {
+          targetType: 'lead',
+          targetId: budget.leadId,
+          type: 'PAYMENT_CREATED',
+          title: 'Pagamento registrado',
+          body: JSON.stringify({
+            budgetId: budget.id,
+            paymentId: payment.id,
+            amount: Number(payment.amount),
+            method: payment.method,
+            status,
+          }),
+          userId: req.userId ?? null,
+        },
+      });
+
+      if (isSettled(status)) {
+        const newTotal = priorTotal + Number(payment.amount);
+        if (priorTotal < budgetAmount && newTotal >= budgetAmount) {
+          await prisma.activity.create({
+            data: {
+              targetType: 'lead',
+              targetId: budget.leadId,
+              type: 'BUDGET_PAID',
+              title: 'Orçamento quitado',
+              body: JSON.stringify({ budgetId: budget.id, title: budget.title, amount: budgetAmount }),
+              userId: req.userId ?? null,
+            },
+          });
+        }
       }
     }
 
     res.status(201).json({ success: true, data: payment });
   } catch (error) {
-    jsonError(res, 500, (error as Error).message);
+    serverError(res, error, 'POST /payments');
   }
 };
 
@@ -180,11 +216,34 @@ export const updatePaymentRoute = async (req: Request, res: Response): Promise<v
       : [];
     const priorTotal = priorSettled.reduce((sum, p) => sum + Number(p.amount), 0);
 
+    // Orçamento do pagamento — usado tanto pela trilha (leadId) quanto pela
+    // detecção de quitação.
+    const budget = payment.budgetId
+      ? await prisma.budget.findUnique({ where: { id: payment.budgetId } })
+      : null;
+
     const updated = await prisma.payment.update({ where: { id }, data: { status, paidAt } });
 
-    if (status === 'PAID' && payment.budgetId) {
-      const budget = await prisma.budget.findUnique({ where: { id: payment.budgetId } });
-      if (budget?.leadId) {
+    if (budget?.leadId) {
+      // Trilha: toda alteração de status de pagamento vira Activity no lead.
+      await prisma.activity.create({
+        data: {
+          targetType: 'lead',
+          targetId: budget.leadId,
+          type: 'PAYMENT_UPDATED',
+          title: 'Pagamento atualizado',
+          body: JSON.stringify({
+            budgetId: budget.id,
+            paymentId: updated.id,
+            field: 'status',
+            from: payment.status,
+            to: status,
+          }),
+          userId: req.userId ?? null,
+        },
+      });
+
+      if (status === 'PAID') {
         const newTotal = priorTotal + Number(updated.amount);
         const amount = Number(budget.amount);
         if (priorTotal < amount && newTotal >= amount) {
@@ -204,12 +263,14 @@ export const updatePaymentRoute = async (req: Request, res: Response): Promise<v
 
     res.json({ success: true, data: updated });
   } catch (error) {
-    jsonError(res, 500, (error as Error).message);
+    serverError(res, error, 'PATCH /payments/:id');
   }
 };
 
+// Escritas financeiras exigem papel financeiro/admin/marketing (ACHADO 1):
+// registrar e alterar pagamentos é ato financeiro, não operação de recepção.
 router.get('/', authMiddleware, listPaymentsRoute);
-router.post('/', authMiddleware, createPaymentRoute);
-router.patch('/:id', authMiddleware, updatePaymentRoute);
+router.post('/', authMiddleware, requireReportExportRole, createPaymentRoute);
+router.patch('/:id', authMiddleware, requireReportExportRole, updatePaymentRoute);
 
 export default router;

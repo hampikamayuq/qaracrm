@@ -117,6 +117,17 @@ describe('Quick reply routes', () => {
     expect(bad.status).toBe(400);
   });
 
+  it('POST / rejeita campos acima do limite (shortcut 50 / title 120 / content 2000)', async () => {
+    const app = await makeApp();
+    const res = await request(app).post('/api/quick-replies').set(AUTH).send({
+      shortcut: '/a',
+      title: 'ok',
+      content: 'c'.repeat(2001),
+    });
+    expect(res.status).toBe(400);
+    expect(mocks.prisma.quickReply.create).not.toHaveBeenCalled();
+  });
+
   it('PATCH /:id exige admin, atualiza campos e retorna 404 quando não existe', async () => {
     mocks.prisma.session.findUnique.mockResolvedValue({ token: 'reception-token', expiresAt: new Date(Date.now() + 3600_000) });
     const app = await makeApp();

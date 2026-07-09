@@ -36,7 +36,22 @@ Dashboard (`/`) · Inbox (3 colunas, estados Tawany/humano, feedback 👍/👎,
 modo teste) · Pipeline (kanban canônico com histórico e motivo de perda) ·
 Agenda (mês/semana/dia + .ics) · Tarefas & Atividades · Relatórios (export
 CSV) · Bots (editor com versionamento) · Conhecimento (`/settings/knowledge`)
-· IA (`/settings/ai`).
+· IA (`/settings/ai`) · Orçamentos & Pagamentos (`/quotes`; máquina de estados,
+follow-up automático) · Pacientes (`/contacts`; conversão lead→paciente,
+histórico unificado).
+
+## Funcionalidades
+
+- **WhatsApp Direct**: envio/recebimento nativo via Cloud API Meta, triagem automatizada
+- **Instagram Direct**: respostas diretas no Instagram (@channels) via Meta Graph API
+- **Servidor MCP**: copiloto Claude integrado; leia [packages/mcp/README.md](packages/mcp)
+- **Respostas Rápidas (Quick Replies)**: gabarito com placeholders (`{{nome}}`), disponível no inbox
+- **Orçamentos**: máquina de estados (DRAFT → SENT → ACCEPTED/REJECTED/EXPIRED), follow-up automático
+- **Pagamentos**: registro de recebimentos (dinheiro, PIX, débito, crédito, transferência), saldo e quitação
+- **Pacientes**: conversão automática lead→paciente, histórico unificado (consultas, orçamentos, pagamentos)
+- **Confirmação D-1 com Botões**: lembrete automático no dia anterior ao agendamento, Confirmar/Remarcar em um toque
+- **NPS pós-consulta**: pesquisa de satisfação 0-10 via WhatsApp, captura automática e categorização (detrator/passivo/promotor)
+- **Transcrição de Áudios**: notas de voz e anexos de áudio convertidos para texto (pt-BR), processados normalmente pela IA e Inbox
 
 ## Desenvolvimento
 

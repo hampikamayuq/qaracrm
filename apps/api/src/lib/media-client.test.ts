@@ -7,6 +7,7 @@ const ENV_KEYS = [
   'META_GRAPH_BASE_URL',
   'AUDIO_MAX_BYTES',
   'AUDIO_DOWNLOAD_TIMEOUT_MS',
+  'MEDIA_URL_ALLOWLIST',
 ] as const;
 const saved: Record<string, string | undefined> = {};
 
@@ -124,15 +125,61 @@ describe('downloadWhatsAppMedia', () => {
 });
 
 describe('downloadDirectMedia', () => {
-  it('fetches the url without auth and returns base64 + mime', async () => {
+  // Hosts atualizados para a allowlist da Meta (ACHADO 4): ig.example não é
+  // mais aceito; usamos sufixos reais (cdninstagram.com / fbsbx.com).
+  const VALID_URL = 'https://scontent.cdninstagram.com/a.m4a';
+
+  it('fetches the url without auth (redirect manual) and returns base64 + mime', async () => {
     const bytes = new Uint8Array([7, 8, 9]);
     const fetchMock = vi.fn().mockResolvedValueOnce(okBinary(bytes, { 'content-type': 'audio/mp4' }));
     vi.stubGlobal('fetch', fetchMock);
 
-    const media = await downloadDirectMedia('https://ig.example/a.m4a');
+    const media = await downloadDirectMedia(VALID_URL);
     expect(media.sizeBytes).toBe(3);
     expect(media.mimeType).toBe('audio/mp4');
+    // sem Authorization e com redirect manual (não segue 3xx para fora da CDN)
     expect(fetchMock.mock.calls[0][1].headers).toBeUndefined();
+    expect(fetchMock.mock.calls[0][1].redirect).toBe('manual');
+  });
+
+  it('accepts the apex allowlisted host too (fbsbx.com)', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(okBinary(new Uint8Array([1])));
+    vi.stubGlobal('fetch', fetchMock);
+    await expect(downloadDirectMedia('https://fbsbx.com/a')).resolves.toBeDefined();
+  });
+
+  it('rejects a non-https url before any fetch', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    await expect(downloadDirectMedia('http://scontent.cdninstagram.com/a.m4a')).rejects.toThrow(/https/);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('rejects a host outside the allowlist before any fetch', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    await expect(downloadDirectMedia('https://evil.example.com/a')).rejects.toThrow(/não permitido/);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('rejects a forged suffix host (evilcdninstagram.com) — suffix match, not includes', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    await expect(downloadDirectMedia('https://evilcdninstagram.com/a')).rejects.toThrow(/não permitido/);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('treats a 3xx redirect as an error (no SSRF follow)', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce({ ok: false, status: 302, headers: new Headers() });
+    vi.stubGlobal('fetch', fetchMock);
+    await expect(downloadDirectMedia(VALID_URL)).rejects.toThrow(/redirect bloqueado/);
+  });
+
+  it('honors extra suffixes from MEDIA_URL_ALLOWLIST', async () => {
+    process.env.MEDIA_URL_ALLOWLIST = 'cdn.example.com';
+    const fetchMock = vi.fn().mockResolvedValueOnce(okBinary(new Uint8Array([1])));
+    vi.stubGlobal('fetch', fetchMock);
+    await expect(downloadDirectMedia('https://media.cdn.example.com/a')).resolves.toBeDefined();
   });
 
   it('enforces the size limit via content-length header before buffering', async () => {
@@ -144,12 +191,12 @@ describe('downloadDirectMedia', () => {
       arrayBuffer: async () => new ArrayBuffer(99),
     });
     vi.stubGlobal('fetch', fetchMock);
-    await expect(downloadDirectMedia('https://ig.example/big')).rejects.toThrow(/too large/);
+    await expect(downloadDirectMedia('https://scontent.cdninstagram.com/big')).rejects.toThrow(/too large/);
   });
 
   it('throws on non-ok response', async () => {
     const fetchMock = vi.fn().mockResolvedValueOnce({ ok: false, status: 403, headers: new Headers() });
     vi.stubGlobal('fetch', fetchMock);
-    await expect(downloadDirectMedia('https://ig.example/x')).rejects.toThrow('media binary fetch failed: 403');
+    await expect(downloadDirectMedia('https://scontent.cdninstagram.com/x')).rejects.toThrow('media binary fetch failed: 403');
   });
 });

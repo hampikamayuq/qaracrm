@@ -30,6 +30,44 @@ const timeoutMs = (): number =>
 
 const graphBaseUrl = (): string => process.env.META_GRAPH_BASE_URL ?? DEFAULT_GRAPH_BASE_URL;
 
+// SSRF (ACHADO 4): a url do anexo do Instagram vem do webhook, controlada por
+// terceiro. Antes do fetch validamos: https obrigatório + host num sufixo de
+// domínio da Meta. Comparação por SUFIXO real (=== host ou termina em ".suf"),
+// nunca includes(), para não aceitar "evilcdninstagram.com".
+const DEFAULT_MEDIA_HOST_SUFFIXES = ['cdninstagram.com', 'fbcdn.net', 'fbsbx.com'];
+
+// MEDIA_URL_ALLOWLIST (opcional): sufixos extras separados por vírgula, para
+// acrescentar CDNs sem alterar código. Ver .env.example.
+const mediaHostSuffixes = (): string[] => {
+  const extra = (process.env.MEDIA_URL_ALLOWLIST ?? '')
+    .split(',')
+    .map((s) => s.trim().toLowerCase())
+    .filter(Boolean);
+  return [...DEFAULT_MEDIA_HOST_SUFFIXES, ...extra];
+};
+
+const hostAllowed = (host: string, suffixes: string[]): boolean =>
+  suffixes.some((suffix) => host === suffix || host.endsWith(`.${suffix}`));
+
+// Valida e normaliza a URL de mídia direta. Lança em qualquer violação para
+// abortar ANTES de qualquer requisição de rede.
+const assertSafeMediaUrl = (raw: string): URL => {
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    throw new Error('media url inválida');
+  }
+  if (url.protocol !== 'https:') {
+    throw new Error('media url deve usar https');
+  }
+  const host = url.hostname.toLowerCase();
+  if (!hostAllowed(host, mediaHostSuffixes())) {
+    throw new Error(`media host não permitido: ${host}`);
+  }
+  return url;
+};
+
 // O token de mídia do WhatsApp reusa a credencial da Graph API. Aceitamos o
 // nome dedicado (WHATSAPP_ACCESS_TOKEN) e caímos no META_ACCESS_TOKEN já usado
 // pelo whatsapp-client para não exigir uma segunda credencial em produção.
@@ -102,10 +140,16 @@ export const downloadWhatsAppMedia = async (mediaId: string): Promise<Downloaded
   return { base64, sizeBytes, mimeType: mimeFrom(binRes, meta.mime_type ?? 'audio/ogg') };
 };
 
-// Instagram: a url do anexo é pública/assinada e não leva Bearer.
+// Instagram: a url do anexo é pública/assinada e não leva Bearer. Validada
+// contra a allowlist da Meta (SSRF) e sem seguir redirects — um 3xx aponta
+// para fora da CDN validada e é tratado como erro.
 export const downloadDirectMedia = async (url: string): Promise<DownloadedMedia> => {
   if (!url) throw new Error('media url ausente');
-  const res = await fetchWithTimeout(url, {});
+  const safeUrl = assertSafeMediaUrl(url);
+  const res = await fetchWithTimeout(safeUrl.toString(), { redirect: 'manual' });
+  if (res.status >= 300 && res.status < 400) {
+    throw new Error(`media redirect bloqueado: ${res.status}`);
+  }
   if (!res.ok) throw new Error(`media binary fetch failed: ${res.status}`);
   const { base64, sizeBytes } = await readCappedBody(res);
   return { base64, sizeBytes, mimeType: mimeFrom(res, 'audio/mp4') };

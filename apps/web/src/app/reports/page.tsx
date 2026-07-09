@@ -11,12 +11,15 @@ import {
   Download,
   Inbox,
   MessagesSquare,
+  Receipt,
   RefreshCw,
   Send,
+  Smile,
   Target,
   Timer,
   UserPlus,
   UserX,
+  Wallet,
 } from 'lucide-react';
 import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import {
@@ -24,6 +27,7 @@ import {
   type DashboardPeriod,
   type ReportAtendimento,
   type ReportComercial,
+  type ReportFinanceiro,
   type ReportParams,
   type ReportTawany,
   type ReportTipo,
@@ -53,10 +57,25 @@ const deltaOfPcts = (atual: number | null, anterior: number | null): number | nu
 const fmtDayBr = (iso: string): string =>
   new Date(`${iso}T00:00:00`).toLocaleDateString('pt-BR');
 
+// Valores do relatório financeiro já chegam calculados (number) — mesmo
+// padrão de moeda usado em quotes/page.tsx.
+const brl = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
+const money = (value: number | null): string => (value === null ? '—' : brl.format(value));
+
+const PAYMENT_METHOD_LABELS: Record<string, string> = {
+  CASH: 'Dinheiro',
+  PIX: 'Pix',
+  DEBIT: 'Débito',
+  CREDIT: 'Cartão',
+  BANK_TRANSFER: 'Transferência',
+  OTHER: 'Outro',
+};
+
 type Reports = {
   comercial: ReportComercial;
   atendimento: ReportAtendimento;
   tawany: ReportTawany;
+  financeiro: ReportFinanceiro;
 };
 
 // Cabeçalho de seção: título + botão de export CSV do relatório.
@@ -129,12 +148,13 @@ function ReportsPage() {
     setLoading(true);
     setError(null);
     try {
-      const [comercial, atendimento, tawany] = await Promise.all([
+      const [comercial, atendimento, tawany, financeiro] = await Promise.all([
         api.getReport<ReportComercial>('comercial', params),
         api.getReport<ReportAtendimento>('atendimento', params),
         api.getReport<ReportTawany>('tawany', params),
+        api.getReport<ReportFinanceiro>('financeiro', params),
       ]);
-      setData({ comercial, atendimento, tawany });
+      setData({ comercial, atendimento, tawany, financeiro });
     } catch (e) {
       setError((e as Error).message || 'Erro ao carregar os relatórios');
     } finally {
@@ -195,13 +215,31 @@ function ReportsPage() {
 
   const perdasTotal = perdasData.reduce((sum, p) => sum + p.count, 0);
 
+  const porMetodoData = useMemo(() => (
+    (data?.financeiro.pagamentos.porMetodo ?? []).map((m) => ({
+      label: PAYMENT_METHOD_LABELS[m.method] ?? m.method,
+      count: m.valor,
+      rightLabel: money(m.valor),
+    }))
+  ), [data?.financeiro.pagamentos.porMetodo]);
+
+  const npsDistribData = useMemo(() => {
+    const d = data?.financeiro.nps.distribuicao;
+    if (!d) return [];
+    return [
+      { label: 'Promotores (9-10)', count: d.promotores, rightLabel: nf(d.promotores) },
+      { label: 'Neutros (7-8)', count: d.neutros, rightLabel: nf(d.neutros) },
+      { label: 'Detratores (0-6)', count: d.detratores, rightLabel: nf(d.detratores) },
+    ];
+  }, [data?.financeiro.nps.distribuicao]);
+
   if (error && !data) {
     return (
       <main className="page page-wide">
         <div className="toolbar">
           <div>
             <h1 className="title">Relatórios</h1>
-            <div className="muted">Comercial, atendimento e Tawany</div>
+            <div className="muted">Comercial, atendimento, Tawany e financeiro</div>
           </div>
         </div>
         <div className="dash-error" role="alert">
@@ -223,7 +261,7 @@ function ReportsPage() {
       <div className="toolbar">
         <div>
           <h1 className="title">Relatórios</h1>
-          <div className="muted">Comercial, atendimento e Tawany · {periodHint}</div>
+          <div className="muted">Comercial, atendimento, Tawany e financeiro · {periodHint}</div>
         </div>
         <div className="toolbar-right">
           <div className="segmented" role="group" aria-label="Período">
@@ -538,6 +576,131 @@ function ReportsPage() {
                     ))}
                   </tbody>
                 </table>
+              </ChartCard>
+            </div>
+          </section>
+
+          {/* ---------------- Financeiro ---------------- */}
+          <section className="report-section" aria-label="Relatório financeiro">
+            <SectionHead
+              title="Financeiro"
+              hint={`orçamentos, pagamentos e NPS · ${periodHint}`}
+              onExport={() => exportCsv('financeiro')}
+              exporting={exporting === 'financeiro'}
+            />
+            <div className="kpi-grid">
+              <KpiCard
+                label="Recebido no período"
+                value={money(data.financeiro.pagamentos.totalRecebido)}
+                icon={Wallet}
+                delta={deltaPct(
+                  data.financeiro.pagamentos.totalRecebido,
+                  data.financeiro.pagamentos.comparativo.totalRecebido,
+                )}
+                hint={`vs ${money(data.financeiro.pagamentos.comparativo.totalRecebido)} no período anterior`}
+              />
+              <KpiCard
+                label="A receber"
+                value={money(data.financeiro.pagamentos.pendente)}
+                icon={Receipt}
+                tone={data.financeiro.pagamentos.pendente > 0 ? 'warning' : 'default'}
+                hint="orçamentos aceitos com saldo em aberto"
+              />
+              <KpiCard
+                label="Taxa de aceitação"
+                value={fmtPct(data.financeiro.orcamentos.taxaAceitacaoPct)}
+                icon={Target}
+                tone="accent"
+                delta={deltaOfPcts(
+                  data.financeiro.orcamentos.taxaAceitacaoPct,
+                  data.financeiro.orcamentos.comparativo.taxaAceitacaoPct,
+                )}
+                hint="aceitos / (aceitos + recusados + expirados)"
+              />
+              <KpiCard
+                label="NPS"
+                value={data.financeiro.nps.npsClassico === null ? '—' : nf(Math.round(data.financeiro.nps.npsClassico))}
+                icon={Smile}
+                tone="accent"
+                delta={deltaOfPcts(data.financeiro.nps.npsClassico, data.financeiro.nps.comparativo.npsClassico)}
+                hint={`${fmtPct(data.financeiro.nps.taxaRespostaPct)} de resposta`}
+              />
+            </div>
+            <div className="dash-grid">
+              <ChartCard
+                title="Orçamentos por status"
+                hint="orçamentos criados no período"
+                accent={TOKEN.teal}
+                empty={data.financeiro.orcamentos.total === 0}
+              >
+                <table className="report-table">
+                  <thead>
+                    <tr>
+                      <th>Status</th>
+                      <th>Qtd</th>
+                      <th>Valor</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {data.financeiro.orcamentos.porStatus.map((s) => (
+                      <tr key={s.status}>
+                        <td>{s.label}</td>
+                        <td>{nf(s.count)}</td>
+                        <td>{money(s.valor)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                <div className="mini-stats">
+                  <div className="mini-stat">
+                    <span className="mini-stat-value">
+                      {fmtMinutes(
+                        data.financeiro.orcamentos.tempoMedioRespostaHoras !== null
+                          ? data.financeiro.orcamentos.tempoMedioRespostaHoras * 60
+                          : null,
+                      )}
+                    </span>
+                    <span className="mini-stat-label">Tempo médio de resposta</span>
+                  </div>
+                  <div className="mini-stat">
+                    <span className="mini-stat-value">{money(data.financeiro.orcamentos.valorMedio)}</span>
+                    <span className="mini-stat-label">Valor médio do orçamento</span>
+                  </div>
+                </div>
+              </ChartCard>
+
+              <ChartCard
+                title="Pagamentos por método"
+                hint="recebido no período (PIX, cartão…)"
+                accent={TOKEN.info}
+                empty={porMetodoData.length === 0}
+              >
+                <HorizontalBars
+                  data={porMetodoData}
+                  color={TOKEN.info}
+                  height={Math.max(100, porMetodoData.length * 30 + 20)}
+                />
+              </ChartCard>
+
+              <ChartCard
+                title="NPS · distribuição"
+                hint="respondentes no período"
+                accent={TOKEN.ai}
+                empty={data.financeiro.nps.respondidos === 0}
+              >
+                <HorizontalBars data={npsDistribData} color={TOKEN.ai} height={120} />
+                <div className="mini-stats">
+                  <div className="mini-stat">
+                    <span className="mini-stat-value">{nf(data.financeiro.nps.respondidos)}</span>
+                    <span className="mini-stat-label">Respondidos de {nf(data.financeiro.nps.enviados)}</span>
+                  </div>
+                  <div className="mini-stat">
+                    <span className="mini-stat-value">
+                      {data.financeiro.nps.notaMedia === null ? '—' : data.financeiro.nps.notaMedia.toLocaleString('pt-BR')}
+                    </span>
+                    <span className="mini-stat-label">Nota média</span>
+                  </div>
+                </div>
               </ChartCard>
             </div>
           </section>

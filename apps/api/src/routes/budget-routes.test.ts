@@ -169,6 +169,81 @@ describe('Budget routes', () => {
     expect(mocks.prisma.activity.create).not.toHaveBeenCalled();
   });
 
+  it('PATCH /:id 404 quando o orçamento não existe', async () => {
+    mocks.prisma.budget.findUnique.mockResolvedValue(null);
+    const app = await makeApp();
+    const res = await request(app).patch('/api/budgets/ghost').set(AUTH).send({ title: 'X' });
+    expect(res.status).toBe(404);
+    expect(mocks.prisma.budget.update).not.toHaveBeenCalled();
+  });
+
+  it('PATCH /:id a recepção PODE editar um rascunho (DRAFT)', async () => {
+    // ACHADO 1: rascunho ainda não é ato financeiro — recepção pode mexer.
+    mocks.prisma.session.findUnique.mockResolvedValue({ token: 'reception-token', expiresAt: new Date(Date.now() + 3600_000) });
+    mocks.prisma.budget.findUnique.mockResolvedValue({ id: 'b1', status: 'DRAFT', leadId: 'l1', amount: 800, entryAmount: null });
+    mocks.prisma.budget.update.mockResolvedValue({ id: 'b1', status: 'DRAFT', leadId: 'l1', amount: 900, title: 'X', payments: [] });
+    const app = await makeApp();
+
+    const res = await request(app).patch('/api/budgets/b1').set(RECEPTION_AUTH).send({ amount: 900 });
+
+    expect(res.status).toBe(200);
+    expect(mocks.prisma.budget.update).toHaveBeenCalled();
+    // valor mudou → trilha BUDGET_UPDATED com de→para no body.
+    expect(mocks.prisma.activity.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ type: 'BUDGET_UPDATED', targetId: 'l1', body: expect.stringContaining('amount') }),
+    });
+  });
+
+  it('PATCH /:id a recepção NÃO pode alterar um orçamento fora de DRAFT (403)', async () => {
+    // ACHADO 1: mexer em valor de orçamento SENT/ACCEPTED é ato financeiro.
+    mocks.prisma.session.findUnique.mockResolvedValue({ token: 'reception-token', expiresAt: new Date(Date.now() + 3600_000) });
+    mocks.prisma.budget.findUnique.mockResolvedValue({ id: 'b1', status: 'SENT', leadId: 'l1', amount: 800, entryAmount: null });
+    const app = await makeApp();
+
+    const res = await request(app).patch('/api/budgets/b1').set(RECEPTION_AUTH).send({ amount: 900 });
+
+    expect(res.status).toBe(403);
+    expect(mocks.prisma.budget.update).not.toHaveBeenCalled();
+    expect(mocks.prisma.activity.create).not.toHaveBeenCalled();
+  });
+
+  it('PATCH /:id admin altera valor de orçamento SENT e grava BUDGET_UPDATED (de→para)', async () => {
+    mocks.prisma.budget.findUnique.mockResolvedValue({ id: 'b1', status: 'SENT', leadId: 'l1', amount: 800, entryAmount: null });
+    mocks.prisma.budget.update.mockResolvedValue({ id: 'b1', status: 'SENT', leadId: 'l1', amount: 1200, title: 'X', payments: [] });
+    const app = await makeApp();
+
+    const res = await request(app).patch('/api/budgets/b1').set(AUTH).send({ amount: 1200 });
+
+    expect(res.status).toBe(200);
+    expect(mocks.prisma.activity.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        type: 'BUDGET_UPDATED',
+        targetId: 'l1',
+        userId: 'u1',
+        body: expect.stringContaining('800'),
+      }),
+    });
+  });
+
+  it('PATCH /:id sem mudança financeira (só notes) não grava BUDGET_UPDATED', async () => {
+    mocks.prisma.budget.findUnique.mockResolvedValue({ id: 'b1', status: 'SENT', leadId: 'l1', amount: 800, entryAmount: null });
+    mocks.prisma.budget.update.mockResolvedValue({ id: 'b1', status: 'SENT', leadId: 'l1', amount: 800, notes: 'oi', payments: [] });
+    const app = await makeApp();
+
+    const res = await request(app).patch('/api/budgets/b1').set(AUTH).send({ notes: 'oi' });
+
+    expect(res.status).toBe(200);
+    expect(mocks.prisma.activity.create).not.toHaveBeenCalled();
+  });
+
+  it('GET / não expõe telefone do lead na listagem (só id e name)', async () => {
+    mocks.prisma.budget.findMany.mockResolvedValue([]);
+    const app = await makeApp();
+    await request(app).get('/api/budgets').set(AUTH);
+    const call = mocks.prisma.budget.findMany.mock.calls[0][0];
+    expect(call.include.lead).toEqual({ select: { id: true, name: true } });
+  });
+
   it('GET /export.csv exige papel de exportação e devolve CSV', async () => {
     mocks.prisma.session.findUnique.mockResolvedValue({ token: 'reception-token', expiresAt: new Date(Date.now() + 3600_000) });
     const app = await makeApp();

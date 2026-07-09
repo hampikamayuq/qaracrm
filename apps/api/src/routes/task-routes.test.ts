@@ -53,6 +53,18 @@ describe('Task routes', () => {
     expect(mocks.prisma.task.findMany).not.toHaveBeenCalled();
   });
 
+  it('POST / rejeita title acima de 200 e description acima de 2000 (ACHADO 7)', async () => {
+    const app = await makeApp();
+
+    const longTitle = await request(app).post('/api/tasks').set(AUTH).send({ title: 'a'.repeat(201) });
+    expect(longTitle.status).toBe(400);
+
+    const longDesc = await request(app).post('/api/tasks').set(AUTH).send({ title: 'ok', description: 'b'.repeat(2001) });
+    expect(longDesc.status).toBe(400);
+
+    expect(mocks.prisma.task.create).not.toHaveBeenCalled();
+  });
+
   it('GET / lista tarefas abertas por padrão (exclui DONE/CANCELED)', async () => {
     mocks.prisma.task.findMany.mockResolvedValue([{ id: 't1', title: 'Follow-up', status: 'OPEN' }]);
     const app = await makeApp();
