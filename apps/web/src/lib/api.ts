@@ -103,6 +103,49 @@ export type TaskItem = {
   assignedTo: { id: string; name: string } | null;
 };
 
+export type QuickReply = {
+  id: string;
+  shortcut: string;
+  title: string;
+  content: string;
+  active: boolean;
+};
+
+export type BudgetStatus = 'DRAFT' | 'SENT' | 'ACCEPTED' | 'REJECTED' | 'EXPIRED';
+
+// amount/entryAmount chegam como string (Decimal do Prisma serializado em JSON).
+export type Budget = {
+  id: string;
+  title: string;
+  amount: string;
+  entryAmount: string | null;
+  installments: number;
+  status: BudgetStatus;
+  expiresAt: string | null;
+  sentAt: string | null;
+  respondedAt: string | null;
+  notes: string | null;
+  totalPaid: number;
+  balance: number;
+  createdAt: string;
+  leadId: string | null;
+  patientId: string | null;
+  serviceId: string | null;
+  lead: { id: string; name: string; phone: string | null } | null;
+  patient: { id: string; name: string } | null;
+  service: { id: string; name: string } | null;
+};
+
+export type BudgetInput = {
+  title: string;
+  amount: number;
+  entryAmount?: number | null;
+  installments?: number;
+  expiresAt?: string | null;
+  notes?: string | null;
+  leadId?: string | null;
+};
+
 export type Pipeline = {
   id: string;
   name: string;
@@ -462,6 +505,13 @@ export const api = {
     return this.fetch(`/inbox/${conversationId}/tags/${encodeURIComponent(tag)}`, { method: 'DELETE' });
   },
 
+  // ---------------- respostas rápidas ----------------
+
+  async getQuickReplies(search?: string): Promise<QuickReply[]> {
+    const res = await this.get<QuickReply[]>(`/quick-replies${qs({ search })}`);
+    return res.data ?? [];
+  },
+
   createTask(input: {
     title: string;
     conversationId?: string;
@@ -654,6 +704,33 @@ export const api = {
 
   setTaskStatus(id: string, status: 'OPEN' | 'IN_PROGRESS' | 'DONE' | 'CANCELED'): Promise<ApiResponse<{ status: string }>> {
     return this.fetch(`/tasks/${id}`, { method: 'PATCH', body: JSON.stringify({ status }) });
+  },
+
+  // ---------------- orçamentos ----------------
+
+  async getBudgets(opts: { status?: string; leadId?: string } = {}): Promise<Budget[]> {
+    const res = await this.get<Budget[]>(`/budgets${qs(opts)}`);
+    return res.data ?? [];
+  },
+
+  createBudget(input: BudgetInput): Promise<ApiResponse<Budget>> {
+    return this.post('/budgets', input);
+  },
+
+  updateBudget(id: string, input: Partial<BudgetInput>): Promise<ApiResponse<Budget>> {
+    return this.fetch(`/budgets/${id}`, { method: 'PATCH', body: JSON.stringify(input) });
+  },
+
+  sendBudget(id: string): Promise<ApiResponse<Budget>> {
+    return this.post(`/budgets/${id}/send`, {});
+  },
+
+  acceptBudget(id: string): Promise<ApiResponse<Budget>> {
+    return this.post(`/budgets/${id}/accept`, {});
+  },
+
+  rejectBudget(id: string): Promise<ApiResponse<Budget>> {
+    return this.post(`/budgets/${id}/reject`, {});
   },
 
   async getActivityFeed(period: FeedPeriod): Promise<TimelineItem[]> {

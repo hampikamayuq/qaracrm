@@ -96,6 +96,73 @@ describe('buildMetaPayload', () => {
       ],
     });
   });
+
+  it('builds a template payload with no components when there are no parameters or buttons', () => {
+    const p = buildMetaPayload('551', '', {
+      messageType: 'template',
+      templateName: 'qara_appointment_reminder_d1',
+    });
+    expect(p.template).toEqual({
+      name: 'qara_appointment_reminder_d1',
+      language: { code: 'pt_BR' },
+      components: [],
+    });
+  });
+
+  it('builds a template payload with quick-reply button components (payload per button)', () => {
+    const p = buildMetaPayload('551', '', {
+      messageType: 'template',
+      templateName: 'qara_appointment_reminder_d1',
+      buttonPayloads: ['confirm_apt_a1', 'reschedule_apt_a1'],
+    });
+    expect(p.type).toBe('template');
+    expect(p.template).toEqual({
+      name: 'qara_appointment_reminder_d1',
+      language: { code: 'pt_BR' },
+      components: [
+        {
+          type: 'button',
+          sub_type: 'quick_reply',
+          index: '0',
+          parameters: [{ type: 'payload', payload: 'confirm_apt_a1' }],
+        },
+        {
+          type: 'button',
+          sub_type: 'quick_reply',
+          index: '1',
+          parameters: [{ type: 'payload', payload: 'reschedule_apt_a1' }],
+        },
+      ],
+    });
+  });
+
+  it('builds a template payload with body parameters AND quick-reply buttons together', () => {
+    const p = buildMetaPayload('551', '', {
+      messageType: 'template',
+      templateName: 'qara_appointment_reminder_d1',
+      parameters: ['Maria'],
+      buttonPayloads: ['confirm_apt_a1', 'reschedule_apt_a1'],
+    });
+    expect(p.template).toEqual({
+      name: 'qara_appointment_reminder_d1',
+      language: { code: 'pt_BR' },
+      components: [
+        { type: 'body', parameters: [{ type: 'text', text: 'Maria' }] },
+        {
+          type: 'button',
+          sub_type: 'quick_reply',
+          index: '0',
+          parameters: [{ type: 'payload', payload: 'confirm_apt_a1' }],
+        },
+        {
+          type: 'button',
+          sub_type: 'quick_reply',
+          index: '1',
+          parameters: [{ type: 'payload', payload: 'reschedule_apt_a1' }],
+        },
+      ],
+    });
+  });
 });
 
 describe('sendViaMeta', () => {
@@ -142,5 +209,45 @@ describe('sendViaMeta', () => {
   it('throws when unconfigured', async () => {
     delete process.env.META_ACCESS_TOKEN;
     await expect(sendViaMeta('551', 'oi')).rejects.toThrow(/configurado/);
+  });
+
+  it('sends the D-1 reminder template with quick-reply button payloads (exact wire payload)', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ messages: [{ id: 'wamid.D1' }] }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await sendViaMeta('5511999998888', '', {
+      messageType: 'template',
+      templateName: 'qara_appointment_reminder_d1',
+      languageCode: 'pt_BR',
+      buttonPayloads: ['confirm_apt_appt-1', 'reschedule_apt_appt-1'],
+    });
+
+    const [, init] = fetchMock.mock.calls[0];
+    expect(JSON.parse(init.body)).toEqual({
+      messaging_product: 'whatsapp',
+      to: '5511999998888',
+      type: 'template',
+      template: {
+        name: 'qara_appointment_reminder_d1',
+        language: { code: 'pt_BR' },
+        components: [
+          {
+            type: 'button',
+            sub_type: 'quick_reply',
+            index: '0',
+            parameters: [{ type: 'payload', payload: 'confirm_apt_appt-1' }],
+          },
+          {
+            type: 'button',
+            sub_type: 'quick_reply',
+            index: '1',
+            parameters: [{ type: 'payload', payload: 'reschedule_apt_appt-1' }],
+          },
+        ],
+      },
+    });
   });
 });

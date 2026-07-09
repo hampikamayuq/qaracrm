@@ -71,6 +71,56 @@ async function main() {
     });
   }
 
+  // Respostas rápidas padrão de uma clínica dermatológica
+  const quickReplies = [
+    {
+      id: 'seed-qr-saudacao',
+      shortcut: '/saudacao',
+      title: 'Saudação inicial',
+      content: 'Olá, {{primeiro_nome}}! Aqui é da Clínica QARA 😊 Como posso te ajudar hoje?',
+    },
+    {
+      id: 'seed-qr-valores-consulta',
+      shortcut: '/valores',
+      title: 'Valores de consulta',
+      content:
+        'Oi, {{primeiro_nome}}! Os valores variam conforme a especialidade e o profissional. ' +
+        'Para te passar o valor certinho, você pode me contar qual tipo de consulta procura? ' +
+        'Assim já te direciono para o time responsável.',
+    },
+    {
+      id: 'seed-qr-endereco',
+      shortcut: '/endereco',
+      title: 'Endereço e estacionamento',
+      content:
+        'A Clínica QARA fica na nossa unidade principal — te envio a localização exata assim que ' +
+        'confirmarmos o agendamento. Temos estacionamento conveniado para pacientes, {{primeiro_nome}}.',
+    },
+    {
+      id: 'seed-qr-pos-consulta',
+      shortcut: '/pos-consulta',
+      title: 'Orientações pós-consulta',
+      content:
+        'Oi, {{primeiro_nome}}! Passando para reforçar as orientações da sua consulta: siga os cuidados ' +
+        'indicados pelo profissional e qualquer dúvida ou reação fora do esperado, fale com a gente por aqui.',
+    },
+    {
+      id: 'seed-qr-reagendamento',
+      shortcut: '/reagendar',
+      title: 'Pedido de reagendamento',
+      content:
+        'Sem problemas, {{primeiro_nome}}! Me diz alguns dias e horários que funcionam melhor para você que ' +
+        'já verifico a disponibilidade na agenda.',
+    },
+  ];
+  for (const qr of quickReplies) {
+    await prisma.quickReply.upsert({
+      where: { id: qr.id },
+      update: {},
+      create: qr,
+    });
+  }
+
   console.log('Seed complete.');
 }
 

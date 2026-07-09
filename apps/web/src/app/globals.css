@@ -1446,6 +1446,52 @@ select {
   font-weight: 600;
 }
 
+/* picker de respostas rápidas (composer do inbox) */
+
+.quick-reply-anchor {
+  order: -1;
+  margin-right: auto;
+}
+
+.quick-reply-menu {
+  display: grid;
+  gap: 4px;
+  left: 0;
+  min-width: 320px;
+  right: auto;
+}
+
+.quick-reply-search {
+  margin-bottom: 4px;
+}
+
+.quick-reply-search .input {
+  width: 100%;
+}
+
+.quick-reply-item {
+  display: grid;
+  gap: 2px;
+}
+
+.quick-reply-item-title {
+  font-weight: 600;
+}
+
+.quick-reply-item-preview {
+  color: var(--text-2);
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  font-size: 12px;
+  overflow: hidden;
+}
+
+.quick-reply-empty {
+  padding: 10px;
+  text-align: center;
+}
+
 /* drawer lateral */
 
 .drawer-root {
@@ -3184,4 +3230,73 @@ a.chip {
   display: grid;
   gap: 10px;
   margin-top: 12px;
+}
+
+/* ---------------- orçamentos ---------------- */
+
+.budget-list {
+  display: grid;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.budget-row {
+  align-items: center;
+  display: grid;
+  gap: 14px;
+  grid-template-columns: 1fr auto;
+}
+
+.budget-main {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.budget-title {
+  font-weight: 650;
+}
+
+.budget-meta {
+  color: var(--text-2);
+  display: flex;
+  flex-wrap: wrap;
+  font-size: 12.5px;
+  gap: 4px 10px;
+}
+
+.budget-amounts {
+  display: grid;
+  gap: 2px;
+  justify-items: end;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.budget-amount {
+  font-size: 15px;
+  font-weight: 680;
+}
+
+.budget-balance {
+  color: var(--text-2);
+  font-size: 12px;
+}
+
+.budget-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+@media (max-width: 640px) {
+  .budget-row {
+    grid-template-columns: 1fr;
+  }
+
+  .budget-amounts {
+    justify-items: start;
+    text-align: left;
+  }
 }

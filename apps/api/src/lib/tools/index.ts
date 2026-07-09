@@ -3,6 +3,7 @@ import type { DataApi } from 'src/lib/data';
 import { readLead } from './readLead';
 import { readPatient } from './readPatient';
 import { readConversationHistory } from './readConversationHistory';
+import { readBudgets } from './readBudgets';
 import { listProfessionals } from './listProfessionals';
 import { listServices } from './listServices';
 import { searchKnowledge } from './searchKnowledge';
@@ -26,6 +27,7 @@ export const ALL_TOOLS: TawanyTool[] = [
   readLead,
   readPatient,
   readConversationHistory,
+  readBudgets,
   listProfessionals,
   listServices,
   searchKnowledge,

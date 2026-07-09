@@ -1,6 +1,8 @@
 import type { DataApi } from './data';
+import { metaGraphBreaker } from './tools/sendWhatsApp';
 import { sendWhatsAppTemplate } from './tools/sendWhatsAppTemplate';
 import { HSM_D1_REMINDER_TEMPLATE, HSM_FOLLOW_UP_TEMPLATE } from './templates/hsm-messages';
+import { isMetaSendConfigured, sendViaMeta } from './whatsapp-client';
 
 export type SchedulerHandle = { stop(): void };
 export type SchedulerJobs = {
@@ -36,12 +38,56 @@ export const getD1Appointments = async (
   select: { id: true, scheduledAt: true, leadId: true, patientId: true, status: true },
 });
 
+// FASE 6: com APPOINTMENT_CONFIRM_BUTTONS=true, o lembrete D-1 sai com botões
+// quick-reply (confirm_apt_<id> / reschedule_apt_<id>) para o paciente
+// confirmar/remarcar num toque — sem IA (ver logic-functions/appointment-confirmation.ts).
+// Default false: o template ainda não tem botões aprovados na Meta, então
+// degradamos para o envio simples de sempre via sendWhatsAppTemplate.
+const appointmentConfirmButtonsEnabled = (): boolean =>
+  process.env.APPOINTMENT_CONFIRM_BUTTONS === 'true';
+
+// Envia o template D-1 diretamente via Meta Cloud API com os componentes de
+// botão (bypassa a tool sendWhatsAppTemplate, que ainda não aceita botões),
+// replicando a mesma gravação de ChatMessage/Conversation que ela faz.
+const sendD1ReminderWithButtons = async (
+  data: DataApi,
+  conversationId: string,
+  appointmentId: string,
+  conversation: Record<string, unknown>,
+): Promise<void> => {
+  const to = typeof conversation.externalId === 'string' ? conversation.externalId : '';
+  const canSend = isMetaSendConfigured() && conversation.channel === 'WHATSAPP' && to.length > 0;
+  const wamid = canSend
+    ? await metaGraphBreaker.execute(() =>
+        sendViaMeta(to, '', {
+          messageType: 'template',
+          templateName: HSM_D1_REMINDER_TEMPLATE,
+          languageCode: 'pt_BR',
+          buttonPayloads: [`confirm_apt_${appointmentId}`, `reschedule_apt_${appointmentId}`],
+        }),
+      )
+    : null;
+
+  await data.create('chatMessage', {
+    body: `[template:${HSM_D1_REMINDER_TEMPLATE}]`,
+    direction: 'OUT',
+    sentAt: new Date().toISOString(),
+    conversationId,
+    messageType: 'TEMPLATE',
+    deliveryStatus: wamid ? 'SENT' : 'PENDING',
+    agentHandled: true,
+    ...(wamid ? { externalId: wamid } : {}),
+  });
+  await data.update('conversation', conversationId, { lastMessageAt: new Date().toISOString() });
+};
+
 export const runD1ReminderJob = async (
   data: DataApi,
   now = new Date(),
 ): Promise<{ checked: number; sent: number }> => {
   const appointments = await getD1Appointments(data, now);
   let sent = 0;
+  const withButtons = appointmentConfirmButtonsEnabled();
 
   for (const appointment of appointments) {
     const leadId = typeof appointment.leadId === 'string' ? appointment.leadId : '';
@@ -51,16 +97,24 @@ export const runD1ReminderJob = async (
     const conversations = await data.list('conversation', {
       filter: { leadId: { eq: leadId } },
       limit: 1,
-      select: { id: true },
+      select: { id: true, channel: true, externalId: true },
     });
-    const conversationId = typeof conversations[0]?.id === 'string' ? conversations[0].id : '';
+    const conversation = conversations[0];
+    const conversationId = typeof conversation?.id === 'string' ? conversation.id : '';
     if (!conversationId) continue;
+    // Templates HSM são só WhatsApp: pula Instagram sem enviar nem marcar como
+    // enviado (evita a mensagem fantasma [template:...] PENDING).
+    if (conversation?.channel === 'INSTAGRAM') continue;
 
-    await sendWhatsAppTemplate.execute({
-      conversationId,
-      templateName: HSM_D1_REMINDER_TEMPLATE,
-      language: 'pt_BR',
-    }, data);
+    if (withButtons) {
+      await sendD1ReminderWithButtons(data, conversationId, appointmentId, conversation);
+    } else {
+      await sendWhatsAppTemplate.execute({
+        conversationId,
+        templateName: HSM_D1_REMINDER_TEMPLATE,
+        language: 'pt_BR',
+      }, data);
+    }
     await data.update('appointment', appointmentId, { reminderD1Sent: true });
     sent++;
   }
@@ -79,13 +133,16 @@ export const runFollowUpJob = async (
       status: { eq: 'OPEN' },
       lastMessageAt: { lt: cutoff },
     },
-    select: { id: true },
+    select: { id: true, channel: true },
   });
   let sent = 0;
 
   for (const conversation of conversations) {
     const conversationId = typeof conversation.id === 'string' ? conversation.id : '';
     if (!conversationId) continue;
+    // Templates HSM são só WhatsApp: pula Instagram sem enviar nem mudar o status
+    // (evita a mensagem fantasma [template:...] PENDING e o PENDING_PATIENT falso).
+    if (conversation.channel === 'INSTAGRAM') continue;
     await sendWhatsAppTemplate.execute({
       conversationId,
       templateName: HSM_FOLLOW_UP_TEMPLATE,

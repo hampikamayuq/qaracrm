@@ -6,6 +6,11 @@ export type SendWhatsAppOptions = {
   templateName?: string;
   languageCode?: string;
   parameters?: string[];
+  // Payloads dos botões quick-reply do template (na mesma ordem dos botões
+  // aprovados no Business Manager). A Meta Cloud API exige um components[]
+  // "button"/"quick_reply" por botão, com o payload estável que volta no
+  // webhook (button.payload) quando o paciente toca.
+  buttonPayloads?: string[];
 };
 
 const DEFAULT_GRAPH_BASE_URL = 'https://graph.facebook.com/v20.0';
@@ -52,20 +57,31 @@ export const buildMetaPayload = (
     };
   }
   if (type === 'template') {
+    const components: Record<string, unknown>[] = [];
+    if (options?.parameters?.length) {
+      components.push({
+        type: 'body',
+        parameters: options.parameters.map((p) => ({ type: 'text', text: p })),
+      });
+    }
+    // Um components[] por botão, na ordem — index é string por exigência da Meta.
+    if (options?.buttonPayloads?.length) {
+      options.buttonPayloads.forEach((payload, index) => {
+        components.push({
+          type: 'button',
+          sub_type: 'quick_reply',
+          index: String(index),
+          parameters: [{ type: 'payload', payload }],
+        });
+      });
+    }
     return {
       ...base,
       type: 'template',
       template: {
         name: options?.templateName ?? '',
         language: { code: options?.languageCode ?? 'pt_BR' },
-        components: options?.parameters?.length
-          ? [
-              {
-                type: 'body',
-                parameters: options.parameters.map((p) => ({ type: 'text', text: p })),
-              },
-            ]
-          : [],
+        components,
       },
     };
   }

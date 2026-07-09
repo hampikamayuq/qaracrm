@@ -1,7 +1,7 @@
 import app from './app.js';
 import { prisma } from './lib/deps.js';
 import { createPrismaDataApi } from './lib/prisma-data-api.js';
-import { runFollowupEngine } from './logic-functions/followup-engine.js';
+import { runBudgetFollowup, runFollowupEngine } from './logic-functions/followup-engine.js';
 
 const PORT = Number.parseInt(process.env.PORT ?? '4000', 10);
 
@@ -23,6 +23,9 @@ if (Number.isFinite(followupIntervalMs) && followupIntervalMs > 0 && process.env
     runFollowupEngine(new Date(), data)
       .then((r) => console.log(JSON.stringify({ event: 'followup_run', ...r })))
       .catch((err) => console.error('[followup] run failed:', (err as Error).message));
+    runBudgetFollowup(new Date(), data)
+      .then((r) => console.log(JSON.stringify({ event: 'budget_followup_run', ...r })))
+      .catch((err) => console.error('[budget-followup] run failed:', (err as Error).message));
   }, followupIntervalMs);
   timer.unref(); // não segura o processo vivo (ex.: shutdown, testes)
   console.log(`[followup] engine scheduled every ${followupIntervalMs}ms`);

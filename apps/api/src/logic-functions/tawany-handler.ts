@@ -55,6 +55,15 @@ const usageLog = (res: { usage?: { promptTokens: number; completionTokens: numbe
   estimatedCostCents: 0,
 });
 
+// Segurança de produto: enquanto o Instagram Direct é um canal novo, nenhuma
+// resposta da Tawany em conversa INSTAGRAM é auto-enviada — nem em autopilot,
+// nem em hibrido. Força human_approval (suggest_only) para revisão humana antes
+// de qualquer envio. Os demais modos ('suggest_only'/'test') já são seguros.
+export const gateSendModeForChannel = (
+  sendMode: TawanySendMode,
+  channel: string | null | undefined,
+): TawanySendMode => (channel === 'INSTAGRAM' && sendMode === 'send' ? 'suggest_only' : sendMode);
+
 const decideRuntimeSendMode = (
   deps: { testMode?: boolean; sendMode?: TawanySendMode },
   settings: AiRuntimeSettings,
@@ -161,9 +170,10 @@ export const runTawany = async (
       }
 
       const riskLevel = classifyTawanyRisk(reply, tawanyCtx);
-      const sendMode = aiSettings
+      const decidedSendMode = aiSettings
         ? decideRuntimeSendMode(deps, aiSettings, riskLevel, tawanyCtx.lead?.intent)
         : explicitSendMode;
+      const sendMode = gateSendModeForChannel(decidedSendMode, tawanyCtx.channel);
       const suggestion = await data.create('aiSuggestion', {
         conversationId: params.conversationId,
         messageId: params.messageId,

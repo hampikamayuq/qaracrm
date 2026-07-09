@@ -52,6 +52,7 @@ model Lead {
   patients      Patient[]
   appointments  Appointment[]
   tasks         Task[]
+  budgets       Budget[]
   temperature   String?        // "COLD" | "WARM" | "HOT"
   assignedToId  String?
   assignedTo    User?          @relation(fields: [assignedToId], references: [id])
@@ -77,6 +78,7 @@ model Patient {
   appointments        Appointment[]
   conversations       Conversation[]
   tasks               Task[]
+  budgets             Budget[]
   cpf                 String?
   birthDate           DateTime?
   preferredChannel    String?
@@ -237,6 +239,7 @@ model Service {
   active         Boolean       @default(true)
   professionalId String?
   appointments   Appointment[]
+  budgets        Budget[]
 }
 
 model Appointment {
@@ -354,8 +357,46 @@ model AppointmentType {
   appointments    Appointment[]
 }
 
+// Orçamento comercial (proposta de procedimento). Saldo = amount − pagamentos
+// PAID/PARTIALLY_PAID; transições DRAFT → SENT → ACCEPTED/REJECTED/EXPIRED.
+enum BudgetStatus {
+  DRAFT
+  SENT
+  ACCEPTED
+  REJECTED
+  EXPIRED
+}
+
+model Budget {
+  id           String       @id @default(uuid())
+  leadId       String?
+  lead         Lead?        @relation(fields: [leadId], references: [id])
+  patientId    String?
+  patient      Patient?     @relation(fields: [patientId], references: [id])
+  serviceId    String?
+  service      Service?     @relation(fields: [serviceId], references: [id])
+  title        String
+  amount       Decimal
+  entryAmount  Decimal?
+  installments Int          @default(1)
+  status       BudgetStatus @default(DRAFT)
+  expiresAt    DateTime?
+  sentAt       DateTime?
+  respondedAt  DateTime?
+  notes        String?
+  payments     Payment[]
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+
+  @@index([leadId])
+  @@index([status])
+  @@index([createdAt])
+}
+
 model Payment {
   id           String    @id @default(uuid())
+  budgetId     String?
+  budget       Budget?   @relation(fields: [budgetId], references: [id])
   amount       Decimal
   method       String    // CASH | PIX | DEBIT | CREDIT | BANK_TRANSFER | OTHER
   installments Int       @default(1)
@@ -363,6 +404,8 @@ model Payment {
   paidAt       DateTime?
   status       String    @default("PENDING") // PENDING | PAID | PARTIALLY_PAID | CANCELED | REFUNDED
   createdAt    DateTime  @default(now())
+
+  @@index([budgetId])
 }
 
 model Tag {

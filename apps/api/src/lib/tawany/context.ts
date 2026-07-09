@@ -14,6 +14,7 @@ export type LeadSummary = {
 
 export type TawanyContext = {
   conversationId: string;
+  channel: string | null;
   lead: LeadSummary;
   recentMessages: RecentMessage[]; // últimas N_RECENT verbatim, mais antiga primeiro
   // Resumo pré-computado por summarize-conversation (rodado pós-Tawany no
@@ -35,8 +36,9 @@ export const buildTawanyContext = async (
   const conv = (await ctx.get('conversation', conversationId, {
     id: true,
     leadId: true,
+    channel: true,
     summary: true,
-  })) as { leadId?: string | null; summary?: string | null } | null;
+  })) as { leadId?: string | null; channel?: string | null; summary?: string | null } | null;
   if (!conv) throw new Error(`Conversation not found: ${conversationId}`);
 
   let lead: LeadSummary = null;
@@ -87,6 +89,7 @@ export const buildTawanyContext = async (
 
   return {
     conversationId,
+    channel: typeof conv.channel === 'string' ? conv.channel : null,
     lead,
     recentMessages: messages.reverse(),
     summary: typeof conv.summary === 'string' && conv.summary.length > 0 ? conv.summary : null,

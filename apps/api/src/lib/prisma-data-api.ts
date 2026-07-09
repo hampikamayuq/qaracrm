@@ -23,6 +23,8 @@ const MODEL_MAP: Record<string, keyof PrismaClient> = {
   tawanyExample: 'tawanyExample',
   webhookEvent: 'webhookEvent',
   appointment: 'appointment',
+  budget: 'budget',
+  payment: 'payment',
   bot: 'bot',
   tag: 'tag',
   quickReply: 'quickReply',

@@ -9,10 +9,15 @@ const mocks = vi.hoisted(() => ({
   sendWhatsApp: {
     execute: vi.fn().mockResolvedValue(JSON.stringify({ ok: true, sent: false })),
   },
+  appointmentConfirmation: vi.fn().mockResolvedValue({ handled: false }),
 }));
 
 vi.mock('../lib/tools/sendWhatsApp', () => ({
   sendWhatsApp: mocks.sendWhatsApp,
+}));
+
+vi.mock('./appointment-confirmation', () => ({
+  runAppointmentConfirmationForInbound: mocks.appointmentConfirmation,
 }));
 
 const api = (over: Partial<DataApi> = {}): DataApi => ({
@@ -243,6 +248,92 @@ describe('handleMetaWebhook — inbound messages', () => {
       expect.objectContaining({ conversationId: 'conv-9' }),
       expect.any(Object),
     );
+  });
+});
+
+describe('handleMetaWebhook — appointment confirmation interception', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.appointmentConfirmation.mockResolvedValue({ handled: false });
+  });
+
+  it('does not run bots nor forward to Tawany when a button reply confirms an appointment', async () => {
+    mocks.appointmentConfirmation.mockResolvedValueOnce({ handled: true });
+    const buttonBody = {
+      object: 'whatsapp_business_account',
+      entry: [
+        {
+          changes: [
+            {
+              value: {
+                messages: [
+                  {
+                    id: 'wamid.BTN1',
+                    from: '5511999998888',
+                    timestamp: '1751650000',
+                    type: 'button',
+                    button: { payload: 'confirm_apt_a1', text: 'Confirmar' },
+                  },
+                ],
+              },
+            },
+          ],
+        },
+      ],
+    };
+    const list = vi
+      .fn()
+      .mockResolvedValueOnce([]) // dedup: no message with this externalId
+      .mockResolvedValueOnce([{ id: 'conv-9', leadId: 'lead-1' }]); // existing conversation
+    const create = vi.fn().mockResolvedValue({ id: 'msg-2' });
+
+    const result = await handleMetaWebhook(buttonBody, api({ list, create }), processDebounce());
+
+    expect(mocks.appointmentConfirmation).toHaveBeenCalledWith(
+      { conversationId: 'conv-9', messageType: 'BUTTON', buttonPayload: 'confirm_apt_a1' },
+      expect.any(Object),
+    );
+    // Não deve sobrar processedMessages: a Tawany (dispatchada a partir daqui
+    // pela rota) não deve ser acionada quando a confirmação já tratou o botão.
+    expect(result.processedMessages).toEqual([]);
+  });
+
+  it('still runs bots/Tawany normally when the button is not an appointment-confirmation payload', async () => {
+    const buttonBody = {
+      object: 'whatsapp_business_account',
+      entry: [
+        {
+          changes: [
+            {
+              value: {
+                messages: [
+                  {
+                    id: 'wamid.BTN2',
+                    from: '5511999998888',
+                    timestamp: '1751650000',
+                    type: 'button',
+                    button: { payload: 'some_other_flow', text: 'Ok' },
+                  },
+                ],
+              },
+            },
+          ],
+        },
+      ],
+    };
+    const list = vi
+      .fn()
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ id: 'conv-9', leadId: 'lead-1' }]);
+    const create = vi.fn().mockResolvedValue({ id: 'msg-2' });
+
+    const result = await handleMetaWebhook(buttonBody, api({ list, create }), processDebounce());
+
+    expect(mocks.appointmentConfirmation).toHaveBeenCalledWith(
+      { conversationId: 'conv-9', messageType: 'BUTTON', buttonPayload: 'some_other_flow' },
+      expect.any(Object),
+    );
+    expect(result.processedMessages).toEqual([{ conversationId: 'conv-9', messageId: 'msg-2' }]);
   });
 });
 

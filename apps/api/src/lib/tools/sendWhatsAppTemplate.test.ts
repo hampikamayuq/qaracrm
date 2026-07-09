@@ -40,6 +40,22 @@ describe('sendWhatsAppTemplate', () => {
     expect(JSON.parse(result)).toMatchObject({ ok: true, sent: false, messageId: 'm1' });
   });
 
+  it('skips INSTAGRAM conversations without writing a phantom template message', async () => {
+    const create = vi.fn().mockResolvedValue({ id: 'm1' });
+    const update = vi.fn().mockResolvedValue({ id: 'c1' });
+    const get = vi.fn().mockResolvedValue({ id: UUID, channel: 'INSTAGRAM', externalId: 'IGSID-42' });
+
+    const result = await sendWhatsAppTemplate.execute({
+      conversationId: UUID,
+      templateName: 'qara_followup_24h',
+      language: 'pt_BR',
+    }, api({ get, create, update }));
+
+    expect(create).not.toHaveBeenCalled();
+    expect(update).not.toHaveBeenCalled();
+    expect(JSON.parse(result)).toMatchObject({ ok: false, skipped: true });
+  });
+
   it('sends a Meta template and stores the wamid when configured', async () => {
     process.env.META_ACCESS_TOKEN = 'tok';
     process.env.META_PHONE_NUMBER_ID = 'phone';

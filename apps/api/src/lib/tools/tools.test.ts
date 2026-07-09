@@ -2,13 +2,14 @@ import { describe, it, expect, vi } from 'vitest';
 import type { DataApi } from 'src/lib/data';
 import { readLead } from './readLead';
 import { readConversationHistory } from './readConversationHistory';
+import { readBudgets } from './readBudgets';
 import { listProfessionals } from './listProfessionals';
 import { searchKnowledge } from './searchKnowledge';
 import { updateLead } from './updateLead';
 import { updateConversation } from './updateConversation';
 import { assignTag } from './assignTag';
 import { createActivity } from './createActivity';
-import { metaGraphBreaker, resetSendWhatsAppRateLimit, sendWhatsApp } from './sendWhatsApp';
+import { igGraphBreaker, metaGraphBreaker, resetSendWhatsAppRateLimit, sendWhatsApp } from './sendWhatsApp';
 import { handoffToHuman } from './handoffToHuman';
 import { tawanyTools, ALL_TOOLS } from './index';
 
@@ -39,6 +40,22 @@ describe('read tools', () => {
     const r = await readConversationHistory.execute({ conversationId: UUID, limit: 3 }, api({ list }));
     expect(list).toHaveBeenCalledWith('chatMessage', expect.objectContaining({ limit: 3 }));
     expect(JSON.parse(r)[0].id).toBe('m1');
+  });
+
+  it('readBudgets returns [] when the conversation has no lead', async () => {
+    const get = vi.fn().mockResolvedValue({ id: UUID, leadId: null });
+    const r = await readBudgets.execute({ conversationId: UUID }, api({ get }));
+    expect(JSON.parse(r)).toEqual([]);
+  });
+
+  it('readBudgets lists budgets for the conversation lead', async () => {
+    const get = vi.fn().mockResolvedValue({ id: UUID, leadId: 'l1' });
+    const list = vi.fn().mockResolvedValue([{ id: 'b1', title: 'Botox', status: 'SENT' }]);
+    const r = await readBudgets.execute({ conversationId: UUID }, api({ get, list }));
+    expect(list).toHaveBeenCalledWith('budget', expect.objectContaining({
+      filter: { leadId: { eq: 'l1' } },
+    }));
+    expect(JSON.parse(r)[0].id).toBe('b1');
   });
 
   it('listProfessionals filters by UPPER_SNAKE specialty', async () => {
@@ -140,6 +157,43 @@ describe('write tools', () => {
     }
   });
 
+  it('sendWhatsApp sends via Instagram Graph API for INSTAGRAM conversations', async () => {
+    igGraphBreaker.reset();
+    process.env.INSTAGRAM_PAGE_ACCESS_TOKEN = 'ig-tok';
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ recipient_id: 'IGSID-42', message_id: 'mid.IGOUT1' }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    try {
+      const get = vi.fn().mockResolvedValue({ id: UUID, channel: 'INSTAGRAM', externalId: 'IGSID-42' });
+      const create = vi.fn().mockResolvedValue({ id: 'm-ig' });
+      const r = await sendWhatsApp.execute({ conversationId: UUID, text: 'Olá IG' }, api({ get, create }));
+      expect(fetchMock).toHaveBeenCalledOnce();
+      expect(fetchMock.mock.calls[0][0]).toContain('/me/messages');
+      expect(create).toHaveBeenCalledWith(
+        'chatMessage',
+        expect.objectContaining({ externalId: 'mid.IGOUT1', deliveryStatus: 'SENT' }),
+      );
+      expect(JSON.parse(r)).toMatchObject({ ok: true, sent: true });
+    } finally {
+      igGraphBreaker.reset();
+      delete process.env.INSTAGRAM_PAGE_ACCESS_TOKEN;
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('sendWhatsApp records INSTAGRAM outbound as PENDING when IG is not configured', async () => {
+    const get = vi.fn().mockResolvedValue({ id: UUID, channel: 'INSTAGRAM', externalId: 'IGSID-42' });
+    const create = vi.fn().mockResolvedValue({ id: 'm-ig2' });
+    const r = await sendWhatsApp.execute({ conversationId: UUID, text: 'Olá IG' }, api({ get, create }));
+    expect(create).toHaveBeenCalledWith(
+      'chatMessage',
+      expect.objectContaining({ direction: 'OUT', deliveryStatus: 'PENDING' }),
+    );
+    expect(JSON.parse(r)).toMatchObject({ ok: true, sent: false });
+  });
+
   it('sendWhatsApp short-circuits Meta calls when the breaker is open', async () => {
     metaGraphBreaker.reset();
     process.env.META_ACCESS_TOKEN = 'tok';
@@ -194,11 +248,11 @@ describe('write tools', () => {
 });
 
 describe('tawanyTools index', () => {
-  it('exports 14 LLM-callable tools with OpenAI-compatible schema', () => {
+  it('exports 15 LLM-callable tools with OpenAI-compatible schema', () => {
     // sendWhatsApp is now INTERNAL only (handler-side, not model-callable) to
     // prevent the model from sending a free-text reply AND calling sendWhatsApp
     // in the same iteration (double-send).
-    expect(ALL_TOOLS).toHaveLength(14);
+    expect(ALL_TOOLS).toHaveLength(15);
     for (const entry of tawanyTools.schema) {
       expect(entry.type).toBe('function');
       expect(entry.function.parameters).toHaveProperty('properties');

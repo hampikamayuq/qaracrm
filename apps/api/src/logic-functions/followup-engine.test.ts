@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { DataApi } from 'src/lib/data';
-import { runFollowupEngine } from './followup-engine';
+import { runBudgetFollowup, runFollowupEngine } from './followup-engine';
 
 const NOW = new Date('2026-07-07T12:00:00Z');
 const OLD = '2026-07-01T12:00:00Z'; // 6 dias atrás
@@ -113,5 +113,78 @@ describe('runFollowupEngine', () => {
       body: 'Oi! Posso te ajudar a seguir com o atendimento?',
     }));
     expect(update).toHaveBeenCalledWith('aiSuggestion', 's1', { status: 'SENT' });
+  });
+});
+
+describe('runBudgetFollowup', () => {
+  // list dispatcha por objeto; get/create/update cobrem o caminho do
+  // sendWhatsAppTemplate (get conversation → create chatMessage → update).
+  const makeBudgetData = (over: {
+    budgets?: Record<string, unknown>[];
+    tasks?: Record<string, unknown>[];
+    conversations?: Record<string, unknown>[];
+    conversationChannel?: string;
+  } = {}) => {
+    const create = vi.fn(async () => ({ id: 'created' }));
+    const update = vi.fn(async () => ({}));
+    const get = vi.fn(async (object: string) =>
+      object === 'conversation'
+        ? { id: 'c1', channel: over.conversationChannel ?? 'WHATSAPP', externalId: '5511999998888' }
+        : null,
+    );
+    const list = vi.fn(async (object: string) => {
+      if (object === 'budget') return over.budgets ?? [];
+      if (object === 'task') return over.tasks ?? [];
+      if (object === 'conversation') return over.conversations ?? [];
+      return [];
+    });
+    return { data: { list, create, update, get } as unknown as DataApi, create, list };
+  };
+
+  it('cria task deduplicada de follow-up para orçamento SENT sem resposta', async () => {
+    const { data, create } = makeBudgetData({
+      budgets: [{ id: 'b1', title: 'Rinoplastia', leadId: 'l1' }],
+      conversations: [],
+    });
+    const r = await runBudgetFollowup(NOW, data);
+    expect(r.budgetsScanned).toBe(1);
+    expect(r.tasksCreated).toBe(1);
+    expect(r.templatesSent).toBe(0);
+    expect(create).toHaveBeenCalledWith('task', expect.objectContaining({
+      title: 'Follow-up orçamento: Rinoplastia',
+      status: 'OPEN',
+      leadId: 'l1',
+    }));
+  });
+
+  it('não duplica quando já existe a task de follow-up aberta', async () => {
+    const { data, create } = makeBudgetData({
+      budgets: [{ id: 'b1', title: 'Rinoplastia', leadId: 'l1' }],
+      tasks: [{ leadId: 'l1', title: 'Follow-up orçamento: Rinoplastia' }],
+    });
+    const r = await runBudgetFollowup(NOW, data);
+    expect(r.tasksCreated).toBe(0);
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it('dispara HSM quando a conversa do lead é WhatsApp', async () => {
+    const { data } = makeBudgetData({
+      budgets: [{ id: 'b1', title: 'Botox', leadId: 'l1' }],
+      conversations: [{ id: 'c1', channel: 'WHATSAPP' }],
+      conversationChannel: 'WHATSAPP',
+    });
+    const r = await runBudgetFollowup(NOW, data);
+    expect(r.tasksCreated).toBe(1);
+    expect(r.templatesSent).toBe(1);
+  });
+
+  it('pula o HSM quando a conversa é Instagram (mantém o skip)', async () => {
+    const { data } = makeBudgetData({
+      budgets: [{ id: 'b1', title: 'Botox', leadId: 'l1' }],
+      conversations: [{ id: 'c1', channel: 'INSTAGRAM' }],
+    });
+    const r = await runBudgetFollowup(NOW, data);
+    expect(r.tasksCreated).toBe(1);
+    expect(r.templatesSent).toBe(0);
   });
 });

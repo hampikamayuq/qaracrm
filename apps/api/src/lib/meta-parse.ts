@@ -8,6 +8,10 @@ export type MetaInboundMessage = {
   text: string;
   sentAt: string;
   messageType: MetaMessageType;
+  // Payload estável do botão clicado: button.payload (quick-reply de template)
+  // ou interactive.button_reply.id (botões de sessão). Usado para intercepções
+  // determinísticas (ex.: confirmação do lembrete D-1) sem depender do texto.
+  buttonPayload?: string;
 };
 
 export type MetaDeliveryStatus = 'SENT' | 'DELIVERED' | 'READ' | 'FAILED';
@@ -26,17 +30,28 @@ const STATUS_MAP: Record<string, MetaDeliveryStatus> = {
   failed: 'FAILED',
 };
 
-// Extrai texto + tipo de uma mensagem WhatsApp Cloud API.
-const waContent = (msg: Rec): { text: string; messageType: MetaMessageType } => {
+// Extrai texto + tipo (+ payload do botão, quando houver) de uma mensagem
+// WhatsApp Cloud API.
+const waContent = (
+  msg: Rec,
+): { text: string; messageType: MetaMessageType; buttonPayload?: string } => {
   const type = asStr(msg.type);
   if (type === 'text') return { text: asStr(asRec(msg.text).body), messageType: 'TEXT' };
-  if (type === 'button') return { text: asStr(asRec(msg.button).text), messageType: 'BUTTON' };
+  if (type === 'button') {
+    // Clique em botão quick-reply de um template HSM aprovado.
+    const btn = asRec(msg.button);
+    const payload = asStr(btn.payload);
+    return { text: asStr(btn.text), messageType: 'BUTTON', ...(payload ? { buttonPayload: payload } : {}) };
+  }
   if (type === 'interactive') {
     const i = asRec(msg.interactive);
     const btn = asRec(i.button_reply);
     const list = asRec(i.list_reply);
     if (asStr(i.type) === 'list_reply') return { text: asStr(list.title), messageType: 'LIST' };
-    return { text: asStr(btn.title), messageType: 'BUTTON' };
+    // Clique em botão interativo de sessão: o "id" que definimos ao montar o
+    // botão funciona como payload estável (mesmo papel do button.payload acima).
+    const payload = asStr(btn.id);
+    return { text: asStr(btn.title), messageType: 'BUTTON', ...(payload ? { buttonPayload: payload } : {}) };
   }
   if (type === 'image')
     return { text: asStr(asRec(msg.image).caption) || '[imagem]', messageType: 'IMAGE' };
@@ -61,7 +76,7 @@ const parseWhatsApp = (body: Rec): ParsedMetaEvent => {
         const id = asStr(msg.id);
         const from = asStr(msg.from);
         if (!id || !from) continue;
-        const { text, messageType } = waContent(msg);
+        const { text, messageType, buttonPayload } = waContent(msg);
         messages.push({
           channel: 'WHATSAPP',
           externalId: id,
@@ -69,6 +84,7 @@ const parseWhatsApp = (body: Rec): ParsedMetaEvent => {
           text,
           sentAt: new Date(Number(asStr(msg.timestamp)) * 1000).toISOString(),
           messageType,
+          ...(buttonPayload ? { buttonPayload } : {}),
         });
       }
     }
@@ -82,6 +98,9 @@ const parseInstagram = (body: Rec): ParsedMetaEvent => {
     for (const ev of asArr(asRec(entry).messaging)) {
       const e = asRec(ev);
       const msg = asRec(e.message);
+      // Ignora ecos das nossas próprias respostas (is_echo). Sem isso, o eco
+      // vira inbound e pode disparar a Tawany num loop de auto-resposta.
+      if (msg.is_echo) continue;
       const mid = asStr(msg.mid);
       const from = asStr(asRec(e.sender).id);
       if (!mid || !from) continue;
@@ -101,6 +120,8 @@ const parseInstagram = (body: Rec): ParsedMetaEvent => {
 export const parseMetaEvent = (body: unknown): ParsedMetaEvent => {
   const rec = asRec(body);
   if (rec.object === 'whatsapp_business_account') return parseWhatsApp(rec);
-  if (rec.object === 'instagram') return parseInstagram(rec);
+  // O Instagram Direct entrega os eventos ora como object='instagram', ora como
+  // object='page' (via Página do Facebook vinculada). Mesmo shape entry[].messaging[].
+  if (rec.object === 'instagram' || rec.object === 'page') return parseInstagram(rec);
   return { messages: [], statuses: [] };
 };

@@ -110,12 +110,43 @@ describe('parseMetaEvent — WhatsApp', () => {
     );
     expect(btn.messages[0].messageType).toBe('BUTTON');
     expect(btn.messages[0].text).toBe('Sim');
+    expect(btn.messages[0].buttonPayload).toBe('b1');
 
     const list = parseMetaEvent(
       make({ type: 'list_reply', list_reply: { id: 'r1', title: 'Botox' } }),
     );
     expect(list.messages[0].messageType).toBe('LIST');
     expect(list.messages[0].text).toBe('Botox');
+    expect(list.messages[0].buttonPayload).toBeUndefined();
+  });
+
+  it('parses a template quick-reply button click (type=button) with its payload', () => {
+    const body = {
+      ...waText,
+      entry: [
+        {
+          changes: [
+            {
+              value: {
+                messages: [
+                  {
+                    id: 'wamid.B1',
+                    from: '551166665555',
+                    timestamp: '1751650000',
+                    type: 'button',
+                    button: { payload: 'confirm_apt_a1b2', text: 'Confirmar' },
+                  },
+                ],
+              },
+            },
+          ],
+        },
+      ],
+    };
+    const { messages } = parseMetaEvent(body);
+    expect(messages[0].messageType).toBe('BUTTON');
+    expect(messages[0].text).toBe('Confirmar');
+    expect(messages[0].buttonPayload).toBe('confirm_apt_a1b2');
   });
 
   it('parses media with placeholder text', () => {
@@ -156,6 +187,42 @@ describe('parseMetaEvent — WhatsApp', () => {
   });
 });
 
+const igPageMessage = {
+  object: 'page',
+  entry: [
+    {
+      id: 'fb-page-1',
+      time: 1751650000000,
+      messaging: [
+        {
+          sender: { id: 'IGSID-99' },
+          recipient: { id: 'fb-page-1' },
+          timestamp: 1751650000000,
+          message: { mid: 'mid.PAGE1', text: 'Oi via página' },
+        },
+      ],
+    },
+  ],
+};
+
+const igEcho = {
+  object: 'instagram',
+  entry: [
+    {
+      id: 'ig-page-1',
+      time: 1751650000000,
+      messaging: [
+        {
+          sender: { id: 'ig-page-1' },
+          recipient: { id: 'IGSID-42' },
+          timestamp: 1751650000000,
+          message: { mid: 'mid.ECHO1', text: 'resposta nossa', is_echo: true },
+        },
+      ],
+    },
+  ],
+};
+
 describe('parseMetaEvent — Instagram', () => {
   it('parses an IG DM', () => {
     const { messages } = parseMetaEvent(igMessage);
@@ -168,6 +235,24 @@ describe('parseMetaEvent — Instagram', () => {
       sentAt: new Date(1751650000000).toISOString(),
       messageType: 'TEXT',
     });
+  });
+
+  it('parses IG delivered as object=page (Facebook Page shape)', () => {
+    const { messages } = parseMetaEvent(igPageMessage);
+    expect(messages).toHaveLength(1);
+    expect(messages[0]).toEqual({
+      channel: 'INSTAGRAM',
+      externalId: 'mid.PAGE1',
+      from: 'IGSID-99',
+      text: 'Oi via página',
+      sentAt: new Date(1751650000000).toISOString(),
+      messageType: 'TEXT',
+    });
+  });
+
+  it('ignores echoes of our own outbound (is_echo)', () => {
+    const { messages } = parseMetaEvent(igEcho);
+    expect(messages).toEqual([]);
   });
 });
 

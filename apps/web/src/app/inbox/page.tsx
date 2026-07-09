@@ -2,7 +2,9 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { AlertTriangle, Bot, Check, CheckCheck, FlaskConical, MessageSquareText, Plus, Search, Send, Sparkles, ThumbsDown, ThumbsUp, Undo2, X } from 'lucide-react';
+import { substituteVars } from '@qara/shared';
 import { api, type AgentState, type Conversation, type ConversationDetail } from '@/lib/api';
+import { QuickReplyPicker } from './quick-reply-picker';
 
 type StatusFilter = 'OPEN' | 'ALL' | 'HUMAN';
 
@@ -282,6 +284,15 @@ export default function InboxPage() {
     await reloadDetail(selected.id);
   };
 
+  // Insere o texto da resposta rápida no composer, trocando {{nome}}/
+  // {{primeiro_nome}}/{{unidade}} pelo nome do lead da conversa aberta.
+  // Anexa ao que já estiver digitado em vez de sobrescrever.
+  const insertQuickReply = (content: string) => {
+    if (!selected) return;
+    const text = substituteVars(content, { nome: selected.lead.name });
+    setReply((current) => (current.trim() ? `${current}\n${text}` : text));
+  };
+
   const createTask = async () => {
     if (!selected || !newTask.trim()) return;
     const res = await api.createTask({ title: newTask.trim(), conversationId: selected.id });
@@ -522,6 +533,7 @@ export default function InboxPage() {
                   onChange={(event) => setReply(event.target.value)}
                 />
                 <div className="composer-actions">
+                  <QuickReplyPicker onSelect={insertQuickReply} />
                   <button className="btn btn-ai" disabled={suggesting} type="button" onClick={generateSuggestion}>
                     <Sparkles size={15} />{suggesting ? 'Gerando…' : 'Sugestão Tawany'}
                   </button>

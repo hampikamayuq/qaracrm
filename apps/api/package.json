@@ -18,6 +18,7 @@
     "db:push": "prisma db push",
     "db:seed": "tsx src/lib/seed/seed.ts",
     "db:seed:knowledge": "tsx src/scripts/seed-knowledge.ts",
+    "mcp:user": "tsx src/scripts/create-mcp-user.ts",
     "postinstall": "prisma generate"
   },
   "dependencies": {

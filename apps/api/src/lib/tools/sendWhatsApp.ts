@@ -2,8 +2,14 @@ import { z } from 'zod';
 import type { DataApi } from 'src/lib/data';
 import { CircuitBreaker } from 'src/lib/resilience/circuit-breaker';
 import { isMetaSendConfigured, sendViaMeta } from 'src/lib/whatsapp-client';
+import { isInstagramSendConfigured, sendViaInstagram } from 'src/lib/instagram-client';
 
 export const metaGraphBreaker = new CircuitBreaker('meta-graph', {
+  threshold: 5,
+  cooldownMs: 30_000,
+});
+
+export const igGraphBreaker = new CircuitBreaker('ig-graph', {
   threshold: 5,
   cooldownMs: 30_000,
 });
@@ -48,15 +54,23 @@ export const sendWhatsApp = {
     });
     if (!conv) return JSON.stringify({ ok: false, error: 'conversation_not_found' });
 
+    // externalId da conversa = destino externo: telefone (WhatsApp) ou PSID/IGSID
+    // (Instagram Direct), gravado no ingest do webhook a partir do sender.id.
     const to = typeof conv.externalId === 'string' ? conv.externalId : '';
+    const channel = typeof conv.channel === 'string' ? conv.channel : '';
     assertSendRateLimit(args.conversationId);
-    
+
     // In test mode, never send to Meta - just record in CRM
     const isTestMode = ctx.testMode === true;
-    const canSend = !isTestMode && isMetaSendConfigured() && conv.channel === 'WHATSAPP' && to.length > 0;
-    const wamid = canSend
-      ? await metaGraphBreaker.execute(() => sendViaMeta(to, args.text))
-      : null;
+    // Despacha por canal: WhatsApp via Cloud API, Instagram via Graph API.
+    let externalId: string | null = null;
+    if (!isTestMode && to.length > 0) {
+      if (channel === 'WHATSAPP' && isMetaSendConfigured()) {
+        externalId = await metaGraphBreaker.execute(() => sendViaMeta(to, args.text));
+      } else if (channel === 'INSTAGRAM' && isInstagramSendConfigured()) {
+        externalId = await igGraphBreaker.execute(() => sendViaInstagram(to, args.text));
+      }
+    }
 
     const message = await ctx.create('chatMessage', {
       body: args.text,
@@ -64,11 +78,11 @@ export const sendWhatsApp = {
       sentAt: new Date().toISOString(),
       conversationId: args.conversationId,
       messageType: 'TEXT',
-      deliveryStatus: wamid ? 'SENT' : (isTestMode ? 'TEST_MODE' : 'PENDING'),
+      deliveryStatus: externalId ? 'SENT' : (isTestMode ? 'TEST_MODE' : 'PENDING'),
       agentHandled: true,
-      ...(wamid ? { externalId: wamid } : {}),
+      ...(externalId ? { externalId } : {}),
     });
     await ctx.update('conversation', args.conversationId, { lastMessageAt: new Date().toISOString() });
-    return JSON.stringify({ ok: true, sent: Boolean(wamid), messageId: message.id, testMode: isTestMode });
+    return JSON.stringify({ ok: true, sent: Boolean(externalId), messageId: message.id, testMode: isTestMode });
   },
 };

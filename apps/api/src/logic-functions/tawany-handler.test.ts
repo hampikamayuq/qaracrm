@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { runTawany, runTawanyHandler } from './tawany-handler';
+import { gateSendModeForChannel, runTawany, runTawanyHandler } from './tawany-handler';
 import type { DataApi } from 'src/lib/data';
 import type { AiClient, ChatResult } from 'src/lib/ai-client';
 
@@ -77,6 +77,42 @@ beforeEach(() => {
   vi.mocked(runLeadsNovosFlow).mockReset();
   vi.mocked(summarizeConversation).mockReset();
   vi.mocked(buildMessages).mockReturnValue([{ role: 'user', content: 'oi' }]);
+});
+
+describe('gateSendModeForChannel', () => {
+  it('forces suggest_only for INSTAGRAM when the resolved mode would auto-send', () => {
+    expect(gateSendModeForChannel('send', 'INSTAGRAM')).toBe('suggest_only');
+  });
+
+  it('leaves already-safe modes untouched for INSTAGRAM', () => {
+    expect(gateSendModeForChannel('suggest_only', 'INSTAGRAM')).toBe('suggest_only');
+    expect(gateSendModeForChannel('test', 'INSTAGRAM')).toBe('test');
+  });
+
+  it('does not change WhatsApp or unknown channels', () => {
+    expect(gateSendModeForChannel('send', 'WHATSAPP')).toBe('send');
+    expect(gateSendModeForChannel('send', null)).toBe('send');
+    expect(gateSendModeForChannel('send', undefined)).toBe('send');
+  });
+});
+
+describe('runTawany — Instagram send gate', () => {
+  it('never auto-sends on INSTAGRAM even with sendMode=send (suggestion stays PENDING)', async () => {
+    const data = makeData();
+    vi.mocked(data.get).mockImplementation(async (obj: string) => {
+      if (obj === 'conversation') return { id: UUID, leadId: LEAD_ID, channel: 'INSTAGRAM', status: 'OPEN', needsHuman: false };
+      if (obj === 'lead') return { id: LEAD_ID, name: 'Maria Silva', phone: null, stageId: null, score: 50, intent: null, source: 'INDICACAO', tags: [] };
+      return { id: LEAD_ID, name: 'Maria Silva', phone: null, stageId: null, score: 50, intent: null, tags: [] };
+    });
+    const r = await runTawany(
+      { messageId: 'm1', conversationId: UUID },
+      { ai: makeAi(chatResult({ content: 'Olá Maria!', finishReason: 'stop', modelUsed: 'minimax/minimax-m3', fallbackUsed: false })), data, sendMode: 'send' },
+    );
+    expect(r.status).toBe('replied');
+    // Gate ativo: nenhuma mensagem OUT criada e a sugestão não vira SENT.
+    expect(data.create).not.toHaveBeenCalledWith('chatMessage', expect.objectContaining({ direction: 'OUT' }));
+    expect(data.update).not.toHaveBeenCalledWith('aiSuggestion', expect.anything(), { status: 'SENT' });
+  });
 });
 
 describe('runTawany', () => {

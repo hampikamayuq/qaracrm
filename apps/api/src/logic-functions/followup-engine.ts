@@ -5,6 +5,8 @@ import { daysSince, FOLLOWUP_THRESHOLD_DAYS } from 'src/lib/followup/categorize'
 import { validateReply } from 'src/lib/guards/reply-validator';
 import { classifyTawanyRisk } from 'src/lib/tawany/risk';
 import { sendWhatsApp } from 'src/lib/tools/sendWhatsApp';
+import { sendWhatsAppTemplate } from 'src/lib/tools/sendWhatsAppTemplate';
+import { HSM_BUDGET_FOLLOWUP_TEMPLATE } from 'src/lib/templates/hsm-messages';
 import { stageFromTags, tagsOf } from 'src/routes/pipeline-routes';
 
 const FOLLOWUP_DUE_OFFSET_DAYS = 1; // dá 24h para a Tawany antes de escalar
@@ -178,6 +180,98 @@ const createIntelligentFollowup = async (
     await sendWhatsApp.execute({ conversationId: conversation.id, text: body }, data);
     await data.update('aiSuggestion', suggestion.id, { status: 'SENT' });
   }
+};
+
+// ---------------------------------------------------------------- orçamentos
+
+const BUDGET_FOLLOWUP_DEFAULT_DAYS = 3;
+
+const budgetFollowupDays = (): number => {
+  const raw = Number.parseInt(process.env.BUDGET_FOLLOWUP_DAYS ?? '', 10);
+  return Number.isFinite(raw) && raw > 0 ? raw : BUDGET_FOLLOWUP_DEFAULT_DAYS;
+};
+
+export type BudgetFollowupResult = {
+  budgetsScanned: number;
+  tasksCreated: number;
+  templatesSent: number;
+  errors: number;
+};
+
+type BudgetLike = {
+  id: string;
+  title?: string | null;
+  leadId?: string | null;
+};
+
+// Varre orçamentos SENT sem resposta há >= BUDGET_FOLLOWUP_DAYS dias e cria uma
+// task deduplicada "Follow-up orçamento: <title>" no lead. Se o lead tem conversa
+// WhatsApp, dispara o HSM qara_budget_followup pelo caminho de templates
+// (sendWhatsAppTemplate pula Instagram sozinho). Idempotente: dedup por
+// (leadId, título da task aberta).
+export const runBudgetFollowup = async (
+  now: Date,
+  data: DataApi,
+): Promise<BudgetFollowupResult> => {
+  const result: BudgetFollowupResult = { budgetsScanned: 0, tasksCreated: 0, templatesSent: 0, errors: 0 };
+  const cutoff = new Date(now.getTime() - budgetFollowupDays() * 86_400_000).toISOString();
+
+  const budgets = (await data.list('budget', {
+    filter: { status: { eq: 'SENT' }, sentAt: { lt: cutoff }, respondedAt: null },
+    select: { id: true, title: true, leadId: true },
+    limit: 500,
+  })) as BudgetLike[];
+  result.budgetsScanned = budgets.length;
+
+  const openTasks = (await data.list('task', {
+    filter: { status: { eq: 'OPEN' } },
+    select: { leadId: true, title: true },
+    limit: 1000,
+  })) as { leadId?: string | null; title?: string | null }[];
+  const existing = new Set(
+    openTasks
+      .filter((t) => typeof t.leadId === 'string' && typeof t.title === 'string')
+      .map((t) => `${t.leadId}::${t.title}`),
+  );
+
+  for (const budget of budgets) {
+    if (!budget.leadId) continue;
+    const title = `Follow-up orçamento: ${budget.title ?? 'sem título'}`;
+    if (existing.has(`${budget.leadId}::${title}`)) continue;
+    try {
+      await data.create('task', {
+        title,
+        status: 'OPEN',
+        priority: 'HIGH',
+        dueAt: now.toISOString(),
+        leadId: budget.leadId,
+      });
+      existing.add(`${budget.leadId}::${title}`);
+      result.tasksCreated++;
+
+      // HSM só quando a conversa é WhatsApp. sendWhatsAppTemplate também pula
+      // Instagram por dentro, então o skip fica garantido nas duas pontas.
+      const conversations = await data.list('conversation', {
+        filter: { leadId: { eq: budget.leadId } },
+        orderBy: { lastMessageAt: 'DESC' },
+        select: { id: true, channel: true },
+        limit: 1,
+      });
+      const conversation = conversations[0] as { id?: string; channel?: string } | undefined;
+      if (conversation?.id && conversation.channel === 'WHATSAPP') {
+        const raw = await sendWhatsAppTemplate.execute(
+          { conversationId: conversation.id, templateName: HSM_BUDGET_FOLLOWUP_TEMPLATE, language: 'pt_BR' },
+          data,
+        );
+        const parsed = JSON.parse(raw) as { ok?: boolean };
+        if (parsed.ok) result.templatesSent++;
+      }
+    } catch {
+      result.errors++;
+    }
+  }
+
+  return result;
 };
 
 // ponytail: o wrapper defineLogicFunction (cron Twenty) foi removido — o

@@ -3,6 +3,7 @@ import { runBotsForInbound } from '../lib/bots/runner';
 import { defaultDebounce, type Debouncer } from '../lib/debounce';
 import { parseMetaEvent, type MetaInboundMessage, type MetaStatusUpdate } from '../lib/meta-parse';
 import { sendWhatsApp } from '../lib/tools/sendWhatsApp';
+import { runAppointmentConfirmationForInbound } from './appointment-confirmation';
 
 const OPT_OUT_CONFIRMATION =
   'Você foi removido da nossa lista de contatos. Se mudar de ideia, é só enviar uma mensagem.';
@@ -112,13 +113,26 @@ const ingestMessage = async (
 
   const processReadyMessage = async (ready: { conversationId: string; messageId: string; text: string }): Promise<void> => {
     await data.update('chatMessage', ready.messageId, { agentHandled: false });
-    let botHandled = false;
+    // Confirmação de agendamento (botão do lembrete D-1) tem precedência sobre
+    // bots e a Tawany: se casar, ela responde e a mensagem não segue adiante.
+    let handled = false;
     try {
-      botHandled = (await runBotsForInbound({ conversationId: ready.conversationId, text: ready.text }, data)) !== null;
+      handled = (await runAppointmentConfirmationForInbound({
+        conversationId: ready.conversationId,
+        messageType: msg.messageType,
+        buttonPayload: msg.buttonPayload,
+      }, data)).handled;
     } catch (err) {
-      console.error('[meta-webhook] bot runner failed (non-fatal):', (err as Error).message);
+      console.error('[meta-webhook] appointment confirmation failed (non-fatal):', (err as Error).message);
     }
-    if (!botHandled) {
+    if (!handled) {
+      try {
+        handled = (await runBotsForInbound({ conversationId: ready.conversationId, text: ready.text }, data)) !== null;
+      } catch (err) {
+        console.error('[meta-webhook] bot runner failed (non-fatal):', (err as Error).message);
+      }
+    }
+    if (!handled) {
       await onProcessedMessage?.({ conversationId: ready.conversationId, messageId: ready.messageId });
     }
   };
@@ -152,15 +166,28 @@ export const handleMetaWebhook = async (
   for (const msg of messages) {
     const processed = await ingestMessage(msg, data, debounce, onProcessedMessage);
     if (!processed) continue;
+    // Confirmação de agendamento (botão do lembrete D-1) tem precedência sobre
+    // bots e a Tawany: se casar, ela responde e a mensagem não segue adiante.
+    let handled = false;
+    try {
+      handled = (await runAppointmentConfirmationForInbound({
+        conversationId: processed.conversationId,
+        messageType: msg.messageType,
+        buttonPayload: msg.buttonPayload,
+      }, data)).handled;
+    } catch (err) {
+      console.error('[meta-webhook] appointment confirmation failed (non-fatal):', (err as Error).message);
+    }
     // Bots determinísticos têm precedência sobre a Tawany: se um fluxo
     // importado casa, ele responde e a mensagem não segue para a IA.
-    let botHandled = false;
-    try {
-      botHandled = (await runBotsForInbound({ conversationId: processed.conversationId, text: msg.text }, data)) !== null;
-    } catch (err) {
-      console.error('[meta-webhook] bot runner failed (non-fatal):', (err as Error).message);
+    if (!handled) {
+      try {
+        handled = (await runBotsForInbound({ conversationId: processed.conversationId, text: msg.text }, data)) !== null;
+      } catch (err) {
+        console.error('[meta-webhook] bot runner failed (non-fatal):', (err as Error).message);
+      }
     }
-    if (!botHandled) processedMessages.push(processed);
+    if (!handled) processedMessages.push(processed);
   }
 
   console.log(

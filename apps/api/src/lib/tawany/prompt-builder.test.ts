@@ -5,6 +5,7 @@ import { buildSystemPrompt } from './prompt-builder';
 
 const ctx = (over: Partial<TawanyContext> = {}): TawanyContext => ({
   conversationId: 'conv-1',
+  channel: 'WHATSAPP',
   lead: null,
   recentMessages: [],
   summary: null,

@@ -1,5 +1,8 @@
 # QARA CRM
 
+**Repositório oficial do CRM da Clínica QARA** — substitui a versão antiga
+([crm-clinica-qara-main](../crm-clinica-qara-main)).
+
 CRM próprio da Clínica QARA (dermatologia, RJ/SP) com a **Tawany** — agente
 de IA que atende pacientes pelo WhatsApp: triagem, qualificação,
 direcionamento e agendamento, sempre sob controle humano.
@@ -45,6 +48,11 @@ pnpm install
 # 1. Variáveis de ambiente (o Prisma lê DATABASE_URL de apps/api/.env)
 cp apps/api/.env.example apps/api/.env
 cp apps/web/.env.example apps/web/.env.local
+
+# Variáveis-chave da API:
+# - ENABLE_SCHEDULER: {true|false} — ativa scheduler de follow-ups e lembretes (D-1)
+# - SHADOW_MODE: {shadow|human_approval|autopilot} — shadow (observa), human_approval (sugere), autopilot (envia)
+# - FOLLOWUP_INTERVAL_MS: int — intervalo de follow-ups (default 900000 = 15min); 0 desativa
 
 # 2. Banco local — auth trust aceita o DATABASE_URL do .env.example e o
 #    do test:integration (que conecta sem senha)

@@ -1,5 +1,6 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { DataApi } from './data';
+import { metaGraphBreaker } from './tools/sendWhatsApp';
 
 const mocks = vi.hoisted(() => ({
   sendWhatsAppTemplate: {
@@ -19,9 +20,25 @@ const api = (over: Partial<DataApi> = {}): DataApi => ({
   ...over,
 });
 
+const D1_ENV_KEYS = ['APPOINTMENT_CONFIRM_BUTTONS', 'META_ACCESS_TOKEN', 'META_PHONE_NUMBER_ID'] as const;
+const savedD1Env: Record<string, string | undefined> = {};
+
 describe('scheduler', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    for (const k of D1_ENV_KEYS) {
+      savedD1Env[k] = process.env[k];
+      delete process.env[k];
+    }
+    metaGraphBreaker.reset();
+  });
+
+  afterEach(() => {
+    for (const k of D1_ENV_KEYS) {
+      if (savedD1Env[k] === undefined) delete process.env[k];
+      else process.env[k] = savedD1Env[k];
+    }
+    vi.unstubAllGlobals();
   });
 
   it('gets confirmed D-1 appointments in the Sao Paulo day window', async () => {
@@ -78,6 +95,103 @@ describe('scheduler', () => {
     );
     expect(update).toHaveBeenCalledWith('conversation', 'c-old', { status: 'PENDING_PATIENT' });
     expect(result).toEqual({ checked: 1, sent: 1 });
+  });
+
+  it('skips Instagram conversations in the follow-up job (no template, no status change)', async () => {
+    const list = vi.fn().mockResolvedValue([{ id: 'c-ig', channel: 'INSTAGRAM' }]);
+    const update = vi.fn().mockResolvedValue({ id: 'c-ig' });
+    const { runFollowUpJob } = await import('./scheduler');
+
+    const result = await runFollowUpJob(api({ list, update }), new Date('2026-07-05T12:00:00.000Z'));
+
+    expect(mocks.sendWhatsAppTemplate.execute).not.toHaveBeenCalled();
+    expect(update).not.toHaveBeenCalled();
+    expect(result).toEqual({ checked: 1, sent: 0 });
+  });
+
+  it('sends the D-1 reminder with confirm/reschedule button payloads when APPOINTMENT_CONFIRM_BUTTONS=true', async () => {
+    process.env.APPOINTMENT_CONFIRM_BUTTONS = 'true';
+    process.env.META_ACCESS_TOKEN = 'tok';
+    process.env.META_PHONE_NUMBER_ID = 'phone';
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ messages: [{ id: 'wamid.D1BTN' }] }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const list = vi
+      .fn()
+      .mockResolvedValueOnce([{ id: 'a1', leadId: 'l1', scheduledAt: '2026-07-06T14:00:00.000Z' }])
+      .mockResolvedValueOnce([{ id: 'c1', channel: 'WHATSAPP', externalId: '5511999998888' }]);
+    const create = vi.fn().mockResolvedValue({ id: 'msg-1' });
+    const update = vi.fn().mockResolvedValue({ id: 'a1' });
+    const { runD1ReminderJob } = await import('./scheduler');
+
+    const result = await runD1ReminderJob(api({ list, create, update }), new Date('2026-07-05T12:00:00.000Z'));
+
+    expect(mocks.sendWhatsAppTemplate.execute).not.toHaveBeenCalled();
+    const [, init] = fetchMock.mock.calls[0];
+    const body = JSON.parse(init.body);
+    expect(body.template.name).toBe('qara_appointment_reminder_d1');
+    expect(body.template.components).toEqual([
+      {
+        type: 'button',
+        sub_type: 'quick_reply',
+        index: '0',
+        parameters: [{ type: 'payload', payload: 'confirm_apt_a1' }],
+      },
+      {
+        type: 'button',
+        sub_type: 'quick_reply',
+        index: '1',
+        parameters: [{ type: 'payload', payload: 'reschedule_apt_a1' }],
+      },
+    ]);
+    expect(create).toHaveBeenCalledWith('chatMessage', expect.objectContaining({
+      body: '[template:qara_appointment_reminder_d1]',
+      conversationId: 'c1',
+      messageType: 'TEMPLATE',
+      deliveryStatus: 'SENT',
+      externalId: 'wamid.D1BTN',
+    }));
+    expect(update).toHaveBeenCalledWith('conversation', 'c1', { lastMessageAt: expect.any(String) });
+    expect(update).toHaveBeenCalledWith('appointment', 'a1', { reminderD1Sent: true });
+    expect(result).toEqual({ checked: 1, sent: 1 });
+  });
+
+  it('records the D-1 reminder as PENDING (no send) when buttons are enabled but Meta is not configured', async () => {
+    process.env.APPOINTMENT_CONFIRM_BUTTONS = 'true';
+
+    const list = vi
+      .fn()
+      .mockResolvedValueOnce([{ id: 'a1', leadId: 'l1', scheduledAt: '2026-07-06T14:00:00.000Z' }])
+      .mockResolvedValueOnce([{ id: 'c1', channel: 'WHATSAPP', externalId: '5511999998888' }]);
+    const create = vi.fn().mockResolvedValue({ id: 'msg-1' });
+    const update = vi.fn().mockResolvedValue({ id: 'a1' });
+    const { runD1ReminderJob } = await import('./scheduler');
+
+    await runD1ReminderJob(api({ list, create, update }), new Date('2026-07-05T12:00:00.000Z'));
+
+    expect(mocks.sendWhatsAppTemplate.execute).not.toHaveBeenCalled();
+    expect(create).toHaveBeenCalledWith('chatMessage', expect.objectContaining({
+      body: '[template:qara_appointment_reminder_d1]',
+      deliveryStatus: 'PENDING',
+    }));
+  });
+
+  it('skips Instagram conversations in the D-1 reminder job', async () => {
+    const list = vi
+      .fn()
+      .mockResolvedValueOnce([{ id: 'a1', leadId: 'l1', scheduledAt: '2026-07-06T14:00:00.000Z' }])
+      .mockResolvedValueOnce([{ id: 'c-ig', channel: 'INSTAGRAM' }]);
+    const update = vi.fn().mockResolvedValue({ id: 'a1' });
+    const { runD1ReminderJob } = await import('./scheduler');
+
+    const result = await runD1ReminderJob(api({ list, update }), new Date('2026-07-05T12:00:00.000Z'));
+
+    expect(mocks.sendWhatsAppTemplate.execute).not.toHaveBeenCalled();
+    expect(update).not.toHaveBeenCalled();
+    expect(result).toEqual({ checked: 1, sent: 0 });
   });
 
   it('runs pending Meta webhook sweep as part of the scheduler tick', async () => {
