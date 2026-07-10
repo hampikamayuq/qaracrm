@@ -149,6 +149,7 @@ model ChatMessage {
   messageType    String?      // TEXT | BUTTON | LIST | IMAGE | DOCUMENT | TEMPLATE
   deliveryStatus String?      // PENDING | SENT | delivered | read | failed
   agentHandled   Boolean      @default(false)
+  sentById       String?      // autoria humana (reply manual do inbox) — sem FK de propósito (mesmo padrão do feedbackById)
   sentAt         DateTime     @default(now())
   createdAt      DateTime     @default(now())
 
