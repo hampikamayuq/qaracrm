@@ -66,6 +66,9 @@ model Lead {
 
   @@index([stageId])
   @@index([score])
+  // Filtrado por janela em dashboard/summary, leads-per-day, sources e
+  // report/comercial (createdAt >= start / range).
+  @@index([createdAt])
 }
 
 model Patient {
@@ -151,6 +154,9 @@ model ChatMessage {
 
   @@unique([conversationId, externalId])
   @@index([conversationId, sentAt])
+  // report/atendimento filtra mensagens por janela (sentAt range) sem
+  // conversationId — o índice composto acima não cobre range só em sentAt.
+  @@index([sentAt])
 }
 
 model AiSuggestion {
@@ -214,6 +220,9 @@ model Activity {
   createdAt      DateTime     @default(now())
 
   @@index([targetType, targetId])
+  // dashboard/loss-reasons e report/comercial: targetType+type iguais,
+  // createdAt em range e ordenado desc — cobre where + orderBy.
+  @@index([targetType, type, createdAt])
 }
 
 model Professional {
@@ -269,6 +278,9 @@ model Appointment {
   updatedAt         DateTime         @updatedAt
 
   @@index([scheduledAt, status])
+  // report/financeiro (NPS) filtra por npsSentAt em range — não coberto
+  // pelo índice de scheduledAt.
+  @@index([npsSentAt])
 }
 
 model WebhookEvent {
@@ -409,6 +421,9 @@ model Payment {
   createdAt    DateTime  @default(now())
 
   @@index([budgetId])
+  // report/financeiro: recebido no período filtra status in (PAID,
+  // PARTIALLY_PAID) + paidAt range — índice composto serve os dois.
+  @@index([status, paidAt])
 }
 
 model Tag {

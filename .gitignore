@@ -10,3 +10,6 @@ dist/
 .obsidian/
 .twenty/
 /2026-*.md
+
+# Postgres portátil local (dev nesta máquina)
+.local/
