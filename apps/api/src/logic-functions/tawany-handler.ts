@@ -8,7 +8,7 @@ import { recordAiRun } from 'src/lib/ai-run-log';
 import { captureExplicitPatientProfile } from 'src/lib/patient-profile';
 import { truncateToContextWindow } from 'src/lib/ai/context-window';
 import { buildTawanyContext, N_RECENT } from 'src/lib/tawany/context';
-import { isAutopilotMode } from 'src/lib/shadow';
+import { isAutopilotMode } from 'src/lib/shadow-mode';
 import { buildMessages, buildSystemPrompt } from 'src/lib/tawany/prompt-builder';
 import { loadAiSettings, type AiRuntimeSettings } from 'src/lib/ai-settings';
 import { classifyTawanyRisk, type TawanyRiskLevel } from 'src/lib/tawany/risk';
