@@ -5,6 +5,7 @@ import { parseMetaEvent, type MetaInboundMessage, type MetaStatusUpdate } from '
 import { downloadDirectMedia, downloadWhatsAppMedia } from '../lib/media-client';
 import { isAudioTranscriptionEnabled, transcribeAudio } from '../lib/transcription-client';
 import { sendWhatsApp } from '../lib/tools/sendWhatsApp';
+import { maybeReopenReactivatedLead } from '../lib/reactivation';
 import { runAppointmentConfirmationForInbound } from './appointment-confirmation';
 import { runNpsCaptureForInbound } from './nps-capture';
 
@@ -145,6 +146,17 @@ const ingestMessage = async (
   }
 
   await data.update('conversation', conversation.id, { lastMessageAt: msg.sentAt });
+
+  // Reativação (Lote 2.3): resposta de lead perdido que recebeu a mensagem de
+  // reativação reabre o funil no pipeline `reativacao`. Não-fatal: falha aqui
+  // nunca segura a mensagem.
+  if (typeof conversation.leadId === 'string' && conversation.leadId.length > 0) {
+    try {
+      await maybeReopenReactivatedLead(conversation.leadId, data);
+    } catch (err) {
+      console.error('[meta-webhook] reactivation reopen failed (non-fatal):', (err as Error).message);
+    }
+  }
 
   const processReadyMessage = async (ready: { conversationId: string; messageId: string; text: string }): Promise<void> => {
     await data.update('chatMessage', ready.messageId, { agentHandled: false });

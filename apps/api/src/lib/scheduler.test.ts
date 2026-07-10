@@ -22,6 +22,8 @@ const api = (over: Partial<DataApi> = {}): DataApi => ({
 
 const D1_ENV_KEYS = [
   'APPOINTMENT_CONFIRM_BUTTONS',
+  'ENABLE_D1_REMINDERS',
+  'ENABLE_FOLLOWUP_HSM',
   'META_ACCESS_TOKEN',
   'META_PHONE_NUMBER_ID',
   'NPS_ENABLED',
@@ -209,6 +211,53 @@ describe('scheduler', () => {
     await runSchedulerTick(api({ list }), now, { processPendingMetaWebhookEvents });
 
     expect(processPendingMetaWebhookEvents).toHaveBeenCalledWith({ now });
+  });
+
+  describe('per-job flags (ENABLE_D1_REMINDERS / ENABLE_FOLLOWUP_HSM)', () => {
+    it('skips the follow-up and D-1 jobs by default (flags unset)', async () => {
+      const list = vi.fn().mockResolvedValue([]);
+      const { runSchedulerTick } = await import('./scheduler');
+
+      await runSchedulerTick(api({ list }), new Date('2026-07-05T12:00:00.000Z'));
+
+      expect(list).not.toHaveBeenCalledWith('conversation', expect.objectContaining({
+        filter: expect.objectContaining({ status: { eq: 'OPEN' } }),
+      }));
+      expect(list).not.toHaveBeenCalledWith('appointment', expect.objectContaining({
+        filter: expect.objectContaining({ reminderD1Sent: { eq: false } }),
+      }));
+      expect(mocks.sendWhatsAppTemplate.execute).not.toHaveBeenCalled();
+    });
+
+    it('runs only the D-1 job when ENABLE_D1_REMINDERS=true (no follow-up burst)', async () => {
+      process.env.ENABLE_D1_REMINDERS = 'true';
+      const list = vi.fn().mockResolvedValue([]);
+      const { runSchedulerTick } = await import('./scheduler');
+
+      await runSchedulerTick(api({ list }), new Date('2026-07-05T12:00:00.000Z'));
+
+      expect(list).toHaveBeenCalledWith('appointment', expect.objectContaining({
+        filter: expect.objectContaining({ reminderD1Sent: { eq: false } }),
+      }));
+      expect(list).not.toHaveBeenCalledWith('conversation', expect.objectContaining({
+        filter: expect.objectContaining({ status: { eq: 'OPEN' } }),
+      }));
+    });
+
+    it('runs the follow-up job only when ENABLE_FOLLOWUP_HSM=true', async () => {
+      process.env.ENABLE_FOLLOWUP_HSM = 'true';
+      const list = vi.fn().mockResolvedValue([]);
+      const { runSchedulerTick } = await import('./scheduler');
+
+      await runSchedulerTick(api({ list }), new Date('2026-07-05T12:00:00.000Z'));
+
+      expect(list).toHaveBeenCalledWith('conversation', expect.objectContaining({
+        filter: expect.objectContaining({ status: { eq: 'OPEN' } }),
+      }));
+      expect(list).not.toHaveBeenCalledWith('appointment', expect.objectContaining({
+        filter: expect.objectContaining({ reminderD1Sent: { eq: false } }),
+      }));
+    });
   });
 
   describe('runNpsJob', () => {
