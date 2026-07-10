@@ -23,6 +23,11 @@ import {
   valueByPrefix,
   type UiStage,
 } from './pipeline-routes';
+// Painel consolidado: reusa as MESMAS agregações dos relatórios (comercial +
+// financeiro/NPS) em vez de recalcular — importadas de report-routes e do
+// módulo financeiro compartilhado.
+import { buildComercial } from './report-routes';
+import { buildFinanceiro } from '../lib/reports/financeiro';
 
 const router = Router();
 
@@ -330,6 +335,122 @@ export const getResponseTimeRoute = async (req: Request, res: Response): Promise
   }
 };
 
+// --------------------------------------------------------------- /overview
+
+// Consultas de hoje: quantas mostrar na fila "próximas".
+const OVERVIEW_UPCOMING = 5;
+
+// Painel de comando: um agregado enxuto juntando todas as áreas do CRM.
+// Reusa buildComercial/buildFinanceiro (mesmos números dos relatórios) e os
+// helpers de janela/primeira-resposta; só monta blocos e arredonda no servidor.
+export const getOverviewRoute = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const days = parsePeriodDays(req.query.period);
+    if (!days) {
+      jsonError(res, 400, 'period must be one of: 7d, 30d, 90d');
+      return;
+    }
+    const { todayStart, start, prevStart } = periodWindow(days);
+    const end = new Date(todayStart.getTime() + DAY_MS);
+    const window = { start, end, prevStart, days };
+    const now = new Date();
+
+    const [
+      comercial,
+      financeiro,
+      conversasAbertas,
+      aguardandoHumano,
+      sugestoesPendentes,
+      responseTime,
+      tarefasAbertas,
+      tarefasAtrasadas,
+      consultasHoje,
+    ] = await Promise.all([
+      buildComercial(window),
+      buildFinanceiro(window),
+      prisma.conversation.count({ where: { status: 'OPEN' } }),
+      prisma.conversation.count({ where: { needsHuman: true } }),
+      // Fila de revisão da Tawany = sugestões aguardando aprovação humana.
+      prisma.aiSuggestion.count({ where: { status: 'PENDING' } }),
+      firstResponseStats(start, end),
+      prisma.task.count({ where: { status: { notIn: ['DONE', 'CANCELED'] } } }),
+      // Atrasadas: não concluídas com vencimento antes de agora.
+      prisma.task.count({ where: { status: { notIn: ['DONE', 'CANCELED'] }, dueAt: { lt: now } } }),
+      prisma.appointment.findMany({
+        where: { scheduledAt: { gte: todayStart, lt: end }, status: { not: 'CANCELLED' } },
+        orderBy: { scheduledAt: 'asc' },
+        select: {
+          id: true,
+          scheduledAt: true,
+          status: true,
+          patient: { select: { name: true } },
+          lead: { select: { name: true } },
+          professional: { select: { name: true, specialty: true } },
+        },
+      }),
+    ]);
+
+    const confirmadas = consultasHoje.filter((a) => a.status === 'CONFIRMED').length;
+    const pendentes = consultasHoje.filter((a) => a.status === 'SCHEDULED').length;
+    const proximas = consultasHoje
+      .filter((a) => a.scheduledAt >= now)
+      .slice(0, OVERVIEW_UPCOMING)
+      .map((a) => ({
+        id: a.id,
+        scheduledAt: a.scheduledAt,
+        status: a.status,
+        paciente: a.patient?.name ?? a.lead?.name ?? null,
+        profissional: a.professional?.name ?? null,
+        especialidade: a.professional?.specialty ?? null,
+      }));
+
+    res.json({
+      success: true,
+      data: {
+        comercial: {
+          novosLeads: comercial.leadsNovos,
+          novosLeadsAnterior: comercial.comparativo.leadsNovos,
+          novosLeadsVariacaoPct: pctChange(comercial.leadsNovos, comercial.comparativo.leadsNovos),
+          porEstagio: comercial.porEstagio,
+          conversaoPct: comercial.conversaoPct,
+        },
+        atendimento: {
+          conversasAbertas,
+          aguardandoHumano,
+          sugestoesPendentes,
+          medianaRespostaMin: secondsToMinutes(responseTime.median_s),
+          conversasComResposta: responseTime.n,
+        },
+        financeiro: {
+          recebido: financeiro.pagamentos.totalRecebido,
+          recebidoAnterior: financeiro.pagamentos.comparativo.totalRecebido,
+          aReceber: financeiro.pagamentos.pendente,
+          taxaAceitacaoPct: financeiro.orcamentos.taxaAceitacaoPct,
+        },
+        nps: {
+          notaMedia: financeiro.nps.notaMedia,
+          npsClassico: financeiro.nps.npsClassico,
+          respondidos: financeiro.nps.respondidos,
+          enviados: financeiro.nps.enviados,
+        },
+        agenda: {
+          totalHoje: consultasHoje.length,
+          confirmadas,
+          pendentes,
+          proximas,
+        },
+        tarefas: {
+          abertas: tarefasAbertas,
+          atrasadas: tarefasAtrasadas,
+        },
+      },
+    });
+  } catch (error) {
+    jsonError(res, 500, (error as Error).message);
+  }
+};
+
+router.get('/overview', authMiddleware, getOverviewRoute);
 router.get('/summary', authMiddleware, getSummaryRoute);
 router.get('/funnel', authMiddleware, getFunnelRoute);
 router.get('/leads-per-day', authMiddleware, getLeadsPerDayRoute);

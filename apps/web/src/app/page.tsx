@@ -1,68 +1,60 @@
 'use client';
 
 import { Suspense, useCallback, useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import {
   AlertTriangle,
+  ArrowRight,
+  Bot,
   CalendarCheck2,
+  CheckCircle2,
   Clock3,
   Inbox,
+  ListTodo,
+  MessagesSquare,
+  Receipt,
   RefreshCw,
+  Smile,
+  Target,
   UserPlus,
-  Users,
+  Wallet,
 } from 'lucide-react';
-import {
-  Area,
-  CartesianGrid,
-  ComposedChart,
-  Line,
-  LineChart,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from 'recharts';
-import {
-  api,
-  type DashboardFunnelStage,
-  type DashboardLeadsPerDay,
-  type DashboardLossReason,
-  type DashboardPeriod,
-  type DashboardResponseTime,
-  type DashboardSource,
-  type DashboardSummary,
-  type DashboardTawany,
-} from '@/lib/api';
-import { lossLabel } from '@/lib/pipeline-meta';
+import { api, type DashboardOverview, type DashboardPeriod } from '@/lib/api';
 // Blocos de UI compartilhados com /reports — ver dashboard-widgets.tsx.
 import {
-  AXIS_TICK,
   ChartCard,
-  ChartTip,
-  Delta,
   HorizontalBars,
   KpiCard,
-  PERIOD_HINT,
   PERIODS,
+  PERIOD_HINT,
   TOKEN,
-  fmtDay,
-  fmtLatency,
+  deltaPct,
   fmtMinutes,
   fmtPct,
   nf,
 } from './dashboard-widgets';
 
-// ---------------- página ----------------
+// Moeda BRL — mesmo padrão de quotes/reports (valores já chegam como number).
+const brl = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
+const money = (value: number | null): string => (value === null ? '—' : brl.format(value));
 
-type DashData = {
-  summary: DashboardSummary;
-  funnel: DashboardFunnelStage[];
-  leadsPerDay: DashboardLeadsPerDay;
-  sources: DashboardSource[];
-  lossReasons: DashboardLossReason[];
-  tawany: DashboardTawany;
-  responseTime: DashboardResponseTime;
-};
+const fmtTime = (iso: string): string =>
+  new Date(iso).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+
+// Cabeçalho de faixa: título + atalho "ver detalhes" para a tela da área.
+const SectionHead = ({ title, hint, href, cta }: { title: string; hint: string; href: string; cta: string }) => (
+  <header className="report-head">
+    <div>
+      <h2 className="section-title">{title}</h2>
+      <span className="faint">{hint}</span>
+    </div>
+    <Link className="btn" href={href}>
+      {cta}
+      <ArrowRight size={14} aria-hidden="true" />
+    </Link>
+  </header>
+);
 
 function Dashboard() {
   const router = useRouter();
@@ -71,7 +63,7 @@ function Dashboard() {
   const rawPeriod = searchParams.get('period');
   const period: DashboardPeriod = rawPeriod === '7d' || rawPeriod === '90d' ? rawPeriod : '30d';
 
-  const [data, setData] = useState<DashData | null>(null);
+  const [data, setData] = useState<DashboardOverview | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -87,18 +79,10 @@ function Dashboard() {
     setLoading(true);
     setError(null);
     try {
-      const [summary, funnel, leadsPerDay, sources, lossReasons, tawany, responseTime] = await Promise.all([
-        api.getDashboard<DashboardSummary>('summary', period),
-        api.getDashboard<DashboardFunnelStage[]>('funnel', period),
-        api.getDashboard<DashboardLeadsPerDay>('leads-per-day', period),
-        api.getDashboard<DashboardSource[]>('sources', period),
-        api.getDashboard<DashboardLossReason[]>('loss-reasons', period),
-        api.getDashboard<DashboardTawany>('tawany', period),
-        api.getDashboard<DashboardResponseTime>('response-time', period),
-      ]);
-      setData({ summary, funnel, leadsPerDay, sources, lossReasons, tawany, responseTime });
+      const overview = await api.getDashboard<DashboardOverview>('overview', period);
+      setData(overview);
     } catch (e) {
-      setError((e as Error).message || 'Erro ao carregar o dashboard');
+      setError((e as Error).message || 'Erro ao carregar o painel');
     } finally {
       setLoading(false);
     }
@@ -108,55 +92,27 @@ function Dashboard() {
     load();
   }, [load]);
 
-  // Funil: % de conversão entre etapas adjacentes, direto no rótulo da barra.
-  const funnelData = useMemo(() => {
-    const funnel = data?.funnel ?? [];
-    return funnel.map((stage, i) => {
-      const prev = i > 0 ? funnel[i - 1].count : null;
-      const conv = prev !== null && prev > 0 ? Math.round((stage.count / prev) * 100) : null;
-      return {
-        label: stage.label,
-        count: stage.count,
-        rightLabel: conv === null ? nf(stage.count) : `${nf(stage.count)} · ${conv}%`,
-      };
-    });
-  }, [data?.funnel]);
-
-  const leadsSeries = useMemo(() => {
-    const series = data?.leadsPerDay.series ?? [];
-    const previous = data?.leadsPerDay.previous ?? [];
-    return series.map((pt, i) => ({ date: pt.date, atual: pt.count, anterior: previous[i]?.count ?? 0 }));
-  }, [data?.leadsPerDay]);
-
-  const sourcesData = useMemo(() => (
-    (data?.sources ?? []).slice(0, 8).map((s) => ({
-      label: s.source,
+  const estagioData = useMemo(() => (
+    (data?.comercial.porEstagio ?? []).map((s) => ({
+      label: s.label,
       count: s.count,
       rightLabel: nf(s.count),
     }))
-  ), [data?.sources]);
-
-  const lossData = useMemo(() => (
-    (data?.lossReasons ?? []).map((r) => ({
-      label: lossLabel(r.reason),
-      count: r.count,
-      rightLabel: nf(r.count),
-    }))
-  ), [data?.lossReasons]);
+  ), [data?.comercial.porEstagio]);
 
   if (error && !data) {
     return (
       <main className="page page-wide">
         <div className="toolbar">
           <div>
-            <h1 className="title">Dashboard</h1>
-            <div className="muted">Visão operacional da clínica</div>
+            <h1 className="title">Painel</h1>
+            <div className="muted">Visão consolidada da clínica</div>
           </div>
         </div>
         <div className="dash-error" role="alert">
           <AlertTriangle size={18} aria-hidden="true" />
           <div>
-            <strong>Não foi possível carregar o dashboard</strong>
+            <strong>Não foi possível carregar o painel</strong>
             <p className="muted">{error}</p>
           </div>
           <button type="button" className="btn btn-primary" onClick={load}>
@@ -171,8 +127,8 @@ function Dashboard() {
     <main className="page page-wide">
       <div className="toolbar">
         <div>
-          <h1 className="title">Dashboard</h1>
-          <div className="muted">Visão operacional · {PERIOD_HINT[period]}</div>
+          <h1 className="title">Painel</h1>
+          <div className="muted">Visão consolidada · {PERIOD_HINT[period]}</div>
         </div>
         <div className="toolbar-right">
           <div className="segmented" role="group" aria-label="Período">
@@ -194,220 +150,189 @@ function Dashboard() {
       {loading && !data ? (
         <>
           <div className="kpi-grid" aria-hidden="true">
-            {Array.from({ length: 5 }, (_, i) => <div key={i} className="skeleton skeleton-kpi" />)}
+            {Array.from({ length: 4 }, (_, i) => <div key={i} className="skeleton skeleton-kpi" />)}
           </div>
           <div className="dash-grid" aria-hidden="true">
-            {Array.from({ length: 6 }, (_, i) => <div key={i} className="skeleton skeleton-chart" />)}
+            {Array.from({ length: 4 }, (_, i) => <div key={i} className="skeleton skeleton-chart" />)}
           </div>
         </>
       ) : data && (
         <div className={loading ? 'dash-updating' : undefined}>
-          <div className="kpi-grid">
-            <KpiCard
-              label="Leads ativos"
-              value={nf(data.summary.leadsAtivos)}
-              icon={Users}
-              hint="fora perdidos e alta"
-            />
-            <KpiCard
-              label="Aguardando resposta"
-              value={nf(data.summary.aguardandoResposta)}
-              icon={Inbox}
-              tone={data.summary.aguardandoResposta > 0 ? 'warning' : 'default'}
-              hint="conversas esperando a clínica"
-            />
-            <KpiCard
-              label="Agendamentos"
-              value={nf(data.summary.agendamentosSemana)}
-              icon={CalendarCheck2}
-              tone="accent"
-              hint="próximos 7 dias"
-            />
-            <KpiCard
-              label="Follow-ups atrasados"
-              value={nf(data.summary.followupsAtrasados)}
-              icon={Clock3}
-              tone={data.summary.followupsAtrasados > 0 ? 'danger' : 'default'}
-              hint="tarefas vencidas"
-            />
-            <KpiCard
-              label="Novos leads"
-              value={nf(data.summary.novosNoPeriodo.atual)}
-              icon={UserPlus}
-              delta={data.summary.novosNoPeriodo.variacaoPct}
-              hint={`vs ${nf(data.summary.novosNoPeriodo.anterior)} no período anterior`}
-            />
-          </div>
-
-          <div className="dash-grid">
-            <ChartCard
-              title="Funil de conversão"
-              hint="estado atual · % vs etapa anterior"
-              accent={TOKEN.teal}
-              empty={funnelData.every((s) => s.count === 0)}
-            >
-              <HorizontalBars data={funnelData} color={TOKEN.teal} height={236} />
-            </ChartCard>
-
-            <ChartCard
-              title="Leads por dia"
-              hint="tracejado = período anterior"
-              accent={TOKEN.teal}
-              empty={leadsSeries.every((p) => p.atual === 0 && p.anterior === 0)}
-            >
-              <ResponsiveContainer width="100%" height={236}>
-                <ComposedChart data={leadsSeries} margin={{ top: 8, right: 8, bottom: 0, left: -18 }}>
-                  <defs>
-                    <linearGradient id="leadsFill" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0%" stopColor={TOKEN.teal} stopOpacity={0.18} />
-                      <stop offset="100%" stopColor={TOKEN.teal} stopOpacity={0.02} />
-                    </linearGradient>
-                  </defs>
-                  <CartesianGrid stroke={TOKEN.grid} vertical={false} />
-                  <XAxis
-                    dataKey="date"
-                    tick={AXIS_TICK}
-                    tickFormatter={fmtDay}
-                    axisLine={false}
-                    tickLine={false}
-                    minTickGap={28}
-                  />
-                  <YAxis tick={AXIS_TICK} axisLine={false} tickLine={false} allowDecimals={false} />
-                  <Tooltip content={<ChartTip isDate />} cursor={{ stroke: TOKEN.grid }} />
-                  <Line
-                    dataKey="anterior"
-                    name="Período anterior"
-                    stroke={TOKEN.text3}
-                    strokeWidth={1.4}
-                    strokeDasharray="4 4"
-                    dot={false}
-                    isAnimationActive={false}
-                  />
-                  <Area
-                    dataKey="atual"
-                    name="Período atual"
-                    stroke={TOKEN.teal}
-                    strokeWidth={2}
-                    fill="url(#leadsFill)"
-                    dot={false}
-                    isAnimationActive={false}
-                  />
-                </ComposedChart>
-              </ResponsiveContainer>
-            </ChartCard>
-
-            <ChartCard
-              title="Origem dos leads"
-              hint={PERIOD_HINT[period]}
-              accent={TOKEN.info}
-              empty={sourcesData.length === 0}
-            >
-              <HorizontalBars
-                data={sourcesData}
-                color={TOKEN.info}
-                height={Math.max(140, sourcesData.length * 30 + 20)}
+          {/* ---------------- Comercial ---------------- */}
+          <section className="report-section" aria-label="Comercial">
+            <SectionHead title="Comercial" hint={`leads e conversão · ${PERIOD_HINT[period]}`} href="/reports" cta="Ver relatórios" />
+            <div className="kpi-grid">
+              <KpiCard
+                label="Novos leads"
+                value={nf(data.comercial.novosLeads)}
+                icon={UserPlus}
+                delta={data.comercial.novosLeadsVariacaoPct}
+                hint={`vs ${nf(data.comercial.novosLeadsAnterior)} no período anterior`}
               />
-            </ChartCard>
-
-            <ChartCard
-              title="Motivos de perda"
-              hint="um motivo por lead, o mais recente"
-              accent={TOKEN.danger}
-              empty={lossData.length === 0}
-            >
-              <HorizontalBars
-                data={lossData}
-                color={TOKEN.danger}
-                height={Math.max(140, lossData.length * 30 + 20)}
+              <KpiCard
+                label="Conversão"
+                value={fmtPct(data.comercial.conversaoPct)}
+                icon={Target}
+                tone="accent"
+                hint="novo-lead → atendido"
               />
-            </ChartCard>
+            </div>
+            <div className="dash-grid">
+              <ChartCard
+                title="Leads por estágio"
+                hint="estágio atual dos leads criados no período"
+                accent={TOKEN.teal}
+                empty={estagioData.every((s) => s.count === 0)}
+              >
+                <HorizontalBars data={estagioData} color={TOKEN.teal} height={Math.max(140, estagioData.length * 30 + 20)} />
+              </ChartCard>
+            </div>
+          </section>
 
-            <ChartCard
-              title="Atividade da Tawany"
-              hint="respostas enviadas por dia"
-              accent={TOKEN.ai}
-              empty={data.tawany.total === 0}
-            >
-              <ResponsiveContainer width="100%" height={150}>
-                <LineChart data={data.tawany.perDay} margin={{ top: 8, right: 8, bottom: 0, left: -18 }}>
-                  <CartesianGrid stroke={TOKEN.grid} vertical={false} />
-                  <XAxis
-                    dataKey="date"
-                    tick={AXIS_TICK}
-                    tickFormatter={fmtDay}
-                    axisLine={false}
-                    tickLine={false}
-                    minTickGap={28}
-                  />
-                  <YAxis tick={AXIS_TICK} axisLine={false} tickLine={false} allowDecimals={false} />
-                  <Tooltip content={<ChartTip isDate />} cursor={{ stroke: TOKEN.grid }} />
-                  <Line
-                    dataKey="count"
-                    name="Respostas"
-                    stroke={TOKEN.ai}
-                    strokeWidth={2}
-                    dot={false}
-                    isAnimationActive={false}
-                  />
-                </LineChart>
-              </ResponsiveContainer>
-              <div className="mini-stats">
-                <div className="mini-stat">
-                  <span className="mini-stat-value">{fmtPct(data.tawany.taxaHandoffPct)}</span>
-                  <span className="mini-stat-label">Taxa de handoff</span>
-                </div>
-                <div className="mini-stat">
-                  <span className="mini-stat-value">{fmtLatency(data.tawany.latenciaMediaMs)}</span>
-                  <span className="mini-stat-label">Latência média</span>
-                </div>
-                <div className="mini-stat">
-                  <span className="mini-stat-value">{nf(data.tawany.fallbacks)}</span>
-                  <span className="mini-stat-label">Fallbacks</span>
-                </div>
-              </div>
-              {data.tawany.bloqueios.length > 0 && (
-                <div className="block-list" aria-label="Bloqueios por motivo">
-                  {data.tawany.bloqueios.slice(0, 4).map((b) => (
-                    <div key={b.motivo} className="block-row">
-                      <span className="block-motivo">{b.motivo}</span>
-                      <span className="count-badge">{b.count}</span>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </ChartCard>
+          {/* ---------------- Atendimento ---------------- */}
+          <section className="report-section" aria-label="Atendimento">
+            <SectionHead title="Atendimento" hint="conversas, fila e resposta" href="/inbox" cta="Abrir inbox" />
+            <div className="kpi-grid">
+              <KpiCard
+                label="Conversas abertas"
+                value={nf(data.atendimento.conversasAbertas)}
+                icon={MessagesSquare}
+                hint="em andamento no inbox"
+              />
+              <KpiCard
+                label="Aguardando humano"
+                value={nf(data.atendimento.aguardandoHumano)}
+                icon={Inbox}
+                tone={data.atendimento.aguardandoHumano > 0 ? 'warning' : 'default'}
+                hint="conversas que pediram atendente"
+              />
+              <KpiCard
+                label="Revisão da Tawany"
+                value={nf(data.atendimento.sugestoesPendentes)}
+                icon={Bot}
+                tone={data.atendimento.sugestoesPendentes > 0 ? 'warning' : 'default'}
+                hint="sugestões aguardando aprovação"
+              />
+              <KpiCard
+                label="1ª resposta (mediana)"
+                value={fmtMinutes(data.atendimento.medianaRespostaMin)}
+                icon={Clock3}
+                tone="accent"
+                hint={`${nf(data.atendimento.conversasComResposta)} conversas no período`}
+              />
+            </div>
+          </section>
 
-            <ChartCard
-              title="Tempo de primeira resposta"
-              hint={PERIOD_HINT[period]}
-              accent={TOKEN.teal}
-            >
-              {data.responseTime.conversas === 0 ? (
-                <div className="chart-empty">Sem dados no período</div>
-              ) : (
-                <div className="response-block">
-                  <div className="response-hero">
-                    <span className="response-value">{fmtMinutes(data.responseTime.medianaMin)}</span>
-                    <Delta pct={data.responseTime.variacaoPct} invert />
-                  </div>
-                  <p className="muted">
-                    Mediana entre a primeira mensagem do lead e a primeira resposta
-                    ({nf(data.responseTime.conversas)} conversas)
-                  </p>
-                  <dl className="kv">
-                    <div>
-                      <dt>Média</dt>
-                      <dd>{fmtMinutes(data.responseTime.mediaMin)}</dd>
-                    </div>
-                    <div>
-                      <dt>Período anterior</dt>
-                      <dd>{fmtMinutes(data.responseTime.medianaAnteriorMin)}</dd>
-                    </div>
-                  </dl>
-                </div>
-              )}
-            </ChartCard>
-          </div>
+          {/* ---------------- Financeiro & NPS ---------------- */}
+          <section className="report-section" aria-label="Financeiro">
+            <SectionHead title="Financeiro" hint={`recebido, a receber e satisfação · ${PERIOD_HINT[period]}`} href="/reports" cta="Ver relatórios" />
+            <div className="kpi-grid">
+              <KpiCard
+                label="Recebido no período"
+                value={money(data.financeiro.recebido)}
+                icon={Wallet}
+                delta={deltaPct(data.financeiro.recebido, data.financeiro.recebidoAnterior)}
+                hint={`vs ${money(data.financeiro.recebidoAnterior)} no período anterior`}
+              />
+              <KpiCard
+                label="A receber"
+                value={money(data.financeiro.aReceber)}
+                icon={Receipt}
+                tone={data.financeiro.aReceber > 0 ? 'warning' : 'default'}
+                hint="orçamentos aceitos com saldo em aberto"
+              />
+              <KpiCard
+                label="Taxa de aceitação"
+                value={fmtPct(data.financeiro.taxaAceitacaoPct)}
+                icon={Target}
+                tone="accent"
+                hint="aceitos / resolvidos"
+              />
+              <KpiCard
+                label="NPS"
+                value={data.nps.npsClassico === null ? '—' : nf(Math.round(data.nps.npsClassico))}
+                icon={Smile}
+                tone="accent"
+                hint={data.nps.notaMedia === null
+                  ? `${nf(data.nps.respondidos)} respostas`
+                  : `nota ${data.nps.notaMedia.toLocaleString('pt-BR')} · ${nf(data.nps.respondidos)} respostas`}
+              />
+            </div>
+          </section>
+
+          {/* ---------------- Agenda do dia ---------------- */}
+          <section className="report-section" aria-label="Agenda do dia">
+            <SectionHead title="Agenda do dia" hint="consultas de hoje" href="/calendar" cta="Abrir agenda" />
+            <div className="kpi-grid">
+              <KpiCard
+                label="Consultas hoje"
+                value={nf(data.agenda.totalHoje)}
+                icon={CalendarCheck2}
+                tone="accent"
+                hint="fora canceladas"
+              />
+              <KpiCard
+                label="Confirmadas"
+                value={nf(data.agenda.confirmadas)}
+                icon={CheckCircle2}
+                hint="pacientes confirmados"
+              />
+              <KpiCard
+                label="Pendentes"
+                value={nf(data.agenda.pendentes)}
+                icon={Clock3}
+                tone={data.agenda.pendentes > 0 ? 'warning' : 'default'}
+                hint="aguardando confirmação"
+              />
+            </div>
+            <div className="dash-grid">
+              <ChartCard
+                title="Próximas consultas"
+                hint="hoje, a partir de agora"
+                accent={TOKEN.info}
+                empty={data.agenda.proximas.length === 0}
+              >
+                <table className="report-table">
+                  <thead>
+                    <tr>
+                      <th>Hora</th>
+                      <th>Paciente</th>
+                      <th>Profissional</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {data.agenda.proximas.map((a) => (
+                      <tr key={a.id}>
+                        <td>{fmtTime(a.scheduledAt)}</td>
+                        <td>{a.paciente ?? '—'}</td>
+                        <td>{a.profissional ?? '—'}{a.especialidade ? ` · ${a.especialidade}` : ''}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </ChartCard>
+            </div>
+          </section>
+
+          {/* ---------------- Tarefas ---------------- */}
+          <section className="report-section" aria-label="Tarefas">
+            <SectionHead title="Tarefas" hint="follow-ups e pendências" href="/tasks" cta="Abrir tarefas" />
+            <div className="kpi-grid">
+              <KpiCard
+                label="Abertas"
+                value={nf(data.tarefas.abertas)}
+                icon={ListTodo}
+                hint="não concluídas"
+              />
+              <KpiCard
+                label="Atrasadas"
+                value={nf(data.tarefas.atrasadas)}
+                icon={AlertTriangle}
+                tone={data.tarefas.atrasadas > 0 ? 'danger' : 'default'}
+                hint="vencidas e não concluídas"
+              />
+            </div>
+          </section>
         </div>
       )}
     </main>

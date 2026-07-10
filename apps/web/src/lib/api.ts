@@ -416,6 +416,52 @@ export type DashboardResponseTime = {
   variacaoPct: number | null;
 };
 
+// Painel consolidado (GET /dashboard/overview): agregado enxuto por área.
+export type DashboardOverviewAppointment = {
+  id: string;
+  scheduledAt: string;
+  status: string;
+  paciente: string | null;
+  profissional: string | null;
+  especialidade: string | null;
+};
+
+export type DashboardOverview = {
+  comercial: {
+    novosLeads: number;
+    novosLeadsAnterior: number;
+    novosLeadsVariacaoPct: number | null;
+    porEstagio: DashboardFunnelStage[];
+    conversaoPct: number | null;
+  };
+  atendimento: {
+    conversasAbertas: number;
+    aguardandoHumano: number;
+    sugestoesPendentes: number;
+    medianaRespostaMin: number | null;
+    conversasComResposta: number;
+  };
+  financeiro: {
+    recebido: number;
+    recebidoAnterior: number;
+    aReceber: number;
+    taxaAceitacaoPct: number | null;
+  };
+  nps: {
+    notaMedia: number | null;
+    npsClassico: number | null;
+    respondidos: number;
+    enviados: number;
+  };
+  agenda: {
+    totalHoje: number;
+    confirmadas: number;
+    pendentes: number;
+    proximas: DashboardOverviewAppointment[];
+  };
+  tarefas: { abertas: number; atrasadas: number };
+};
+
 // ---------------- relatórios ----------------
 
 export type ReportTipo = 'comercial' | 'atendimento' | 'tawany' | 'financeiro';

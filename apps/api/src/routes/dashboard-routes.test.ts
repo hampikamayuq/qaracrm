@@ -13,9 +13,11 @@ const mocks = vi.hoisted(() => ({
     },
     conversation: {
       findMany: vi.fn(),
+      count: vi.fn(),
     },
     appointment: {
       count: vi.fn(),
+      findMany: vi.fn(),
     },
     task: {
       count: vi.fn(),
@@ -24,6 +26,15 @@ const mocks = vi.hoisted(() => ({
       findMany: vi.fn(),
     },
     aiRunLog: {
+      findMany: vi.fn(),
+    },
+    aiSuggestion: {
+      count: vi.fn(),
+    },
+    budget: {
+      findMany: vi.fn(),
+    },
+    payment: {
       findMany: vi.fn(),
     },
     session: {
@@ -327,6 +338,97 @@ describe('Dashboard routes', () => {
       conversas: 0,
       medianaAnteriorMin: null,
       variacaoPct: null,
+    });
+  });
+
+  describe('GET /overview', () => {
+    // NOW 2026-07-07, period=7d → janela 01–07/jul, anterior 24–30/jun.
+    const seedOverview = () => {
+      // buildComercial: leads criados na janela + comparativo.
+      mocks.prisma.lead.findMany.mockResolvedValue([
+        { createdAt: at('2026-07-06T10:00:00Z'), tags: ['status:novo-lead'] },
+        { createdAt: at('2026-07-05T10:00:00Z'), tags: ['status:atendido'] }, // convertido
+        { createdAt: at('2026-06-25T10:00:00Z'), tags: ['status:novo-lead'] }, // anterior
+      ]);
+      mocks.prisma.activity.findMany.mockResolvedValue([]);
+      // buildFinanceiro: orçamentos da janela vs snapshot ACCEPTED.
+      mocks.prisma.budget.findMany.mockImplementation(async (args: { where?: { status?: string } } = {}) =>
+        args.where?.status === 'ACCEPTED'
+          ? [{ amount: 1000, payments: [{ amount: 400, status: 'PAID' }] }] // saldo 600
+          : [{ amount: 1000, status: 'ACCEPTED', createdAt: at('2026-07-04T09:00:00Z'), sentAt: at('2026-07-04T09:00:00Z'), respondedAt: at('2026-07-04T15:00:00Z') }],
+      );
+      mocks.prisma.payment.findMany.mockResolvedValue([
+        { amount: 500, method: 'PIX', paidAt: at('2026-07-05T10:00:00Z') },
+      ]);
+      // appointment.findMany atende dois callers: NPS (npsSentAt) e agenda de hoje.
+      mocks.prisma.appointment.findMany.mockImplementation(async (args: { where?: { npsSentAt?: unknown } } = {}) =>
+        args.where?.npsSentAt !== undefined
+          ? [{ npsSentAt: at('2026-07-02T00:00:00Z'), npsScore: 9, npsRespondedAt: at('2026-07-02T12:00:00Z') }]
+          : [
+              { id: 'a1', scheduledAt: at('2026-07-07T16:00:00Z'), status: 'CONFIRMED', patient: { name: 'Ana' }, lead: null, professional: { name: 'Dra. Bia', specialty: 'Dermatologia' } },
+              { id: 'a2', scheduledAt: at('2026-07-07T10:00:00Z'), status: 'SCHEDULED', patient: null, lead: { name: 'Léo' }, professional: null },
+            ],
+      );
+      mocks.prisma.conversation.count.mockResolvedValueOnce(9).mockResolvedValueOnce(4);
+      mocks.prisma.aiSuggestion.count.mockResolvedValue(3);
+      mocks.prisma.$queryRaw.mockResolvedValue([{ median_s: 120, avg_s: 200, n: 5 }]);
+      mocks.prisma.task.count.mockResolvedValueOnce(12).mockResolvedValueOnce(3);
+    };
+
+    it('exige Authorization e valida period', async () => {
+      const app = await makeApp();
+      expect((await request(app).get('/api/dashboard/overview')).status).toBe(401);
+      expect((await request(app).get('/api/dashboard/overview?period=1y').set(AUTH)).status).toBe(400);
+    });
+
+    it('consolida comercial, atendimento, financeiro, NPS, agenda e tarefas', async () => {
+      seedOverview();
+      const app = await makeApp();
+
+      const res = await request(app).get('/api/dashboard/overview?period=7d').set(AUTH);
+
+      expect(res.status).toBe(200);
+      const d = res.body.data;
+
+      // comercial (reusa buildComercial): 2 novos vs 1 anterior → +100%, conversão 1/2.
+      expect(d.comercial.novosLeads).toBe(2);
+      expect(d.comercial.novosLeadsAnterior).toBe(1);
+      expect(d.comercial.novosLeadsVariacaoPct).toBe(100);
+      expect(d.comercial.conversaoPct).toBe(50);
+      expect(d.comercial.porEstagio.find((s: { stage: string }) => s.stage === 'atendido').count).toBe(1);
+
+      // atendimento
+      expect(d.atendimento.conversasAbertas).toBe(9);
+      expect(d.atendimento.aguardandoHumano).toBe(4);
+      expect(d.atendimento.sugestoesPendentes).toBe(3);
+      expect(d.atendimento.medianaRespostaMin).toBe(2);
+      expect(d.atendimento.conversasComResposta).toBe(5);
+
+      // financeiro (reusa buildFinanceiro)
+      expect(d.financeiro.recebido).toBe(500);
+      expect(d.financeiro.aReceber).toBe(600);
+      expect(d.financeiro.taxaAceitacaoPct).toBe(100);
+
+      // nps
+      expect(d.nps.notaMedia).toBe(9);
+      expect(d.nps.npsClassico).toBe(100);
+      expect(d.nps.respondidos).toBe(1);
+
+      // agenda: 2 hoje (1 confirmada, 1 pendente); próximas só a de 16h (>= agora 15h).
+      expect(d.agenda.totalHoje).toBe(2);
+      expect(d.agenda.confirmadas).toBe(1);
+      expect(d.agenda.pendentes).toBe(1);
+      expect(d.agenda.proximas).toHaveLength(1);
+      expect(d.agenda.proximas[0]).toMatchObject({ id: 'a1', paciente: 'Ana', profissional: 'Dra. Bia' });
+
+      // tarefas
+      expect(d.tarefas.abertas).toBe(12);
+      expect(d.tarefas.atrasadas).toBe(3);
+
+      // atrasadas = não concluídas com dueAt antes de agora
+      expect(mocks.prisma.task.count).toHaveBeenCalledWith({
+        where: { status: { notIn: ['DONE', 'CANCELED'] }, dueAt: { lt: NOW } },
+      });
     });
   });
 });
