@@ -144,18 +144,15 @@ Ordem exata. 👤 = você (dashboard/1 clique) · 🤖 = agente (automatizável)
 ### 1.1 Lembrete de consulta D-1 (P)
 **Por quê:** reduz falta (no-show) — maior ROI de clínica. Já implementado.
 
-> ⚠️ **Efeito colateral conhecido**: `ENABLE_SCHEDULER=true` liga DOIS jobs
-> (`lib/scheduler.ts`): o D-1 **e** o `runFollowUpJob`, que envia
-> `HSM_FOLLOW_UP_TEMPLATE` para **toda conversa OPEN sem mensagem há 48h+**
-> e a marca `PENDING_PATIENT`. Ligar a flag com backlog de conversas
-> antigas = rajada de follow-ups não planejados.
+> ✅ **Efeito colateral eliminado (10/07)**: as flags foram separadas —
+> `ENABLE_SCHEDULER` liga só o loop; `ENABLE_D1_REMINDERS` e
+> `ENABLE_FOLLOWUP_HSM` (ambas default `false`) ligam cada job de envio
+> individualmente (gate em `runSchedulerTick`, com testes). Ligar o D-1 não
+> dispara mais rajada de follow-ups 48h no backlog.
 
 **Passos:**
-1. **Antes de tudo — separar as flags (P, código):** dividir em
-   `ENABLE_D1_REMINDERS` e `ENABLE_FOLLOWUP_HSM` (gate por job em
-   `runScheduledJobs`), com teste. Alternativa mínima aceitável: triar e
-   resolver/fechar as conversas OPEN paradas há 48h+ no inbox ANTES de
-   ligar a flag única — mas a separação é barata e elimina o risco.
+1. ✅ ~~Separar as flags (P, código)~~ — feito em 10/07: gate por job em
+   `runSchedulerTick` (`ENABLE_D1_REMINDERS` / `ENABLE_FOLLOWUP_HSM`).
 2. Aprovar os templates HSM na Meta (Business Manager → WhatsApp →
    Message Templates, textos em `src/lib/templates/hsm-messages.ts`) —
    ambos os templates, se o follow-up HSM também for desejado.
@@ -179,11 +176,11 @@ Também definir `LEAD_WEBHOOK_SECRET` para o webhook público de leads.
 
 ## Lote 2 — Operação sente no primeiro dia 🔥
 
-### 2.1 Notificações no inbox (M)
-Badge no título da aba + som curto em mensagem nova/handoff (o inbox já
-faz polling — detectar deltas no cliente); handoff com som/realce distinto;
-toggle persistido. **Arquivos:** `inbox/page.tsx`, `globals.css`.
-**Aceite:** msg nova em outra aba → título muda e som toca.
+### 2.1 Notificações no inbox (M) ✅ (10/07)
+Badge `(N)` no título da aba + som curto (WebAudio, sem asset) em mensagem
+nova; handoff com som distinto (dois tons); toggle persistido em
+localStorage; polling silencioso de 15s (lista visível + detecção de deltas
+sem filtro). **Arquivos:** `inbox/page.tsx`, `inbox/notifications.ts`.
 
 ### 2.2 Áudio do WhatsApp com transcrição (M/G)
 Paciente de clínica manda muito áudio; hoje não alimenta a Tawany.
@@ -193,10 +190,14 @@ OpenRouter) com timeout; falha → handoff "áudio não transcrito"; corpo vira
 inbox mostra ícone + transcrição.
 **Aceite:** áudio → Tawany responde ao conteúdo; falha → handoff visível.
 
-### 2.3 Reativação de perdidos (M)
-Job no scheduler: `status:perdido-sem-resposta` há 30/60d, sem opt-out →
-template HSM 1x por janela (tag `reativacao:30d/60d`); resposta reabre no
-pipeline `9-reativacao`. Métrica no dashboard.
+### 2.3 Reativação de perdidos (M) ✅ código (10/07)
+Job no scheduler (`lib/reactivation.ts`, gate `ENABLE_REACTIVATION`):
+`status:perdido-sem-resposta` há 30/60d (data do stage_change; fallback
+`updatedAt`), sem opt-out → template `qara_reativacao` 1x por janela (tag
+`reativacao:30d/60d`); resposta reabre como `novo-lead` no pipeline
+`reativacao` (hook no ingest do webhook). Falta: aprovar o template na Meta
+e ligar a flag (runbook §5b); card de métrica no dashboard (Activity
+`type=REACTIVATION` já é a fonte).
 
 ### 2.4 NPS automático pós-consulta (M)
 Appointment `DONE` → NPS via scheduler; resposta → tags `nps:*`; 9-10 pede
@@ -214,9 +215,10 @@ construir quando a operação pedir.
 Engine ganha `{{nome}}` e ação por regra (responder | tawany | humano);
 o editor já está desenhado para expor. Testes por ação + interpolação.
 
-### 3.2 Autoria de mensagem (M)
-Migration `ChatMessage.sentById` (nullable); reply grava `req.userId`.
-Destrava "conversas por atendente" nos relatórios (hoje impossível).
+### 3.2 Autoria de mensagem (M) ✅ base (10/07)
+Migration `ChatMessage.sentById` (nullable, sem FK — padrão `feedbackById`);
+reply do inbox grava `req.userId`. Falta: usar nos relatórios ("conversas
+por atendente" — agora possível).
 
 ### 3.3 Métricas do ciclo de feedback (P)
 Card em /settings/ai: % de 👍 por semana, exemplos ativos, tendência de
@@ -233,7 +235,7 @@ nada de risco sai sem humano.
 
 | Item | O quê | Esforço |
 |---|---|---|
-| 4.1 | Import circular `shadow ↔ tawany-handler` → extrair `lib/shadow-mode.ts` | P |
+| 4.1 | ✅ (10/07) Import circular `shadow ↔ tawany-handler` → extraído `lib/shadow-mode.ts` (re-export em `shadow.ts` preserva consumidores) | P |
 | 4.2 | Teto de 500 nos `findMany` dos agregadores → `groupBy` no banco quando leads > ~2k | P |
 | 4.3 | Limpeza do legado: arquivos twenty-sdk restantes + `__tests__` antigos (~795 erros de tipo fora do build) + `TWENTY_FORWARD_URL` | P/M |
 | 4.4 | Monitoramento: health check do Render + uptime externo + Sentry na API + **alerta conversa aguardando-humano >15 min** (via scheduler) | P/M |
