@@ -610,3 +610,124 @@ describe('handleMetaWebhook — statuses', () => {
     expect(update).not.toHaveBeenCalled();
   });
 });
+
+// Coexistence: alguém da clínica respondeu pelo app WhatsApp Business e a
+// Meta espelhou a mensagem via smb_message_echoes.
+describe('handleMetaWebhook — Coexistence echoes', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  const echoBody = {
+    object: 'whatsapp_business_account',
+    entry: [
+      {
+        changes: [
+          {
+            field: 'smb_message_echoes',
+            value: {
+              metadata: { display_phone_number: '5511900001111', phone_number_id: 'PNID-1' },
+              message_echoes: [
+                {
+                  from: '5511900001111',
+                  to: '5511999998888',
+                  id: 'wamid.ECHO1',
+                  timestamp: '1751650300',
+                  type: 'text',
+                  text: { body: 'Oi Maria, podemos sim!' },
+                },
+              ],
+            },
+          },
+        ],
+      },
+    ],
+  };
+
+  it('records an OUT message and marks the conversation as human-assumed', async () => {
+    const list = vi
+      .fn()
+      .mockResolvedValueOnce([]) // dedup do wamid
+      .mockResolvedValueOnce([{ id: 'conv-1', leadId: 'lead-1', status: 'OPEN' }]);
+    const create = vi.fn().mockResolvedValue({ id: 'msg-echo-1' });
+    const update = vi.fn().mockResolvedValue({ id: 'conv-1' });
+
+    const result = await handleMetaWebhook(echoBody, api({ list, create, update }), processDebounce());
+
+    expect(create).toHaveBeenCalledWith(
+      'chatMessage',
+      expect.objectContaining({
+        conversationId: 'conv-1',
+        direction: 'OUT',
+        body: 'Oi Maria, podemos sim!',
+        externalId: 'wamid.ECHO1',
+        deliveryStatus: 'SENT',
+        agentHandled: true,
+      }),
+    );
+    // Mesmo efeito da resposta manual pelo Inbox: humano assumiu, Tawany
+    // não volta a responder até "Devolver para a Tawany".
+    expect(update).toHaveBeenCalledWith(
+      'conversation',
+      'conv-1',
+      expect.objectContaining({ needsHuman: false, status: 'PENDING_PATIENT' }),
+    );
+    // Echo nunca entra na fila da Tawany nem dispara bots.
+    expect(result.processedMessages).toEqual([]);
+    expect(mocks.sendWhatsApp.execute).not.toHaveBeenCalled();
+  });
+
+  it('creates lead + conversation when the clinic starts the chat from the phone', async () => {
+    const list = vi.fn().mockResolvedValue([]); // sem dup, sem conversa, sem lead
+    const create = vi
+      .fn()
+      .mockResolvedValueOnce({ id: 'lead-9' }) // lead
+      .mockResolvedValueOnce({ id: 'conv-9' }) // conversation
+      .mockResolvedValueOnce({ id: 'msg-9' }); // chatMessage
+    const update = vi.fn().mockResolvedValue({ id: 'conv-9' });
+
+    await handleMetaWebhook(echoBody, api({ list, create, update }), processDebounce());
+
+    expect(create).toHaveBeenNthCalledWith(
+      1,
+      'lead',
+      expect.objectContaining({ name: '5511999998888', phone: '5511999998888', source: 'WHATSAPP' }),
+    );
+    expect(create).toHaveBeenNthCalledWith(
+      2,
+      'conversation',
+      expect.objectContaining({ channel: 'WHATSAPP', externalId: '5511999998888' }),
+    );
+    expect(create).toHaveBeenNthCalledWith(
+      3,
+      'chatMessage',
+      expect.objectContaining({ direction: 'OUT', externalId: 'wamid.ECHO1' }),
+    );
+  });
+
+  it('dedups echoes of messages we sent via Cloud API (same wamid)', async () => {
+    const list = vi.fn().mockResolvedValueOnce([{ id: 'msg-out-1' }]); // wamid já gravado
+    const create = vi.fn();
+    const update = vi.fn();
+
+    await handleMetaWebhook(echoBody, api({ list, create, update }), processDebounce());
+
+    expect(create).not.toHaveBeenCalled();
+    expect(update).not.toHaveBeenCalled();
+  });
+
+  it('does not reopen RESOLVED/CLOSED conversations, only records the message', async () => {
+    const list = vi
+      .fn()
+      .mockResolvedValueOnce([]) // dedup
+      .mockResolvedValueOnce([{ id: 'conv-2', leadId: 'lead-2', status: 'RESOLVED' }]);
+    const create = vi.fn().mockResolvedValue({ id: 'msg-echo-2' });
+    const update = vi.fn().mockResolvedValue({ id: 'conv-2' });
+
+    await handleMetaWebhook(echoBody, api({ list, create, update }), processDebounce());
+
+    expect(update).toHaveBeenCalledWith('conversation', 'conv-2', {
+      lastMessageAt: new Date(1751650300 * 1000).toISOString(),
+    });
+  });
+});
