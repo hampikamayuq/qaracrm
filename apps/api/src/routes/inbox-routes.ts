@@ -238,6 +238,15 @@ export const replyRoute = async (req: Request, res: Response): Promise<void> => 
       jsonError(res, 409, typeof result.error === 'string' ? result.error : 'send_failed');
       return;
     }
+    // Autoria: reply manual pertence ao atendente logado (sentById), o que
+    // habilita "conversas por atendente" nos relatórios. A tool sendWhatsApp é
+    // compartilhada com a Tawany, então a autoria é gravada aqui, não nela.
+    if (typeof result?.messageId === 'string' && req.userId) {
+      await prisma.chatMessage.updateMany({
+        where: { id: result.messageId },
+        data: { sentById: req.userId },
+      });
+    }
     // Resposta manual = humano assumiu: formaliza o estado. Tawany não volta a
     // responder (gate exige status OPEN) até "Devolver para a Tawany".
     if (conversation.status !== 'RESOLVED' && conversation.status !== 'CLOSED') {

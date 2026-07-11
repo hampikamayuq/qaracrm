@@ -4,6 +4,7 @@ import { metaGraphBreaker } from './tools/sendWhatsApp';
 import { sendWhatsAppTemplate } from './tools/sendWhatsAppTemplate';
 import { HSM_D1_REMINDER_TEMPLATE, HSM_FOLLOW_UP_TEMPLATE, HSM_NPS_TEMPLATE } from './templates/hsm-messages';
 import { isMetaSendConfigured, sendViaMeta } from './whatsapp-client';
+import { runReactivationJob } from './reactivation';
 
 export type SchedulerHandle = { stop(): void };
 export type SchedulerJobs = {
@@ -301,6 +302,13 @@ export const runInstanceReconcileJob = async (
   return { checked: instances.length, updated };
 };
 
+// Gates por job (Lote 1.1 do plano): ENABLE_SCHEDULER liga só o loop; cada
+// job que ENVIA mensagem tem sua própria flag, default false. Isso elimina o
+// efeito colateral de ligar o D-1 e disparar junto uma rajada de follow-ups
+// 48h para o backlog de conversas OPEN antigas.
+const d1RemindersEnabled = (): boolean => process.env.ENABLE_D1_REMINDERS === 'true';
+const followUpHsmEnabled = (): boolean => process.env.ENABLE_FOLLOWUP_HSM === 'true';
+
 export const runSchedulerTick = async (
   data: DataApi,
   now = new Date(),
@@ -308,9 +316,10 @@ export const runSchedulerTick = async (
 ): Promise<void> => {
   await jobs.processPendingMetaWebhookEvents?.({ now });
   await jobs.processPendingEvolutionWebhookEvents?.({ now });
-  await runFollowUpJob(data, now);
-  await runD1ReminderJob(data, now);
+  if (followUpHsmEnabled()) await runFollowUpJob(data, now);
+  if (d1RemindersEnabled()) await runD1ReminderJob(data, now);
   await runNpsJob(data, now);
+  await runReactivationJob(data, now);
   if (now.getTime() >= nextInstanceReconcileAt) {
     nextInstanceReconcileAt = now.getTime() + INSTANCE_RECONCILE_INTERVAL_MS;
     await runInstanceReconcileJob(data);

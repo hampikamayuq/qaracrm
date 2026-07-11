@@ -1,10 +1,14 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { AlertTriangle, Bot, Check, CheckCheck, FlaskConical, MessageSquareText, Plus, Search, Send, Sparkles, ThumbsDown, ThumbsUp, Undo2, X } from 'lucide-react';
+import { AlertTriangle, Bell, BellOff, Bot, Check, CheckCheck, FlaskConical, MessageSquareText, Plus, Search, Send, Sparkles, ThumbsDown, ThumbsUp, Undo2, X } from 'lucide-react';
 import { substituteVars } from '@qara/shared';
 import { api, type AgentState, type Conversation, type ConversationDetail } from '@/lib/api';
+import { diffConversations, playNotificationSound, snapshotOf, type ConversationSnapshot } from './notifications';
 import { QuickReplyPicker } from './quick-reply-picker';
+
+const NOTIFY_STORAGE_KEY = 'qara-inbox-notify';
+const POLL_INTERVAL_MS = 15_000;
 
 type StatusFilter = 'OPEN' | 'ALL' | 'HUMAN';
 
@@ -126,6 +130,13 @@ export default function InboxPage() {
   // deep link /inbox?lead=<id> (vindo do card do pipeline): seleciona a
   // conversa do lead assim que a lista carregar, em qualquer status.
   const pendingLeadRef = useRef<string | null>(null);
+  // Notificações (Lote 2.1): toggle persistido + snapshot para detectar deltas
+  // no polling e badge de não-vistos no título da aba.
+  const [notifyEnabled, setNotifyEnabled] = useState(true);
+  const notifyRef = useRef(true);
+  const snapshotRef = useRef<Map<string, ConversationSnapshot> | null>(null);
+  const unseenRef = useRef(0);
+  const baseTitleRef = useRef('');
 
   useEffect(() => {
     const leadParam = new URLSearchParams(window.location.search).get('lead');
@@ -133,6 +144,72 @@ export default function InboxPage() {
       pendingLeadRef.current = leadParam;
       setStatus('ALL');
     }
+  }, []);
+
+  useEffect(() => {
+    const stored = window.localStorage.getItem(NOTIFY_STORAGE_KEY);
+    const enabled = stored !== '0';
+    setNotifyEnabled(enabled);
+    notifyRef.current = enabled;
+  }, []);
+
+  const toggleNotify = () => {
+    setNotifyEnabled((current) => {
+      const next = !current;
+      notifyRef.current = next;
+      window.localStorage.setItem(NOTIFY_STORAGE_KEY, next ? '1' : '0');
+      return next;
+    });
+  };
+
+  // Badge "(N)" no título da aba enquanto ela está em segundo plano; volta ao
+  // normal quando a equipe retorna para a aba.
+  useEffect(() => {
+    baseTitleRef.current = document.title;
+    const clearUnseen = () => {
+      if (unseenRef.current === 0) return;
+      unseenRef.current = 0;
+      document.title = baseTitleRef.current;
+    };
+    const onVisible = () => {
+      if (!document.hidden) clearUnseen();
+    };
+    window.addEventListener('focus', clearUnseen);
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      window.removeEventListener('focus', clearUnseen);
+      document.removeEventListener('visibilitychange', onVisible);
+      document.title = baseTitleRef.current;
+    };
+  }, []);
+
+  // Polling de notificações: lista sem filtros (independente do filtro visível)
+  // a cada 15s; a primeira carga só semeia o snapshot, nunca notifica.
+  useEffect(() => {
+    let cancelled = false;
+    const tick = async () => {
+      try {
+        const data = await api.getConversations({ pageSize: 50 });
+        if (cancelled) return;
+        const delta = diffConversations(snapshotRef.current, data.items);
+        snapshotRef.current = snapshotOf(data.items);
+        const total = delta.newMessages + delta.newHandoffs;
+        if (total === 0 || !notifyRef.current) return;
+        playNotificationSound(delta.newHandoffs > 0 ? 'handoff' : 'message');
+        if (document.hidden) {
+          unseenRef.current += total;
+          document.title = `(${unseenRef.current}) ${baseTitleRef.current}`;
+        }
+      } catch {
+        // polling silencioso: falha de rede não vira erro na UI
+      }
+    };
+    void tick();
+    const timer = window.setInterval(tick, POLL_INTERVAL_MS);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
   }, []);
 
   const reloadDetail = useCallback(async (id: string) => {
@@ -145,8 +222,8 @@ export default function InboxPage() {
   }, []);
 
   useEffect(() => {
-    const timer = window.setTimeout(() => {
-      setLoading(true);
+    const load = (silent: boolean) => {
+      if (!silent) setLoading(true);
       api.getConversations({
         search: search || undefined,
         status: status === 'ALL' || status === 'HUMAN' ? undefined : status,
@@ -166,9 +243,18 @@ export default function InboxPage() {
           if (candidate && data.items.some((item) => item.id === candidate)) return candidate;
           return data.items[0]?.id ?? '';
         });
-      }).finally(() => setLoading(false));
-    }, 250);
-    return () => window.clearTimeout(timer);
+      }).finally(() => {
+        if (!silent) setLoading(false);
+      });
+    };
+    const timer = window.setTimeout(() => load(false), 250);
+    // Refresh silencioso na mesma cadência das notificações: a lista visível
+    // acompanha o que o som/badge anunciam, sem piscar o "Carregando…".
+    const poll = window.setInterval(() => load(true), POLL_INTERVAL_MS);
+    return () => {
+      window.clearTimeout(timer);
+      window.clearInterval(poll);
+    };
   }, [search, status]);
 
   useEffect(() => {
@@ -346,6 +432,18 @@ export default function InboxPage() {
               </button>
             ))}
           </div>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={notifyEnabled}
+            className="switch-row"
+            onClick={toggleNotify}
+            title={notifyEnabled ? 'Som e badge ativos para mensagem nova e handoff' : 'Notificações desativadas'}
+          >
+            <span className="switch" aria-hidden="true"><span className="switch-thumb" /></span>
+            {notifyEnabled ? <Bell size={15} /> : <BellOff size={15} />}
+            Notificações
+          </button>
           <button
             type="button"
             role="switch"

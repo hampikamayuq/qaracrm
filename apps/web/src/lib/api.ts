@@ -372,7 +372,13 @@ export type ReviewQueueItem = {
   createdAt: string;
 };
 
-export type AiSettings = { shadowMode: string; promptVersion: string };
+export type AiOperationMode = 'shadow' | 'human_approval' | 'recomendacoes' | 'autopilot' | 'hibrido';
+export type AiSettings = {
+  mode: AiOperationMode;
+  shadowMode: string;
+  promptVersion: string;
+  autopilotIntents: string[];
+};
 
 // ---------------- canais (números extras de WhatsApp via QR) ----------------
 
@@ -693,6 +699,13 @@ export const api = {
   async getAiSettings(): Promise<AiSettings | null> {
     const res = await this.get<AiSettings>('/settings/ai');
     return res.data ?? null;
+  },
+
+  updateAiSettings(
+    mode: AiOperationMode,
+    autopilotIntents: string[] = [],
+  ): Promise<ApiResponse<{ mode: AiOperationMode; autopilotIntents: string[] }>> {
+    return this.fetch('/settings/ai', { method: 'PUT', body: JSON.stringify({ mode, autopilotIntents }) });
   },
 
   setConversationStatus(conversationId: string, status: string): Promise<ApiResponse<{ status: string }>> {

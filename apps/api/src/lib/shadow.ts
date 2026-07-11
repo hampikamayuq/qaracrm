@@ -1,26 +1,18 @@
 import type { AiClient } from './ai-client';
 import type { DataApi } from './data';
 import { runTawanyHandler, type TawanySendMode } from '../logic-functions/tawany-handler';
+import { type ShadowMode } from './shadow-mode';
+import { loadAiSettings, type AiOperationMode } from './ai-settings';
 
-export type ShadowMode = 'shadow' | 'human_approval' | 'autopilot';
+// Re-export para não quebrar os consumidores existentes de lib/shadow.
+export { getShadowMode, isAutopilotMode, isHumanApprovalMode, isShadowMode, type ShadowMode } from './shadow-mode';
+
 export type ProcessedShadowMessage = { conversationId: string; messageId: string };
 
 type FetchLike = (
   input: string,
   init: { method: 'POST'; headers: Record<string, string>; body: Buffer },
 ) => Promise<unknown>;
-
-const VALID_MODES = new Set<ShadowMode>(['shadow', 'human_approval', 'autopilot']);
-
-export const getShadowMode = (): ShadowMode => {
-  const mode = process.env.SHADOW_MODE ?? 'shadow';
-  if (!VALID_MODES.has(mode as ShadowMode)) throw new Error(`Invalid SHADOW_MODE: ${mode}`);
-  return mode as ShadowMode;
-};
-
-export const isShadowMode = (): boolean => getShadowMode() === 'shadow';
-export const isHumanApprovalMode = (): boolean => getShadowMode() === 'human_approval';
-export const isAutopilotMode = (): boolean => getShadowMode() === 'autopilot';
 
 export const forwardWebhookToTwenty = async (
   params: {
@@ -85,6 +77,17 @@ const SEND_MODE_BY_SHADOW_MODE: Record<ShadowMode, TawanySendMode> = {
   autopilot: 'send',
 };
 
+// Modo efetivo salvo em __ai_settings (editável em /settings/ai) tem
+// prioridade sobre SHADOW_MODE do ambiente — loadAiSettings já cai pro env
+// quando não há linha salva, então isto é retrocompatível.
+// ponytail: 'hibrido'/'recomendacoes' colapsam para human_approval aqui —
+// a decisão por risco/intent de 'hibrido' (decideRuntimeSendMode) só roda
+// hoje no disparo manual (/api/tawany/run), não neste dispatch em lote do
+// webhook. Se isso importar pro canal WhatsApp/Instagram real, plugar o
+// mesmo loadAiSettings+decideRuntimeSendMode aqui em vez de forçar sendMode.
+const shadowModeFromSettingsMode = (mode: AiOperationMode): ShadowMode =>
+  mode === 'shadow' || mode === 'autopilot' ? mode : 'human_approval';
+
 // Roda a Tawany para as mensagens processadas pelo webhook, em TODOS os modos.
 // Sempre via runTawanyHandler para aplicar os gates de entrada (conversa
 // fechada/needsHuman, opt-out, prompt-injection) antes de qualquer chamada de IA.
@@ -93,7 +96,8 @@ export const runTawanyForProcessedMessages = async (
   deps: { createAi: () => AiClient; data: DataApi },
 ): Promise<void> => {
   if (messages.length === 0) return;
-  const mode = getShadowMode();
+  const settings = await loadAiSettings(deps.data);
+  const mode = shadowModeFromSettingsMode(settings.mode);
   const sendMode = SEND_MODE_BY_SHADOW_MODE[mode];
 
   let ai: AiClient | undefined;

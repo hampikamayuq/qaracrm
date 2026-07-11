@@ -15,6 +15,9 @@ const mocks = vi.hoisted(() => ({
     aiSuggestion: {
       findMany: vi.fn(),
     },
+    chatMessage: {
+      updateMany: vi.fn(),
+    },
   },
   sendWhatsApp: {
     execute: vi.fn(),
@@ -261,6 +264,27 @@ describe('Inbox phase-3 actions', () => {
       expect.anything(),
     );
     expect(ok.json).toHaveBeenCalledWith({ success: true, data: { ok: true, sent: true, messageId: 'm1' } });
+  });
+
+  it('reply grava a autoria (sentById) do atendente logado na mensagem enviada', async () => {
+    mocks.prisma.conversation.findUnique.mockResolvedValue({ id: 'c1', status: 'OPEN' });
+    mocks.sendWhatsApp.execute.mockResolvedValue(JSON.stringify({ ok: true, sent: true, messageId: 'm1' }));
+    const { replyRoute } = await import('./inbox-routes');
+    await replyRoute(req({ params: { id: 'c1' }, body: { text: 'Oi' }, userId: 'u1' } as Partial<Request>), res());
+
+    expect(mocks.prisma.chatMessage.updateMany).toHaveBeenCalledWith({
+      where: { id: 'm1' },
+      data: { sentById: 'u1' },
+    });
+  });
+
+  it('reply sem messageId no resultado não tenta gravar autoria', async () => {
+    mocks.prisma.conversation.findUnique.mockResolvedValue({ id: 'c1', status: 'OPEN' });
+    mocks.sendWhatsApp.execute.mockResolvedValue(JSON.stringify({ ok: false, error: 'conversation_not_found' }));
+    const { replyRoute } = await import('./inbox-routes');
+    await replyRoute(req({ params: { id: 'c1' }, body: { text: 'Oi' }, userId: 'u1' } as Partial<Request>), res());
+
+    expect(mocks.prisma.chatMessage.updateMany).not.toHaveBeenCalled();
   });
 
   it('reply formaliza "humano assumiu": limpa needsHuman e sai de OPEN', async () => {

@@ -28,7 +28,7 @@ Monorepo standalone.
 | Tools do agente | `lib/tools/` | sendWhatsApp, listProfessionals/Services, readLead, checkBotFaq, handoffToHuman etc. |
 | Bots (fluxos fixos) | `lib/bots/` + `routes/bot-routes.ts` | Respostas automáticas por palavra-chave, editáveis pela UI, com risk blocking imutável |
 | Rotas HTTP | `routes/` | auth, inbox, pipeline, dashboard, reports, appointments, tasks, tags, bots, settings, lgpd, webhooks |
-| Scheduler | `src/server.ts` + `lib/scheduler.ts` | Follow-up (`FOLLOWUP_INTERVAL_MS`) e lembrete D-1 (`ENABLE_SCHEDULER`) |
+| Scheduler | `src/server.ts` + `lib/scheduler.ts` + `lib/reactivation.ts` | Follow-up de tasks (`FOLLOWUP_INTERVAL_MS`); loop de envios (`ENABLE_SCHEDULER`) com flags por job: D-1 (`ENABLE_D1_REMINDERS`), follow-up 48h (`ENABLE_FOLLOWUP_HSM`), NPS (`NPS_ENABLED`), reativação de perdidos (`ENABLE_REACTIVATION`) |
 
 ### Telas (`apps/web/src/app`)
 
@@ -65,7 +65,8 @@ cp apps/api/.env.example apps/api/.env
 cp apps/web/.env.example apps/web/.env.local
 
 # Variáveis-chave da API:
-# - ENABLE_SCHEDULER: {true|false} — ativa scheduler de follow-ups e lembretes (D-1)
+# - ENABLE_SCHEDULER: {true|false} — liga o loop do scheduler (jobs de envio têm flags próprias:
+#   ENABLE_D1_REMINDERS, ENABLE_FOLLOWUP_HSM, NPS_ENABLED, ENABLE_REACTIVATION — default false)
 # - SHADOW_MODE: {shadow|human_approval|autopilot} — shadow (observa), human_approval (sugere), autopilot (envia)
 # - FOLLOWUP_INTERVAL_MS: int — intervalo de follow-ups (default 900000 = 15min); 0 desativa
 

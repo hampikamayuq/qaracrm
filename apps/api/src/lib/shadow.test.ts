@@ -194,6 +194,39 @@ describe('runTawanyForProcessedMessages', () => {
     expect(runTawanyHandler).not.toHaveBeenCalled();
   });
 
+  it('usa o modo salvo em __ai_settings (DB), sobrepondo SHADOW_MODE do ambiente', async () => {
+    process.env.SHADOW_MODE = 'shadow';
+    const data = api({
+      get: vi.fn().mockResolvedValue(inboundMessage),
+      list: vi.fn().mockResolvedValue([{ content: JSON.stringify({ mode: 'autopilot', autopilotIntents: [] }) }]),
+    });
+    vi.mocked(runTawanyHandler).mockResolvedValue({ status: 'replied', toolCalls: 0, content: 'Olá!' });
+    const { runTawanyForProcessedMessages } = await import('./shadow');
+
+    await runTawanyForProcessedMessages([{ conversationId: 'conv-1', messageId: 'msg-1' }], deps(data));
+
+    expect(runTawanyHandler).toHaveBeenCalledWith(
+      inboundMessage,
+      expect.objectContaining({ sendMode: 'send', markHandled: true }),
+    );
+  });
+
+  it("modo 'hibrido' no banco colapsa para sendMode 'suggest_only' neste dispatch em lote", async () => {
+    const data = api({
+      get: vi.fn().mockResolvedValue(inboundMessage),
+      list: vi.fn().mockResolvedValue([{ content: JSON.stringify({ mode: 'hibrido', autopilotIntents: ['AGENDAMENTO'] }) }]),
+    });
+    vi.mocked(runTawanyHandler).mockResolvedValue({ status: 'replied', toolCalls: 0, content: 'Olá!' });
+    const { runTawanyForProcessedMessages } = await import('./shadow');
+
+    await runTawanyForProcessedMessages([{ conversationId: 'conv-1', messageId: 'msg-1' }], deps(data));
+
+    expect(runTawanyHandler).toHaveBeenCalledWith(
+      inboundMessage,
+      expect.objectContaining({ sendMode: 'suggest_only' }),
+    );
+  });
+
   it('segue mesmo sem createAi funcional — runTawanyHandler trata a config ausente', async () => {
     process.env.SHADOW_MODE = 'human_approval';
     const data = api({ get: vi.fn().mockResolvedValue(inboundMessage) });
