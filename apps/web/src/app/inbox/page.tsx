@@ -72,6 +72,18 @@ const agentStateOf = (conversation: { status: string; needsHuman: boolean; agent
     ?? (conversation.needsHuman ? 'aguardando_humano' : conversation.status === 'OPEN' ? 'tawany_ativa' : 'humano_assumiu');
 
 // Motivos técnicos do handoff traduzidos para a equipe
+// Canal legível: número oficial, número extra por QR (com o nome da
+// instância quando disponível) ou Instagram.
+const channelLabel = (
+  channel: string | null | undefined,
+  instance?: { name: string } | null,
+): string => {
+  if (channel === 'WHATSAPP') return 'WhatsApp';
+  if (channel === 'WHATSAPP_QR') return instance?.name ? `WhatsApp · ${instance.name}` : 'WhatsApp · número QR';
+  if (channel === 'INSTAGRAM') return 'Instagram';
+  return channel ?? 'Canal não informado';
+};
+
 const handoffReasonLabel = (reason: string | null | undefined): string => {
   if (!reason) return 'motivo não registrado';
   if (reason.startsWith('guard_failed')) {
@@ -84,6 +96,7 @@ const handoffReasonLabel = (reason: string | null | undefined): string => {
     return 'bloqueado pelo validador';
   }
   if (reason === 'opt_out_detected') return 'paciente pediu para parar';
+  if (reason === 'canal_qr') return 'canal QR — atendimento humano';
   if (reason.includes('injection')) return 'mensagem suspeita';
   if (reason === 'manual_handoff') return 'marcado manualmente';
   if (reason === 'max_iterations') return 'Tawany não conseguiu concluir';
@@ -377,7 +390,12 @@ export default function InboxPage() {
                     <span className="avatar" style={avatarStyle(leadName)} aria-hidden="true">{initials(leadName)}</span>
                     <span className="conversation-id">
                       <span className="conversation-name">{leadName}</span>
-                      <span className="conversation-phone">{conversation.lead?.phone ?? conversation.channel ?? 'Sem telefone'}</span>
+                      <span className="conversation-phone">
+                        {conversation.lead?.phone ?? channelLabel(conversation.channel, conversation.instance)}
+                        {conversation.channel === 'WHATSAPP_QR' && conversation.lead?.phone
+                          ? ` · ${channelLabel(conversation.channel, conversation.instance)}`
+                          : ''}
+                      </span>
                     </span>
                     <span className="conversation-time">{relativeTime(conversation.lastMessageAt ?? conversation.updatedAt)}</span>
                   </span>
@@ -419,7 +437,7 @@ export default function InboxPage() {
                   <span className="avatar" style={avatarStyle(selected.lead.name)} aria-hidden="true">{initials(selected.lead.name)}</span>
                   <div>
                     <h2 className="title">{selected.lead.name}</h2>
-                    <div className="muted">{selected.channel ?? 'Canal não informado'} · {statusLabel(selected.status)}</div>
+                    <div className="muted">{channelLabel(selected.channel, selected.instance)} · {statusLabel(selected.status)}</div>
                   </div>
                 </div>
                 <div className="thread-head-state">
@@ -432,7 +450,8 @@ export default function InboxPage() {
                   ) : (
                     <span className="chip">Humano assumiu</span>
                   )}
-                  {agentStateOf(selected) !== 'tawany_ativa' ? (
+                  {/* Canal QR não tem Tawany — o botão seria estado fake (PRODUCT.md). */}
+                  {agentStateOf(selected) !== 'tawany_ativa' && selected.channel !== 'WHATSAPP_QR' ? (
                     <button className="btn" type="button" onClick={devolverTawany}>
                       <Undo2 size={14} />Devolver para a Tawany
                     </button>

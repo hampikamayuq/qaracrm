@@ -12,6 +12,8 @@ export type Conversation = {
   agentState?: AgentState;
   handoffReason?: string | null;
   channel?: string | null;
+  // Número extra via QR (instância Evolution); null/ausente = canal oficial.
+  instance?: { id: string; name: string } | null;
   lastMessageAt?: string | null;
   updatedAt: string;
   lead?: {

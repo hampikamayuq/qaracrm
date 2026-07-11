@@ -81,6 +81,7 @@ describe('Inbox routes', () => {
         needsHuman: true,
         handoffReason: true,
         channel: true,
+        instance: { select: { id: true, name: true } },
         lastMessageAt: true,
         updatedAt: true,
         lead: {

@@ -66,6 +66,7 @@ export const listInboxRoute = async (req: Request, res: Response): Promise<void>
           needsHuman: true,
           handoffReason: true,
           channel: true,
+          instance: { select: { id: true, name: true } },
           lastMessageAt: true,
           updatedAt: true,
           lead: {
@@ -122,6 +123,7 @@ export const getInboxDetailRoute = async (req: Request, res: Response): Promise<
         needsHuman: true,
         handoffReason: true,
         channel: true,
+        instance: { select: { id: true, name: true } },
         lastMessageAt: true,
         updatedAt: true,
         classification: true,

@@ -48,6 +48,10 @@ no padrão das existentes + `prisma generate`; use `db:migrate:deploy`
   nunca torná-los editáveis pela UI/API.
 - **Histórico/versionamento reusa o modelo `Activity`** (stage_change,
   versões de bot, notas) — não crie tabela nova para histórico.
+- **IA/automação são exclusivas do canal oficial (`channel === 'WHATSAPP'`)**:
+  Tawany, bots, templates HSM e jobs do scheduler nunca tocam conversas
+  `WHATSAPP_QR` (números extras via gateway Evolution, atendimento humano
+  apenas) nem `INSTAGRAM` (templates). Ver `docs/whatsapp-qr-numeros.md`.
 - **Web sem Tailwind**: design system próprio em
   `apps/web/src/app/globals.css` (tokens em `:root`, cor semântica:
   Tawany = violeta `--ai`, urgência = vermelho, follow-up/teste = âmbar).
