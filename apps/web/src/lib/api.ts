@@ -380,6 +380,23 @@ export type AiSettings = {
   autopilotIntents: string[];
 };
 
+// ---------------- usuários (gestão pelo admin) ----------------
+
+export type UserRole = 'admin' | 'recepcao' | 'medico' | 'financeiro' | 'marketing';
+
+export type ManagedUser = {
+  id: string;
+  name: string;
+  email: string;
+  role: string;
+  active: boolean;
+  createdAt: string;
+};
+
+export type CreateUserInput = { name: string; email: string; password: string; role: UserRole };
+
+export type UpdateUserInput = { name?: string; role?: UserRole; active?: boolean; password?: string };
+
 // ---------------- canais (números extras de WhatsApp via QR) ----------------
 
 export type WhatsAppChannelStatus = 'DISCONNECTED' | 'PAIRING' | 'CONNECTED';
@@ -675,6 +692,21 @@ export const api = {
 
   deleteExample(id: string): Promise<ApiResponse<{ deleted: boolean }>> {
     return this.fetch(`/tawany/examples/${id}`, { method: 'DELETE' });
+  },
+
+  // ---------------- usuários (gestão pelo admin) ----------------
+
+  async listUsers(): Promise<ManagedUser[]> {
+    const res = await this.get<ManagedUser[]>('/users');
+    return res.data ?? [];
+  },
+
+  createUser(input: CreateUserInput): Promise<ApiResponse<ManagedUser>> {
+    return this.post('/users', input);
+  },
+
+  updateUser(id: string, input: UpdateUserInput): Promise<ApiResponse<ManagedUser>> {
+    return this.fetch(`/users/${id}`, { method: 'PATCH', body: JSON.stringify(input) });
   },
 
   // ---------------- canais (números extras via QR) ----------------

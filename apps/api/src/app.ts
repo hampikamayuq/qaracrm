@@ -20,6 +20,7 @@ import webhookCsvRoutes from './routes/webhook-csv-routes.js';
 import dashboardRoutes from './routes/dashboard-routes.js';
 import reportRoutes from './routes/report-routes.js';
 import settingsRoutes from './routes/settings-routes.js';
+import usersRoutes from './routes/users-routes.js';
 import quickReplyRoutes from './routes/quick-reply-routes.js';
 import channelRoutes from './routes/channel-routes.js';
 import { prisma } from './lib/deps.js';
@@ -70,6 +71,7 @@ app.use('/api/webhook', webhookCsvRoutes);
 app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/reports', reportRoutes);
 app.use('/api/settings', settingsRoutes);
+app.use('/api/users', usersRoutes);
 app.use('/api/quick-replies', quickReplyRoutes);
 app.use('/api/channels', channelRoutes);
 
