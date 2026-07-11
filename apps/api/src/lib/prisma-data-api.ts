@@ -22,6 +22,7 @@ const MODEL_MAP: Record<string, keyof PrismaClient> = {
   knowledgeSection: 'knowledgeSection',
   tawanyExample: 'tawanyExample',
   webhookEvent: 'webhookEvent',
+  whatsAppInstance: 'whatsAppInstance',
   appointment: 'appointment',
   budget: 'budget',
   payment: 'payment',

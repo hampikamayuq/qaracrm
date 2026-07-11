@@ -16,6 +16,7 @@ import {
   ListTodo,
   LogIn,
   Settings,
+  Smartphone,
   Sparkles,
   type LucideIcon,
 } from 'lucide-react';
@@ -42,6 +43,7 @@ const NAV_GROUPS: NavGroup[] = [
     label: 'Admin',
     items: [
       { href: '/settings', label: 'Configurações', icon: Settings },
+      { href: '/settings/channels', label: 'Canais', icon: Smartphone },
       { href: '/settings/knowledge', label: 'Conhecimento', icon: BookOpen },
       { href: '/settings/ai', label: 'IA', icon: Sparkles },
       { href: '/login', label: 'Login', icon: LogIn },

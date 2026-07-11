@@ -118,7 +118,11 @@ model Conversation {
   metaContactId String?
   metaThreadId  String?
   externalId    String?
-  channel       String?
+  channel       String?        // WHATSAPP (oficial Meta) | WHATSAPP_QR (instância Evolution) | INSTAGRAM
+  // Instância Evolution (número extra pareado por QR). NULL = canal oficial.
+  // onDelete SET NULL preserva o histórico quando a instância é removida.
+  instanceId    String?
+  instance      WhatsAppInstance? @relation(fields: [instanceId], references: [id], onDelete: SetNull)
   lastMessageAt DateTime?
   classification Json?
   summary       String?
@@ -136,6 +140,24 @@ model Conversation {
   @@index([leadId])
   @@index([status])
   @@index([assignedToId])
+  // Lookup do ingest: conversa por canal + contato externo (+ instância no QR).
+  @@index([channel, externalId, instanceId])
+}
+
+// Número extra de WhatsApp pareado por QR code via gateway Evolution API
+// (não-oficial — risco de ban; atendimento humano apenas, sem Tawany/bots).
+// O número oficial da Meta Cloud API NÃO vira instância.
+model WhatsAppInstance {
+  id              String         @id @default(uuid())
+  name            String
+  provider        String         @default("EVOLUTION")
+  instanceName    String         @unique // nome da instância no Evolution
+  phoneNumber     String?        // preenchido no CONNECTION_UPDATE (wuid)
+  status          String         @default("DISCONNECTED") // DISCONNECTED | PAIRING | CONNECTED
+  lastConnectedAt DateTime?
+  conversations   Conversation[]
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
 }
 
 model ChatMessage {

@@ -9,7 +9,7 @@ import { updateLead } from './updateLead';
 import { updateConversation } from './updateConversation';
 import { assignTag } from './assignTag';
 import { createActivity } from './createActivity';
-import { igGraphBreaker, metaGraphBreaker, resetSendWhatsAppRateLimit, sendWhatsApp } from './sendWhatsApp';
+import { evolutionBreaker, igGraphBreaker, metaGraphBreaker, resetSendWhatsAppRateLimit, sendWhatsApp } from './sendWhatsApp';
 import { handoffToHuman } from './handoffToHuman';
 import { tawanyTools, ALL_TOOLS } from './index';
 
@@ -192,6 +192,60 @@ describe('write tools', () => {
       expect.objectContaining({ direction: 'OUT', deliveryStatus: 'PENDING' }),
     );
     expect(JSON.parse(r)).toMatchObject({ ok: true, sent: false });
+  });
+
+  it('sendWhatsApp sends WHATSAPP_QR conversations via Evolution (instância conectada)', async () => {
+    evolutionBreaker.reset();
+    process.env.EVOLUTION_BASE_URL = 'http://evo.local:8080';
+    process.env.EVOLUTION_API_KEY = 'dev-key';
+    process.env.EVOLUTION_WEBHOOK_SECRET = 'whsec';
+    process.env.EVOLUTION_WEBHOOK_URL = 'https://crm.example/api/webhooks/evolution';
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ key: { id: 'EVOSENT1' } }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    try {
+      const get = vi.fn().mockImplementation(async (object: string) =>
+        object === 'conversation'
+          ? { id: UUID, channel: 'WHATSAPP_QR', externalId: '5511999998888', instanceId: 'inst-1' }
+          : { id: 'inst-1', instanceName: 'qara-recepcao', status: 'CONNECTED' });
+      const create = vi.fn().mockResolvedValue({ id: 'm-qr' });
+      const r = await sendWhatsApp.execute({ conversationId: UUID, text: 'Olá' }, api({ get, create }));
+      expect(fetchMock).toHaveBeenCalledOnce();
+      expect(fetchMock.mock.calls[0][0]).toContain('/message/sendText/qara-recepcao');
+      expect(create).toHaveBeenCalledWith(
+        'chatMessage',
+        expect.objectContaining({ externalId: 'EVOSENT1', deliveryStatus: 'SENT' }),
+      );
+      expect(JSON.parse(r)).toMatchObject({ ok: true, sent: true });
+    } finally {
+      evolutionBreaker.reset();
+      for (const k of ['EVOLUTION_BASE_URL', 'EVOLUTION_API_KEY', 'EVOLUTION_WEBHOOK_SECRET', 'EVOLUTION_WEBHOOK_URL']) {
+        delete process.env[k];
+      }
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('sendWhatsApp falha com instance_disconnected sem gravar mensagem (instância desconectada ou ausente)', async () => {
+    const disconnected = vi.fn().mockImplementation(async (object: string) =>
+      object === 'conversation'
+        ? { id: UUID, channel: 'WHATSAPP_QR', externalId: '5511999998888', instanceId: 'inst-1' }
+        : { id: 'inst-1', instanceName: 'qara-recepcao', status: 'DISCONNECTED' });
+    const create = vi.fn();
+    const r = await sendWhatsApp.execute(
+      { conversationId: UUID, text: 'Olá' },
+      api({ get: disconnected, create }),
+    );
+    expect(JSON.parse(r)).toEqual({ ok: false, error: 'instance_disconnected' });
+    expect(create).not.toHaveBeenCalled();
+
+    // Conversa QR órfã (instância removida → instanceId NULL): mesmo erro.
+    const orphan = vi.fn().mockResolvedValue({ id: UUID, channel: 'WHATSAPP_QR', externalId: '5511', instanceId: null });
+    const r2 = await sendWhatsApp.execute({ conversationId: UUID, text: 'Olá' }, api({ get: orphan, create }));
+    expect(JSON.parse(r2)).toEqual({ ok: false, error: 'instance_disconnected' });
+    expect(create).not.toHaveBeenCalled();
   });
 
   it('sendWhatsApp short-circuits Meta calls when the breaker is open', async () => {

@@ -1,4 +1,5 @@
 import type { DataApi } from './data';
+import { getEvolutionConnectionState, isEvolutionConfigured } from './evolution-client';
 import { metaGraphBreaker } from './tools/sendWhatsApp';
 import { sendWhatsAppTemplate } from './tools/sendWhatsAppTemplate';
 import { HSM_D1_REMINDER_TEMPLATE, HSM_FOLLOW_UP_TEMPLATE, HSM_NPS_TEMPLATE } from './templates/hsm-messages';
@@ -7,6 +8,7 @@ import { isMetaSendConfigured, sendViaMeta } from './whatsapp-client';
 export type SchedulerHandle = { stop(): void };
 export type SchedulerJobs = {
   processPendingMetaWebhookEvents?: (options?: { now?: Date }) => Promise<unknown>;
+  processPendingEvolutionWebhookEvents?: (options?: { now?: Date }) => Promise<unknown>;
 };
 
 const SAO_PAULO_UTC_OFFSET_HOURS = 3;
@@ -110,17 +112,17 @@ export const runD1ReminderJob = async (
     const appointmentId = typeof appointment.id === 'string' ? appointment.id : '';
     if (!leadId || !appointmentId) continue;
 
+    // Templates HSM saem só pelo canal oficial: busca a conversa WHATSAPP do
+    // lead (ele pode ter também conversa Instagram ou de número QR/Evolution).
     const conversations = await data.list('conversation', {
-      filter: { leadId: { eq: leadId } },
+      filter: { leadId: { eq: leadId }, channel: { eq: 'WHATSAPP' } },
       limit: 1,
       select: { id: true, channel: true, externalId: true },
     });
     const conversation = conversations[0];
     const conversationId = typeof conversation?.id === 'string' ? conversation.id : '';
     if (!conversationId) continue;
-    // Templates HSM são só WhatsApp: pula Instagram sem enviar nem marcar como
-    // enviado (evita a mensagem fantasma [template:...] PENDING).
-    if (conversation?.channel === 'INSTAGRAM') continue;
+    if (conversation?.channel !== 'WHATSAPP') continue;
 
     if (withButtons) {
       await sendD1ReminderWithButtons(data, conversationId, appointmentId, conversation);
@@ -156,9 +158,11 @@ export const runFollowUpJob = async (
   for (const conversation of conversations) {
     const conversationId = typeof conversation.id === 'string' ? conversation.id : '';
     if (!conversationId) continue;
-    // Templates HSM são só WhatsApp: pula Instagram sem enviar nem mudar o status
-    // (evita a mensagem fantasma [template:...] PENDING e o PENDING_PATIENT falso).
-    if (conversation.channel === 'INSTAGRAM') continue;
+    // Templates HSM são só do canal oficial: pula Instagram e números QR
+    // (Evolution) sem enviar nem mudar o status — evita a mensagem fantasma
+    // [template:...] PENDING e o PENDING_PATIENT falso. No canal QR também
+    // não pode haver follow-up automático (atendimento humano apenas).
+    if (conversation.channel !== 'WHATSAPP') continue;
     await sendWhatsAppTemplate.execute({
       conversationId,
       templateName: HSM_FOLLOW_UP_TEMPLATE,
@@ -231,17 +235,17 @@ export const runNpsJob = async (
     const appointmentId = typeof appointment.id === 'string' ? appointment.id : '';
     if (!leadId || !appointmentId) continue;
 
+    // Templates HSM saem só pelo canal oficial (mesmo motivo do D-1 e do
+    // follow-up 48h): busca a conversa WHATSAPP do lead.
     const conversations = await data.list('conversation', {
-      filter: { leadId: { eq: leadId } },
+      filter: { leadId: { eq: leadId }, channel: { eq: 'WHATSAPP' } },
       limit: 1,
       select: { id: true, channel: true, externalId: true },
     });
     const conversation = conversations[0];
     const conversationId = typeof conversation?.id === 'string' ? conversation.id : '';
     if (!conversationId) continue;
-    // Templates HSM são só WhatsApp: pula Instagram sem enviar nem marcar como
-    // enviado (mesmo motivo do D-1 e do follow-up 48h).
-    if (conversation?.channel === 'INSTAGRAM') continue;
+    if (conversation?.channel !== 'WHATSAPP') continue;
 
     const patientName = await getPatientDisplayName(data, appointment);
     await sendWhatsAppTemplate.execute({
@@ -258,15 +262,59 @@ export const runNpsJob = async (
   return { checked: appointments.length, sent };
 };
 
+// Reconciliação de status das instâncias Evolution: o CONNECTION_UPDATE pode
+// se perder (deploy, gateway fora) e o envio pelo Inbox depende do status.
+// Best-effort: só instâncias não-DISCONNECTED, a cada ~5min.
+const INSTANCE_RECONCILE_INTERVAL_MS = 5 * 60_000;
+let nextInstanceReconcileAt = 0;
+export const resetInstanceReconcileClock = (): void => {
+  nextInstanceReconcileAt = 0;
+};
+
+export const runInstanceReconcileJob = async (
+  data: DataApi,
+): Promise<{ checked: number; updated: number }> => {
+  if (!isEvolutionConfigured()) return { checked: 0, updated: 0 };
+  const instances = await data.list('whatsAppInstance', {
+    filter: { status: { notIn: ['DISCONNECTED'] } },
+    select: { id: true, instanceName: true, status: true },
+  });
+  let updated = 0;
+  for (const instance of instances) {
+    const id = typeof instance.id === 'string' ? instance.id : '';
+    const instanceName = typeof instance.instanceName === 'string' ? instance.instanceName : '';
+    if (!id || !instanceName) continue;
+    try {
+      const remote = await getEvolutionConnectionState(instanceName);
+      if (remote && remote !== instance.status) {
+        await data.update('whatsAppInstance', id, {
+          status: remote,
+          ...(remote === 'CONNECTED' ? { lastConnectedAt: new Date().toISOString() } : {}),
+        });
+        updated++;
+      }
+    } catch (err) {
+      console.error('[scheduler] instance reconcile falhou (non-fatal):', (err as Error).message);
+    }
+  }
+  console.log(JSON.stringify({ event: 'scheduler_instance_reconcile', checked: instances.length, updated }));
+  return { checked: instances.length, updated };
+};
+
 export const runSchedulerTick = async (
   data: DataApi,
   now = new Date(),
   jobs: SchedulerJobs = {},
 ): Promise<void> => {
   await jobs.processPendingMetaWebhookEvents?.({ now });
+  await jobs.processPendingEvolutionWebhookEvents?.({ now });
   await runFollowUpJob(data, now);
   await runD1ReminderJob(data, now);
   await runNpsJob(data, now);
+  if (now.getTime() >= nextInstanceReconcileAt) {
+    nextInstanceReconcileAt = now.getTime() + INSTANCE_RECONCILE_INTERVAL_MS;
+    await runInstanceReconcileJob(data);
+  }
 };
 
 export const startScheduler = (

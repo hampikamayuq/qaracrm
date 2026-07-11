@@ -12,6 +12,8 @@ export type Conversation = {
   agentState?: AgentState;
   handoffReason?: string | null;
   channel?: string | null;
+  // Número extra via QR (instância Evolution); null/ausente = canal oficial.
+  instance?: { id: string; name: string } | null;
   lastMessageAt?: string | null;
   updatedAt: string;
   lead?: {
@@ -372,6 +374,20 @@ export type ReviewQueueItem = {
 
 export type AiSettings = { shadowMode: string; promptVersion: string };
 
+// ---------------- canais (números extras de WhatsApp via QR) ----------------
+
+export type WhatsAppChannelStatus = 'DISCONNECTED' | 'PAIRING' | 'CONNECTED';
+
+export type WhatsAppChannel = {
+  id: string;
+  name: string;
+  instanceName: string;
+  phoneNumber: string | null;
+  status: WhatsAppChannelStatus;
+  lastConnectedAt: string | null;
+  createdAt: string;
+};
+
 // ---------------- dashboard ----------------
 
 export type DashboardPeriod = '7d' | '30d' | '90d';
@@ -634,6 +650,33 @@ export const api = {
 
   deleteExample(id: string): Promise<ApiResponse<{ deleted: boolean }>> {
     return this.fetch(`/tawany/examples/${id}`, { method: 'DELETE' });
+  },
+
+  // ---------------- canais (números extras via QR) ----------------
+
+  async getChannels(): Promise<{ items: WhatsAppChannel[]; evolutionConfigured: boolean }> {
+    const res = await this.get<{ items: WhatsAppChannel[]; evolutionConfigured: boolean }>('/channels');
+    return res.data ?? { items: [], evolutionConfigured: false };
+  },
+
+  createChannel(name: string): Promise<ApiResponse<WhatsAppChannel>> {
+    return this.post('/channels', { name });
+  },
+
+  getChannelQr(id: string): Promise<ApiResponse<{ qrBase64: string | null; pairingCode: string | null }>> {
+    return this.get(`/channels/${id}/qr`);
+  },
+
+  getChannelStatus(id: string): Promise<ApiResponse<WhatsAppChannel>> {
+    return this.get(`/channels/${id}/status`);
+  },
+
+  disconnectChannel(id: string): Promise<ApiResponse<WhatsAppChannel>> {
+    return this.post(`/channels/${id}/disconnect`, {});
+  },
+
+  deleteChannel(id: string): Promise<ApiResponse<{ id: string }>> {
+    return this.fetch(`/channels/${id}`, { method: 'DELETE' });
   },
 
   // ---------------- knowledge vivo ----------------

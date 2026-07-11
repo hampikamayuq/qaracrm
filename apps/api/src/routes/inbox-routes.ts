@@ -66,6 +66,7 @@ export const listInboxRoute = async (req: Request, res: Response): Promise<void>
           needsHuman: true,
           handoffReason: true,
           channel: true,
+          instance: { select: { id: true, name: true } },
           lastMessageAt: true,
           updatedAt: true,
           lead: {
@@ -122,6 +123,7 @@ export const getInboxDetailRoute = async (req: Request, res: Response): Promise<
         needsHuman: true,
         handoffReason: true,
         channel: true,
+        instance: { select: { id: true, name: true } },
         lastMessageAt: true,
         updatedAt: true,
         classification: true,
@@ -229,6 +231,13 @@ export const replyRoute = async (req: Request, res: Response): Promise<void> => 
       return;
     }
     const result = JSON.parse(await sendWhatsApp.execute({ conversationId: id, text: text.trim() }, data));
+    // Falha dura (ex.: número QR com instância desconectada): nada foi gravado
+    // nem enviado — devolve 409 para o Inbox mostrar o erro em vez de fingir
+    // sucesso.
+    if (result?.ok === false) {
+      jsonError(res, 409, typeof result.error === 'string' ? result.error : 'send_failed');
+      return;
+    }
     // Resposta manual = humano assumiu: formaliza o estado. Tawany não volta a
     // responder (gate exige status OPEN) até "Devolver para a Tawany".
     if (conversation.status !== 'RESOLVED' && conversation.status !== 'CLOSED') {

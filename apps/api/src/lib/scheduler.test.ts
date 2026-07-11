@@ -6,11 +6,17 @@ const mocks = vi.hoisted(() => ({
   sendWhatsAppTemplate: {
     execute: vi.fn().mockResolvedValue(JSON.stringify({ ok: true, sent: false })),
   },
+  evolution: {
+    isEvolutionConfigured: vi.fn().mockReturnValue(false),
+    getEvolutionConnectionState: vi.fn(),
+  },
 }));
 
 vi.mock('./tools/sendWhatsAppTemplate', () => ({
   sendWhatsAppTemplate: mocks.sendWhatsAppTemplate,
 }));
+
+vi.mock('./evolution-client', () => mocks.evolution);
 
 const api = (over: Partial<DataApi> = {}): DataApi => ({
   get: vi.fn().mockResolvedValue(null),
@@ -68,7 +74,7 @@ describe('scheduler', () => {
     const list = vi
       .fn()
       .mockResolvedValueOnce([{ id: 'a1', leadId: 'l1', scheduledAt: '2026-07-06T14:00:00.000Z' }])
-      .mockResolvedValueOnce([{ id: 'c1' }]);
+      .mockResolvedValueOnce([{ id: 'c1', channel: 'WHATSAPP' }]);
     const update = vi.fn().mockResolvedValue({ id: 'a1' });
     const { runD1ReminderJob } = await import('./scheduler');
 
@@ -83,7 +89,7 @@ describe('scheduler', () => {
   });
 
   it('runs follow-up job for stale open conversations', async () => {
-    const list = vi.fn().mockResolvedValue([{ id: 'c-old' }]);
+    const list = vi.fn().mockResolvedValue([{ id: 'c-old', channel: 'WHATSAPP' }]);
     const update = vi.fn().mockResolvedValue({ id: 'c-old' });
     const { runFollowUpJob } = await import('./scheduler');
 
@@ -115,6 +121,18 @@ describe('scheduler', () => {
     expect(result).toEqual({ checked: 1, sent: 0 });
   });
 
+  it('skips QR-number (WHATSAPP_QR) conversations in the follow-up job — human-only channel', async () => {
+    const list = vi.fn().mockResolvedValue([{ id: 'c-qr', channel: 'WHATSAPP_QR' }]);
+    const update = vi.fn().mockResolvedValue({ id: 'c-qr' });
+    const { runFollowUpJob } = await import('./scheduler');
+
+    const result = await runFollowUpJob(api({ list, update }), new Date('2026-07-05T12:00:00.000Z'));
+
+    expect(mocks.sendWhatsAppTemplate.execute).not.toHaveBeenCalled();
+    expect(update).not.toHaveBeenCalled();
+    expect(result).toEqual({ checked: 1, sent: 0 });
+  });
+
   it('sends the D-1 reminder with confirm/reschedule button payloads when APPOINTMENT_CONFIRM_BUTTONS=true', async () => {
     process.env.APPOINTMENT_CONFIRM_BUTTONS = 'true';
     process.env.META_ACCESS_TOKEN = 'tok';
@@ -136,6 +154,11 @@ describe('scheduler', () => {
     const result = await runD1ReminderJob(api({ list, create, update }), new Date('2026-07-05T12:00:00.000Z'));
 
     expect(mocks.sendWhatsAppTemplate.execute).not.toHaveBeenCalled();
+    // O lookup da conversa é restrito ao canal oficial — leads com conversa
+    // extra (Instagram/número QR) nunca recebem o template por outro canal.
+    expect(list).toHaveBeenNthCalledWith(2, 'conversation', expect.objectContaining({
+      filter: { leadId: { eq: 'l1' }, channel: { eq: 'WHATSAPP' } },
+    }));
     const [, init] = fetchMock.mock.calls[0];
     const body = JSON.parse(init.body);
     expect(body.template.name).toBe('qara_appointment_reminder_d1');
@@ -209,6 +232,52 @@ describe('scheduler', () => {
     await runSchedulerTick(api({ list }), now, { processPendingMetaWebhookEvents });
 
     expect(processPendingMetaWebhookEvents).toHaveBeenCalledWith({ now });
+  });
+
+  describe('runInstanceReconcileJob', () => {
+    it('não faz nada sem o gateway configurado', async () => {
+      mocks.evolution.isEvolutionConfigured.mockReturnValue(false);
+      const list = vi.fn();
+      const { runInstanceReconcileJob } = await import('./scheduler');
+
+      const result = await runInstanceReconcileJob(api({ list }));
+
+      expect(list).not.toHaveBeenCalled();
+      expect(result).toEqual({ checked: 0, updated: 0 });
+    });
+
+    it('corrige status stale consultando o connectionState (instância caiu sem webhook)', async () => {
+      mocks.evolution.isEvolutionConfigured.mockReturnValue(true);
+      mocks.evolution.getEvolutionConnectionState.mockResolvedValue('DISCONNECTED');
+      const list = vi.fn().mockResolvedValue([
+        { id: 'inst-1', instanceName: 'qara-recepcao', status: 'CONNECTED' },
+      ]);
+      const update = vi.fn().mockResolvedValue({ id: 'inst-1' });
+      const { runInstanceReconcileJob } = await import('./scheduler');
+
+      const result = await runInstanceReconcileJob(api({ list, update }));
+
+      expect(list).toHaveBeenCalledWith('whatsAppInstance', expect.objectContaining({
+        filter: { status: { notIn: ['DISCONNECTED'] } },
+      }));
+      expect(update).toHaveBeenCalledWith('whatsAppInstance', 'inst-1', { status: 'DISCONNECTED' });
+      expect(result).toEqual({ checked: 1, updated: 1 });
+    });
+
+    it('tolera erro do gateway sem quebrar o tick (best-effort)', async () => {
+      mocks.evolution.isEvolutionConfigured.mockReturnValue(true);
+      mocks.evolution.getEvolutionConnectionState.mockRejectedValue(new Error('down'));
+      const list = vi.fn().mockResolvedValue([
+        { id: 'inst-1', instanceName: 'qara-recepcao', status: 'CONNECTED' },
+      ]);
+      const update = vi.fn();
+      const { runInstanceReconcileJob } = await import('./scheduler');
+
+      const result = await runInstanceReconcileJob(api({ list, update }));
+
+      expect(update).not.toHaveBeenCalled();
+      expect(result).toEqual({ checked: 1, updated: 0 });
+    });
   });
 
   describe('runNpsJob', () => {

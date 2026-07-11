@@ -249,11 +249,19 @@ Parte 2 (cliques) ──► smoke ──► Lote 1.1/1.2 (ligar D-1, backup)
      Lotes 3 e 4: qualquer ordem, intercalar com os anteriores
 ```
 
+## Fora dos lotes (entregue depois)
+
+- **11/07/2026 — números extras de WhatsApp via QR** (gateway Evolution,
+  canal `WHATSAPP_QR`, atendimento humano apenas): ver
+  `docs/whatsapp-qr-numeros.md`. Evoluções possíveis (mídia outbound,
+  histórico, Tawany no canal QR) são lotes novos, não estão prometidas.
+
 ## O que NÃO fazer agora (YAGNI)
 
 - Google Calendar OAuth — calendário interno + .ics cobre; revisitar se a
   equipe pedir sincronização real.
-- Multi-clínica/multi-tenant, app mobile nativo, i18n — sem demanda.
+- Multi-clínica/multi-tenant, app mobile nativo, i18n — sem demanda (N números
+  da mesma clínica ≠ multi-tenant).
 - Fila/worker externo (Redis/Bull) — `setImmediate` + scheduler interno dão
   conta no volume atual.
 
