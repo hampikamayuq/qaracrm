@@ -1,5 +1,6 @@
 import type { DataApi } from '../lib/data';
 import { defaultDebounce } from '../lib/debounce';
+import { emitInboundMessage } from '../lib/events';
 import { getEvolutionMediaBase64, mapEvolutionState } from '../lib/evolution-client';
 import {
   parseEvolutionWebhook,
@@ -168,6 +169,14 @@ const ingestMessage = async (
     externalId: msg.externalId,
     messageType: msg.messageType,
     agentHandled: true,
+  });
+
+  // Notificação em tempo real (SSE) para o Inbox. emitInboundMessage é
+  // internamente protegida: nunca quebra o webhook.
+  emitInboundMessage({
+    conversationId: conversation.id,
+    leadName: msg.pushName || undefined,
+    preview: msg.text,
   });
 
   // Opt-out vale para o lead inteiro (bloqueia também as automações do canal

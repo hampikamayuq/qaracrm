@@ -4,6 +4,7 @@ import { prisma } from '../lib/deps';
 import { authMiddleware } from '../middleware/auth-middleware';
 import { requireAdmin } from '../middleware/authorization';
 import { invalidateKnowledgeCache } from '../lib/tawany/knowledge';
+import { recordAudit } from '../lib/audit';
 import { getShadowMode } from '../lib/shadow';
 import {
   AI_SETTINGS_SLUG,
@@ -63,6 +64,7 @@ export const updateKnowledgeRoute = async (req: Request, res: Response): Promise
       return;
     }
 
+    const existing = await prisma.knowledgeSection.findFirst({ where: { slug }, select: { content: true } });
     const result = await prisma.knowledgeSection.updateMany({
       where: { slug },
       data: {
@@ -76,6 +78,15 @@ export const updateKnowledgeRoute = async (req: Request, res: Response): Promise
       return;
     }
     invalidateKnowledgeCache();
+    // Só os primeiros 200 chars do content para não inflar a tabela.
+    await recordAudit(prisma, {
+      userId: req.userId ?? null,
+      action: 'knowledge.update',
+      entity: 'knowledge_section',
+      entityId: slug,
+      before: { content: existing?.content?.slice(0, 200) ?? null },
+      after: { content: content.slice(0, 200) },
+    });
     res.json({ success: true, data: { slug } });
   } catch (error) {
     jsonError(res, 500, (error as Error).message);
@@ -114,6 +125,12 @@ export const updateAiSettingsRoute = async (req: Request, res: Response): Promis
       return;
     }
     const content = serializeAiSettings(parsed);
+    const rows = await prisma.knowledgeSection.findMany({
+      where: { slug: AI_SETTINGS_SLUG },
+      take: 1,
+      select: { content: true },
+    });
+    const before = parseAiSettingsContent(rows[0]?.content);
     await prisma.knowledgeSection.upsert({
       where: { slug: AI_SETTINGS_SLUG },
       create: {
@@ -127,6 +144,14 @@ export const updateAiSettingsRoute = async (req: Request, res: Response): Promis
         content,
         updatedById: req.userId ?? null,
       },
+    });
+    await recordAudit(prisma, {
+      userId: req.userId ?? null,
+      action: 'ai_settings.update',
+      entity: 'ai_settings',
+      entityId: AI_SETTINGS_SLUG,
+      before,
+      after: parsed,
     });
     res.json({ success: true, data: parsed });
   } catch (error) {

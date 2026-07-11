@@ -14,9 +14,11 @@ import {
   KanbanSquare,
   LayoutDashboard,
   ListTodo,
+  ScrollText,
   Settings,
   Smartphone,
   Sparkles,
+  Users,
   type LucideIcon,
 } from 'lucide-react';
 import { api } from '@/lib/api';
@@ -46,6 +48,8 @@ const NAV_GROUPS: NavGroup[] = [
       { href: '/settings/channels', label: 'Canais', icon: Smartphone },
       { href: '/settings/knowledge', label: 'Conhecimento', icon: BookOpen },
       { href: '/settings/ai', label: 'IA', icon: Sparkles },
+      { href: '/settings/users', label: 'Usuários', icon: Users },
+      { href: '/settings/audit', label: 'Auditoria', icon: ScrollText },
     ],
   },
 ];

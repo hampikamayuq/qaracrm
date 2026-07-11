@@ -354,6 +354,28 @@ export type KnowledgeSection = {
   updatedByName: string | null;
 };
 
+// ---------------- trilha de auditoria ----------------
+
+export type AuditEntry = {
+  id: string;
+  userId: string | null;
+  userName: string | null;
+  action: string;
+  entity: string;
+  entityId: string;
+  before: unknown;
+  after: unknown;
+  createdAt: string;
+};
+
+export type AuditLogPage = {
+  items: AuditEntry[];
+  total: number;
+  page: number;
+  pageSize: number;
+  entities: string[];
+};
+
 export type TawanyExample = {
   id: string;
   question: string;
@@ -379,6 +401,23 @@ export type AiSettings = {
   promptVersion: string;
   autopilotIntents: string[];
 };
+
+// ---------------- usuários (gestão pelo admin) ----------------
+
+export type UserRole = 'admin' | 'recepcao' | 'medico' | 'financeiro' | 'marketing';
+
+export type ManagedUser = {
+  id: string;
+  name: string;
+  email: string;
+  role: string;
+  active: boolean;
+  createdAt: string;
+};
+
+export type CreateUserInput = { name: string; email: string; password: string; role: UserRole };
+
+export type UpdateUserInput = { name?: string; role?: UserRole; active?: boolean; password?: string };
 
 // ---------------- canais (números extras de WhatsApp via QR) ----------------
 
@@ -677,6 +716,21 @@ export const api = {
     return this.fetch(`/tawany/examples/${id}`, { method: 'DELETE' });
   },
 
+  // ---------------- usuários (gestão pelo admin) ----------------
+
+  async listUsers(): Promise<ManagedUser[]> {
+    const res = await this.get<ManagedUser[]>('/users');
+    return res.data ?? [];
+  },
+
+  createUser(input: CreateUserInput): Promise<ApiResponse<ManagedUser>> {
+    return this.post('/users', input);
+  },
+
+  updateUser(id: string, input: UpdateUserInput): Promise<ApiResponse<ManagedUser>> {
+    return this.fetch(`/users/${id}`, { method: 'PATCH', body: JSON.stringify(input) });
+  },
+
   // ---------------- canais (números extras via QR) ----------------
 
   async getChannels(): Promise<{ items: WhatsAppChannel[]; evolutionConfigured: boolean }> {
@@ -725,6 +779,21 @@ export const api = {
     autopilotIntents: string[] = [],
   ): Promise<ApiResponse<{ mode: AiOperationMode; autopilotIntents: string[] }>> {
     return this.fetch('/settings/ai', { method: 'PUT', body: JSON.stringify({ mode, autopilotIntents }) });
+  },
+
+  // ---------------- trilha de auditoria ----------------
+
+  async getAuditLog(filters: {
+    entity?: string;
+    action?: string;
+    userId?: string;
+    from?: string;
+    to?: string;
+    page?: number;
+    pageSize?: number;
+  } = {}): Promise<AuditLogPage> {
+    const res = await this.get<AuditLogPage>(`/audit${qs(filters)}`);
+    return res.data ?? { items: [], total: 0, page: 1, pageSize: 25, entities: [] };
   },
 
   setConversationStatus(conversationId: string, status: string): Promise<ApiResponse<{ status: string }>> {
