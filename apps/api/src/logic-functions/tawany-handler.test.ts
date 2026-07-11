@@ -95,8 +95,8 @@ describe('gateSendModeForChannel', () => {
     expect(gateSendModeForChannel('send', undefined)).toBe('send');
   });
 
-  it('forces suggest_only for WHATSAPP_QR (número não-oficial — risco de ban em auto-envio)', () => {
-    expect(gateSendModeForChannel('send', 'WHATSAPP_QR')).toBe('suggest_only');
+  it('permite auto-envio em WHATSAPP_QR (decisão de produto 2026-07-11)', () => {
+    expect(gateSendModeForChannel('send', 'WHATSAPP_QR')).toBe('send');
     expect(gateSendModeForChannel('suggest_only', 'WHATSAPP_QR')).toBe('suggest_only');
     expect(gateSendModeForChannel('test', 'WHATSAPP_QR')).toBe('test');
   });
@@ -118,6 +118,35 @@ describe('runTawany — Instagram send gate', () => {
     // Gate ativo: nenhuma mensagem OUT criada e a sugestão não vira SENT.
     expect(data.create).not.toHaveBeenCalledWith('chatMessage', expect.objectContaining({ direction: 'OUT' }));
     expect(data.update).not.toHaveBeenCalledWith('aiSuggestion', expect.anything(), { status: 'SENT' });
+  });
+});
+
+describe('runTawany — falha dura de envio em autopilot', () => {
+  it('WHATSAPP_QR sem instância: handoff, sugestão NÃO vira SENT', async () => {
+    const data = makeData();
+    // Conversa QR sem instanceId: o sendWhatsApp real devolve ok:false
+    // (instance_disconnected) sem gravar nada.
+    vi.mocked(data.get).mockImplementation(async (obj: string) => {
+      if (obj === 'conversation') return { id: UUID, leadId: LEAD_ID, channel: 'WHATSAPP_QR', status: 'OPEN', needsHuman: false, externalId: '5511999998888' };
+      if (obj === 'lead') return { id: LEAD_ID, name: 'Maria Silva', phone: null, stageId: null, score: 50, intent: null, source: 'INDICACAO', tags: [] };
+      return { id: LEAD_ID, name: 'Maria Silva', phone: null, stageId: null, score: 50, intent: null, tags: [] };
+    });
+
+    const r = await runTawany(
+      { messageId: 'm1', conversationId: UUID },
+      { ai: makeAi(chatResult({ content: 'Olá Maria!', finishReason: 'stop', modelUsed: 'minimax/minimax-m3', fallbackUsed: false })), data, sendMode: 'send' },
+    );
+
+    expect(r.status).toBe('handoff');
+    // Nunca SENT sem envio real; a sugestão fica PENDING pro humano aprovar
+    // quando a instância voltar.
+    expect(data.update).not.toHaveBeenCalledWith('aiSuggestion', expect.anything(), { status: 'SENT' });
+    // Handoff formalizado: conversa vai pro humano.
+    expect(data.update).toHaveBeenCalledWith(
+      'conversation',
+      UUID,
+      expect.objectContaining({ needsHuman: true }),
+    );
   });
 });
 

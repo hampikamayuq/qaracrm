@@ -10,13 +10,12 @@ import {
 import { isAudioTranscriptionEnabled, transcribeAudio } from '../lib/transcription-client';
 
 // Pipeline do canal WHATSAPP_QR (números extras pareados por QR via Evolution).
-// Decisão de produto (2026-07-11): a Tawany TAMBÉM atende este canal — mesmo
-// fluxo do oficial (debounce → Tawany), com duas diferenças deliberadas:
-// - Sem confirmação D-1/NPS/bots aqui (HSM e botões são exclusivos do canal
-//   oficial; bots por palavra-chave ficam de fora até decisão própria).
-// - Em modos autônomos (autopilot/híbrido) a resposta em número QR exige
-//   aprovação humana — gateSendModeForChannel força suggest_only, mitigando
-//   o risco de ban em número não-oficial (mesmo tratamento do Instagram).
+// Decisão de produto (2026-07-11): a Tawany atende este canal com o MESMO
+// fluxo do oficial (debounce → Tawany), inclusive auto-envio nos modos
+// autônomos. Única diferença deliberada: sem confirmação D-1/NPS/bots aqui
+// (HSM e botões são exclusivos do canal oficial; bots por palavra-chave ficam
+// de fora até decisão própria). Falha dura de envio (instância desconectada)
+// vira handoff no tawany-handler — nunca SENT sem envio real.
 
 export type ProcessedMessageHandler = (message: {
   conversationId: string;

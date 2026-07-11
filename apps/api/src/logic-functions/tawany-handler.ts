@@ -59,9 +59,10 @@ const usageLog = (res: { usage?: { promptTokens: number; completionTokens: numbe
 // autopilot, nem em hibrido. Força human_approval (suggest_only) para revisão
 // humana antes de qualquer envio. Os demais modos já são seguros.
 // - INSTAGRAM: canal novo em validação.
-// - WHATSAPP_QR: número não-oficial (Evolution/Baileys) — resposta automática
-//   em volume aumenta o risco de ban; humano aprova cada envio.
-const HUMAN_APPROVAL_ONLY_CHANNELS = new Set(['INSTAGRAM', 'WHATSAPP_QR']);
+// WHATSAPP_QR foi liberado para auto-envio por decisão de produto
+// (2026-07-11) — ciente do risco de ban em número não-oficial; falha dura de
+// envio (instância desconectada) vira handoff, nunca SENT fantasma.
+const HUMAN_APPROVAL_ONLY_CHANNELS = new Set(['INSTAGRAM']);
 export const gateSendModeForChannel = (
   sendMode: TawanySendMode,
   channel: string | null | undefined,
@@ -192,11 +193,31 @@ export const runTawany = async (
       // Inbox para aprovar/editar/descartar. 'test' (shadow/modo teste) marca
       // TEST_SENT para não poluir a fila de aprovação.
       if (sendMode === 'send') {
-        await tawanyTools.execute(
+        const sendResult = JSON.parse(await tawanyTools.execute(
           'sendWhatsApp',
           JSON.stringify({ conversationId: params.conversationId, text: reply }),
           data,
-        );
+        )) as { ok?: boolean; error?: string };
+        // Falha dura de envio (ex.: instância QR desconectada): a sugestão
+        // fica PENDING e a conversa vai pro humano — nunca marcar SENT sem
+        // ter enviado.
+        if (sendResult?.ok === false) {
+          const sendError = typeof sendResult.error === 'string' ? sendResult.error : 'send_failed';
+          await recordAiRun(data, {
+            layer: 'tawany',
+            model: res.modelUsed,
+            fallbackUsed: res.fallbackUsed,
+            latencyMs: Date.now() - startedAt,
+            success: false,
+            validationPass: true,
+            reason: `send_failed: ${sendError}`.slice(0, 200),
+            conversationId: params.conversationId,
+            messageId: params.messageId,
+            ...usageLog(res),
+          });
+          await handoff(params.conversationId, `send_failed: ${sendError}`.slice(0, 200), data);
+          return { status: 'handoff', content: reply, toolCalls: totalToolCalls };
+        }
         if (typeof suggestion.id === 'string') {
           await data.update('aiSuggestion', suggestion.id, { status: 'SENT' });
         }
