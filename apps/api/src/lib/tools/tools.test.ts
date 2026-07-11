@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import type { DataApi } from 'src/lib/data';
+import { invalidateKnowledgeCache } from 'src/lib/tawany/knowledge';
 import { readLead } from './readLead';
 import { readConversationHistory } from './readConversationHistory';
 import { readBudgets } from './readBudgets';
@@ -67,9 +68,11 @@ describe('read tools', () => {
   });
 
   it('searchKnowledge returns top-3 with fallback', async () => {
-    const hit = JSON.parse(await searchKnowledge.execute({ query: 'estacionamento copacabana' }));
+    invalidateKnowledgeCache();
+    const ctx = api(); // list → [] ⇒ tabela vazia ⇒ chunks hardcoded
+    const hit = JSON.parse(await searchKnowledge.execute({ query: 'estacionamento copacabana' }, ctx));
     expect(hit[0].id).toBe('endereco-copacabana');
-    const fallback = JSON.parse(await searchKnowledge.execute({ query: 'xyzabc' }));
+    const fallback = JSON.parse(await searchKnowledge.execute({ query: 'xyzabc' }, ctx));
     expect(fallback.length).toBe(3);
   });
 });
