@@ -1,8 +1,11 @@
 import { Router } from 'express';
 import type { Request, Response } from 'express';
 import { prisma } from '../lib/deps';
+import { createAiClient } from '../lib/ai-client';
 import { createPrismaDataApi } from '../lib/prisma-data-api';
 import { handleEvolutionWebhook } from '../logic-functions/evolution-webhook';
+import { runTawanyForProcessedMessages } from '../lib/shadow';
+import type { Debouncer } from '../lib/debounce';
 
 // Webhook do gateway Evolution API (números extras via QR). Autenticação por
 // segredo compartilhado: o header x-webhook-secret é configurado por instância
@@ -14,6 +17,25 @@ const data = createPrismaDataApi(prisma);
 
 const PENDING_WEBHOOK_AGE_MS = 2 * 60 * 1000;
 const PENDING_WEBHOOK_LIMIT = 25;
+
+// Mesmo desenho do webhook Meta: no sweep as mensagens já envelheceram além
+// da janela de debounce, então processa direto.
+const immediateDebounce: Debouncer = {
+  check: () => ({ status: 'process' }),
+  isOptOut: (text: string) => {
+    const normalized = text.trim().toLowerCase();
+    return /(^|\s)(parar|pare|sair|cancelar|descadastrar|stop|nao quero|não quero)([\s.!?]|$)/i.test(normalized);
+  },
+};
+
+const dispatchProcessedMessages = async (
+  processedMessages: Array<{ conversationId: string; messageId: string }>,
+): Promise<void> => {
+  await runTawanyForProcessedMessages(processedMessages, {
+    createAi: createAiClient,
+    data,
+  });
+};
 
 const isValidWebhookSecret = (req: Request): boolean => {
   const secret = process.env.EVOLUTION_WEBHOOK_SECRET;
@@ -50,11 +72,12 @@ export const processPendingEvolutionWebhookEvents = async (
   let failed = 0;
   for (const event of events) {
     try {
-      await handleEvolutionWebhook(event.payload, data);
+      const result = await handleEvolutionWebhook(event.payload, data, immediateDebounce);
       await prisma.webhookEvent.update({
         where: { id: event.id },
         data: { processed: true, error: null },
       });
+      await dispatchProcessedMessages(result.processedMessages);
       processed++;
     } catch (error) {
       failed++;
@@ -95,11 +118,15 @@ export const receiveEvolutionWebhook = async (req: Request, res: Response): Prom
 
     setImmediate(async () => {
       try {
-        await handleEvolutionWebhook(req.body, data);
+        const result = await handleEvolutionWebhook(req.body, data, undefined, async (message) => {
+          await dispatchProcessedMessages([message]);
+        });
         await prisma.webhookEvent.update({
           where: { id: webhookEvent.id },
           data: { processed: true, error: null },
         });
+        void dispatchProcessedMessages(result.processedMessages)
+          .catch((err) => console.error('[tawany] evolution webhook run failed:', (err as Error).message));
       } catch (err) {
         console.error('[evolution-webhook] async processing error:', (err as Error).message);
         await prisma.webhookEvent.update({

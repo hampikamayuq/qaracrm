@@ -33,6 +33,12 @@ const api = (over: Partial<DataApi> = {}): DataApi => ({
 
 const INSTANCE = { id: 'inst-1', status: 'CONNECTED' };
 
+// Mesmo helper dos testes do meta-webhook: debounce que processa na hora.
+const processDebounce = () => ({
+  check: vi.fn().mockReturnValue({ status: 'process' as const }),
+  isOptOut: vi.fn().mockReturnValue(false),
+});
+
 const inboundBody = (over: object = {}) => ({
   event: 'messages.upsert',
   instance: 'qara-recepcao',
@@ -45,13 +51,13 @@ const inboundBody = (over: object = {}) => ({
   },
 });
 
-describe('handleEvolutionWebhook — inbound (canal humano)', () => {
+describe('handleEvolutionWebhook — inbound (Tawany atende, como no canal oficial)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.isAudioTranscriptionEnabled.mockReturnValue(false);
   });
 
-  it('creates lead (pushName) + conversation (instanceId) + IN message as PENDING_HUMAN', async () => {
+  it('creates lead (pushName) + conversation (instanceId) + IN message liberada para a Tawany', async () => {
     const list = vi
       .fn()
       .mockResolvedValueOnce([INSTANCE]) // whatsAppInstance
@@ -65,7 +71,7 @@ describe('handleEvolutionWebhook — inbound (canal humano)', () => {
       .mockResolvedValueOnce({ id: 'msg-1' });
     const update = vi.fn().mockResolvedValue({ id: 'conv-1' });
 
-    const result = await handleEvolutionWebhook(inboundBody(), api({ list, create, update }));
+    const result = await handleEvolutionWebhook(inboundBody(), api({ list, create, update }), processDebounce());
 
     expect(create).toHaveBeenNthCalledWith(
       1,
@@ -90,16 +96,21 @@ describe('handleEvolutionWebhook — inbound (canal humano)', () => {
         direction: 'IN',
         body: 'Oi, quero agendar',
         externalId: 'EVO1',
-        agentHandled: true,
+        agentHandled: false,
       }),
     );
-    // Canal humano: a conversa cai no Inbox como "aguardando humano".
-    expect(update).toHaveBeenCalledWith(
+    // Sem handoff automático: a conversa segue OPEN e a mensagem vai pra Tawany.
+    expect(update).toHaveBeenCalledWith('conversation', 'conv-1', { lastMessageAt: expect.anything() });
+    expect(update).not.toHaveBeenCalledWith(
       'conversation',
       'conv-1',
-      expect.objectContaining({ needsHuman: true, status: 'PENDING_HUMAN', handoffReason: 'canal_qr' }),
+      expect.objectContaining({ status: 'PENDING_HUMAN' }),
     );
-    expect(result).toEqual({ messages: 1, connections: 0 });
+    expect(result).toEqual({
+      messages: 1,
+      connections: 0,
+      processedMessages: [{ conversationId: 'conv-1', messageId: 'msg-1' }],
+    });
     // Notificação em tempo real (SSE) emitida no processamento da mensagem IN.
     expect(mocks.emitInboundMessage).toHaveBeenCalledWith({
       conversationId: 'conv-1',
@@ -117,7 +128,7 @@ describe('handleEvolutionWebhook — inbound (canal humano)', () => {
     const create = vi.fn().mockResolvedValue({ id: 'msg-9' });
     const update = vi.fn().mockResolvedValue({ id: 'conv-9' });
 
-    await handleEvolutionWebhook(inboundBody(), api({ list, create, update }));
+    await handleEvolutionWebhook(inboundBody(), api({ list, create, update }), processDebounce());
 
     expect(list).toHaveBeenNthCalledWith(3, 'conversation', expect.objectContaining({
       filter: {
@@ -141,7 +152,7 @@ describe('handleEvolutionWebhook — inbound (canal humano)', () => {
 
     expect(create).not.toHaveBeenCalled();
     expect(update).not.toHaveBeenCalled();
-    expect(result).toEqual({ messages: 0, connections: 0 });
+    expect(result).toEqual({ messages: 0, connections: 0, processedMessages: [] });
   });
 
   it('discards events from unknown instances', async () => {
@@ -151,7 +162,7 @@ describe('handleEvolutionWebhook — inbound (canal humano)', () => {
     const result = await handleEvolutionWebhook(inboundBody(), api({ list, create }));
 
     expect(create).not.toHaveBeenCalled();
-    expect(result).toEqual({ messages: 0, connections: 0 });
+    expect(result).toEqual({ messages: 0, connections: 0, processedMessages: [] });
   });
 
   it('transcribes patient audio via Evolution media download when the gate is on', async () => {
@@ -169,6 +180,7 @@ describe('handleEvolutionWebhook — inbound (canal humano)', () => {
     await handleEvolutionWebhook(
       inboundBody({ message: { audioMessage: { seconds: 8 } } }),
       api({ list, create, update }),
+      processDebounce(),
     );
 
     expect(mocks.getEvolutionMediaBase64).toHaveBeenCalledWith(
@@ -195,6 +207,7 @@ describe('handleEvolutionWebhook — inbound (canal humano)', () => {
     await handleEvolutionWebhook(
       inboundBody({ message: { audioMessage: { seconds: 8 } } }),
       api({ list, create, update }),
+      processDebounce(),
     );
 
     expect(create).toHaveBeenCalledWith('chatMessage', expect.objectContaining({ body: '[áudio]' }));
@@ -209,11 +222,14 @@ describe('handleEvolutionWebhook — inbound (canal humano)', () => {
     const create = vi.fn().mockResolvedValue({ id: 'msg-1' });
     const update = vi.fn().mockResolvedValue({ id: 'x' });
 
-    await handleEvolutionWebhook(
+    const result = await handleEvolutionWebhook(
       inboundBody({ message: { conversation: 'PARAR' } }),
       api({ list, create, update }),
+      { check: vi.fn().mockReturnValue({ status: 'process' as const }), isOptOut: () => true },
     );
 
+    // Opt-out não vai pra Tawany.
+    expect(result.processedMessages).toEqual([]);
     expect(update).toHaveBeenCalledWith('lead', 'lead-1', expect.objectContaining({ optedOut: true }));
     expect(update).toHaveBeenCalledWith(
       'conversation',
@@ -223,6 +239,40 @@ describe('handleEvolutionWebhook — inbound (canal humano)', () => {
     // Só a mensagem IN do paciente — nenhuma resposta automática (create 1x).
     expect(create).toHaveBeenCalledTimes(1);
     expect(create).toHaveBeenCalledWith('chatMessage', expect.objectContaining({ direction: 'IN' }));
+  });
+
+  it('with trailing debounce: message born agentHandled, flush frees it and dispatches to Tawany', async () => {
+    const list = vi
+      .fn()
+      .mockResolvedValueOnce([INSTANCE])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ id: 'conv-1', leadId: 'lead-1', status: 'OPEN' }]);
+    const create = vi.fn().mockResolvedValue({ id: 'msg-1' });
+    const update = vi.fn().mockResolvedValue({ id: 'x' });
+    const onProcessed = vi.fn().mockResolvedValue(undefined);
+    // Debouncer que difere e dispara o flush na hora (simula o fim da janela).
+    const deferringDebounce = {
+      check: vi.fn((conversationId: string, messageId: string, text?: string, onFlush?: (f: { conversationId: string; messageId: string; text: string }) => void | Promise<void>) => {
+        void onFlush?.({ conversationId, messageId, text: text ?? '' });
+        return { status: 'defer' as const };
+      }),
+      isOptOut: () => false,
+    };
+
+    const result = await handleEvolutionWebhook(
+      inboundBody(),
+      api({ list, create, update }),
+      deferringDebounce,
+      onProcessed,
+    );
+
+    // Nasce reservada (onProcessedMessage presente)...
+    expect(create).toHaveBeenCalledWith('chatMessage', expect.objectContaining({ agentHandled: true }));
+    // ...o flush libera e entrega pra Tawany.
+    expect(update).toHaveBeenCalledWith('chatMessage', 'msg-1', { agentHandled: false });
+    expect(onProcessed).toHaveBeenCalledWith({ conversationId: 'conv-1', messageId: 'msg-1' });
+    // defer: nada retorna no lote síncrono.
+    expect(result.processedMessages).toEqual([]);
   });
 });
 
@@ -299,7 +349,7 @@ describe('handleEvolutionWebhook — connection/qr', () => {
         lastConnectedAt: expect.any(String),
       }),
     );
-    expect(result).toEqual({ messages: 0, connections: 1 });
+    expect(result).toEqual({ messages: 0, connections: 1, processedMessages: [] });
   });
 
   it('marks DISCONNECTED on state close', async () => {

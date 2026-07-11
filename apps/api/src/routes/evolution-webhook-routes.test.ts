@@ -12,7 +12,15 @@ vi.mock('../lib/deps', () => ({
 }));
 
 vi.mock('../logic-functions/evolution-webhook', () => ({
-  handleEvolutionWebhook: vi.fn().mockResolvedValue({ messages: 0, connections: 0 }),
+  handleEvolutionWebhook: vi.fn().mockResolvedValue({ messages: 0, connections: 0, processedMessages: [] }),
+}));
+
+vi.mock('../lib/shadow', () => ({
+  runTawanyForProcessedMessages: vi.fn().mockResolvedValue(undefined),
+}));
+
+vi.mock('../lib/ai-client', () => ({
+  createAiClient: vi.fn(),
 }));
 
 const req = (overrides: Partial<Request>): Request => overrides as Request;
@@ -85,7 +93,7 @@ describe('Evolution Webhook Routes', () => {
     expect(response.json).toHaveBeenCalledWith({ success: true, data: { eventId: 'evt-evo-1' } });
 
     await flushImmediates();
-    expect(handleEvolutionWebhook).toHaveBeenCalledWith(body, expect.anything());
+    expect(handleEvolutionWebhook).toHaveBeenCalledWith(body, expect.anything(), undefined, expect.any(Function));
     expect(prisma.webhookEvent.update).toHaveBeenCalledWith({
       where: { id: 'evt-evo-1' },
       data: { processed: true, error: null },
@@ -121,11 +129,39 @@ describe('Evolution Webhook Routes', () => {
 
     const result = await processPendingEvolutionWebhookEvents({ now: new Date() });
 
-    expect(handleEvolutionWebhook).toHaveBeenCalledWith({ event: 'messages.upsert' }, expect.anything());
+    expect(handleEvolutionWebhook).toHaveBeenCalledWith(
+      { event: 'messages.upsert' },
+      expect.anything(),
+      expect.objectContaining({ check: expect.any(Function) }),
+    );
     expect(prisma.webhookEvent.update).toHaveBeenCalledWith({
       where: { id: 'evt-stuck' },
       data: { processed: true, error: null },
     });
     expect(result).toEqual({ scanned: 1, processed: 1, failed: 0 });
+  });
+
+  it('despacha as mensagens processadas para a Tawany (async e sweep)', async () => {
+    const { receiveEvolutionWebhook, processPendingEvolutionWebhookEvents } = await import('./evolution-webhook-routes');
+    const { prisma } = await import('../lib/deps');
+    const { handleEvolutionWebhook } = await import('../logic-functions/evolution-webhook');
+    const { runTawanyForProcessedMessages } = await import('../lib/shadow');
+    const processed = [{ conversationId: 'conv-1', messageId: 'msg-1' }];
+    vi.mocked(handleEvolutionWebhook).mockResolvedValue({ messages: 1, connections: 0, processedMessages: processed });
+
+    const response = res();
+    await receiveEvolutionWebhook(
+      req({ headers: { 'x-webhook-secret': 'whsec' }, body: { event: 'messages.upsert' } }),
+      response,
+    );
+    await flushImmediates();
+    expect(runTawanyForProcessedMessages).toHaveBeenCalledWith(processed, expect.anything());
+
+    vi.mocked(runTawanyForProcessedMessages).mockClear();
+    vi.mocked(prisma.webhookEvent.findMany).mockResolvedValueOnce([
+      { id: 'evt-stuck', payload: {} } as never,
+    ]);
+    await processPendingEvolutionWebhookEvents({ now: new Date() });
+    expect(runTawanyForProcessedMessages).toHaveBeenCalledWith(processed, expect.anything());
   });
 });
