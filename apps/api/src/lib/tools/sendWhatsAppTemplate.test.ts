@@ -56,6 +56,22 @@ describe('sendWhatsAppTemplate', () => {
     expect(JSON.parse(result)).toMatchObject({ ok: false, skipped: true });
   });
 
+  it('skips WHATSAPP_QR conversations (número via Evolution) — templates são só do canal oficial', async () => {
+    const create = vi.fn().mockResolvedValue({ id: 'm1' });
+    const update = vi.fn().mockResolvedValue({ id: 'c1' });
+    const get = vi.fn().mockResolvedValue({ id: UUID, channel: 'WHATSAPP_QR', externalId: '5511999998888' });
+
+    const result = await sendWhatsAppTemplate.execute({
+      conversationId: UUID,
+      templateName: 'qara_followup_24h',
+      language: 'pt_BR',
+    }, api({ get, create, update }));
+
+    expect(create).not.toHaveBeenCalled();
+    expect(update).not.toHaveBeenCalled();
+    expect(JSON.parse(result)).toMatchObject({ ok: false, skipped: true, reason: 'template_unsupported_on_channel' });
+  });
+
   it('sends a Meta template and stores the wamid when configured', async () => {
     process.env.META_ACCESS_TOKEN = 'tok';
     process.env.META_PHONE_NUMBER_ID = 'phone';

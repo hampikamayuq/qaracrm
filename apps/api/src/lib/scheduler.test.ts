@@ -68,7 +68,7 @@ describe('scheduler', () => {
     const list = vi
       .fn()
       .mockResolvedValueOnce([{ id: 'a1', leadId: 'l1', scheduledAt: '2026-07-06T14:00:00.000Z' }])
-      .mockResolvedValueOnce([{ id: 'c1' }]);
+      .mockResolvedValueOnce([{ id: 'c1', channel: 'WHATSAPP' }]);
     const update = vi.fn().mockResolvedValue({ id: 'a1' });
     const { runD1ReminderJob } = await import('./scheduler');
 
@@ -83,7 +83,7 @@ describe('scheduler', () => {
   });
 
   it('runs follow-up job for stale open conversations', async () => {
-    const list = vi.fn().mockResolvedValue([{ id: 'c-old' }]);
+    const list = vi.fn().mockResolvedValue([{ id: 'c-old', channel: 'WHATSAPP' }]);
     const update = vi.fn().mockResolvedValue({ id: 'c-old' });
     const { runFollowUpJob } = await import('./scheduler');
 
@@ -115,6 +115,18 @@ describe('scheduler', () => {
     expect(result).toEqual({ checked: 1, sent: 0 });
   });
 
+  it('skips QR-number (WHATSAPP_QR) conversations in the follow-up job — human-only channel', async () => {
+    const list = vi.fn().mockResolvedValue([{ id: 'c-qr', channel: 'WHATSAPP_QR' }]);
+    const update = vi.fn().mockResolvedValue({ id: 'c-qr' });
+    const { runFollowUpJob } = await import('./scheduler');
+
+    const result = await runFollowUpJob(api({ list, update }), new Date('2026-07-05T12:00:00.000Z'));
+
+    expect(mocks.sendWhatsAppTemplate.execute).not.toHaveBeenCalled();
+    expect(update).not.toHaveBeenCalled();
+    expect(result).toEqual({ checked: 1, sent: 0 });
+  });
+
   it('sends the D-1 reminder with confirm/reschedule button payloads when APPOINTMENT_CONFIRM_BUTTONS=true', async () => {
     process.env.APPOINTMENT_CONFIRM_BUTTONS = 'true';
     process.env.META_ACCESS_TOKEN = 'tok';
@@ -136,6 +148,11 @@ describe('scheduler', () => {
     const result = await runD1ReminderJob(api({ list, create, update }), new Date('2026-07-05T12:00:00.000Z'));
 
     expect(mocks.sendWhatsAppTemplate.execute).not.toHaveBeenCalled();
+    // O lookup da conversa é restrito ao canal oficial — leads com conversa
+    // extra (Instagram/número QR) nunca recebem o template por outro canal.
+    expect(list).toHaveBeenNthCalledWith(2, 'conversation', expect.objectContaining({
+      filter: { leadId: { eq: 'l1' }, channel: { eq: 'WHATSAPP' } },
+    }));
     const [, init] = fetchMock.mock.calls[0];
     const body = JSON.parse(init.body);
     expect(body.template.name).toBe('qara_appointment_reminder_d1');

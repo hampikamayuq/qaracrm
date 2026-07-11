@@ -23,11 +23,12 @@ export const sendWhatsAppTemplate = {
     });
     if (!conv) return JSON.stringify({ ok: false, error: 'conversation_not_found' });
 
-    // Templates HSM são exclusivos do WhatsApp. Em conversas Instagram, gravar a
-    // mensagem [template:...] só criaria um fantasma PENDING que nunca é enviado —
+    // Templates HSM são exclusivos do canal oficial (Meta Cloud API). Em
+    // Instagram ou números QR (WHATSAPP_QR via Evolution), gravar a mensagem
+    // [template:...] só criaria um fantasma PENDING que nunca é enviado —
     // então pulamos explicitamente sem tocar no histórico.
-    if (conv.channel === 'INSTAGRAM') {
-      return JSON.stringify({ ok: false, skipped: true, reason: 'template_unsupported_on_instagram' });
+    if (conv.channel !== 'WHATSAPP') {
+      return JSON.stringify({ ok: false, skipped: true, reason: 'template_unsupported_on_channel' });
     }
 
     const to = typeof conv.externalId === 'string' ? conv.externalId : '';
