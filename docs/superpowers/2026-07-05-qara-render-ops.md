@@ -52,7 +52,7 @@ asleep; use a plan/tier that keeps the API resident.
 - [ ] Provision the web host (or Vercel project).
 - [ ] Set API env vars from `apps/api/.env.example`, filled with real values.
 - [ ] Set `NEXT_PUBLIC_API_URL` on the web host, then trigger a build (not just a restart).
-- [ ] Run `pnpm --filter @qara/api db:migrate:deploy` against the production database (non-interactive; do **not** use `db:migrate`/`prisma migrate dev` in production).
+- [ ] Migrations run automatically on API boot: `start` runs `prisma migrate deploy` unless `RUN_MIGRATIONS=false` — no manual step per deploy. Set `RUN_MIGRATIONS=false` on any extra API instance that must not migrate. Never use `db:migrate`/`prisma migrate dev` in production.
 - [ ] Run `pnpm --filter @qara/api db:seed` once, then rotate `ADMIN_PASSWORD`.
 - [ ] Set `ENABLE_SCHEDULER=true` on the API once follow-up sending is ready to go live.
 - [ ] Configure the Meta App webhook to `https://<api-service>.example.com/api/webhooks/meta`, verify token = `META_VERIFY_TOKEN`.
