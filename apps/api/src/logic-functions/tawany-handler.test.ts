@@ -94,6 +94,12 @@ describe('gateSendModeForChannel', () => {
     expect(gateSendModeForChannel('send', null)).toBe('send');
     expect(gateSendModeForChannel('send', undefined)).toBe('send');
   });
+
+  it('forces suggest_only for WHATSAPP_QR (número não-oficial — risco de ban em auto-envio)', () => {
+    expect(gateSendModeForChannel('send', 'WHATSAPP_QR')).toBe('suggest_only');
+    expect(gateSendModeForChannel('suggest_only', 'WHATSAPP_QR')).toBe('suggest_only');
+    expect(gateSendModeForChannel('test', 'WHATSAPP_QR')).toBe('test');
+  });
 });
 
 describe('runTawany — Instagram send gate', () => {

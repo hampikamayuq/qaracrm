@@ -55,14 +55,18 @@ const usageLog = (res: { usage?: { promptTokens: number; completionTokens: numbe
   estimatedCostCents: 0,
 });
 
-// Segurança de produto: enquanto o Instagram Direct é um canal novo, nenhuma
-// resposta da Tawany em conversa INSTAGRAM é auto-enviada — nem em autopilot,
-// nem em hibrido. Força human_approval (suggest_only) para revisão humana antes
-// de qualquer envio. Os demais modos ('suggest_only'/'test') já são seguros.
+// Segurança de produto: canais onde a Tawany nunca auto-envia — nem em
+// autopilot, nem em hibrido. Força human_approval (suggest_only) para revisão
+// humana antes de qualquer envio. Os demais modos já são seguros.
+// - INSTAGRAM: canal novo em validação.
+// - WHATSAPP_QR: número não-oficial (Evolution/Baileys) — resposta automática
+//   em volume aumenta o risco de ban; humano aprova cada envio.
+const HUMAN_APPROVAL_ONLY_CHANNELS = new Set(['INSTAGRAM', 'WHATSAPP_QR']);
 export const gateSendModeForChannel = (
   sendMode: TawanySendMode,
   channel: string | null | undefined,
-): TawanySendMode => (channel === 'INSTAGRAM' && sendMode === 'send' ? 'suggest_only' : sendMode);
+): TawanySendMode =>
+  (channel && HUMAN_APPROVAL_ONLY_CHANNELS.has(channel) && sendMode === 'send' ? 'suggest_only' : sendMode);
 
 const decideRuntimeSendMode = (
   deps: { testMode?: boolean; sendMode?: TawanySendMode },
