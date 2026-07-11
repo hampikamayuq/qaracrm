@@ -109,10 +109,11 @@ da web em todo push/PR.
 ## Deploy
 
 Render (API) e Vercel (web) deployam a `main` via integração git.
-**Após merges com migration**, rodar no shell do Render:
+**Migrations rodam sozinhas no boot da API** (`start` executa `prisma migrate deploy`;
+desative com `RUN_MIGRATIONS=false` em instância extra que não deva migrar).
+Único passo manual restante, só após merges que adicionem knowledge novo:
 
 ```bash
-pnpm --filter @qara/api db:migrate:deploy
 pnpm --filter @qara/api db:seed:knowledge   # idempotente
 ```
 
