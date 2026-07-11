@@ -1,12 +1,7 @@
-import { PlaceholderPage } from '../placeholder-page';
+import { redirect } from 'next/navigation';
 
+// /settings era um placeholder "Em breve" — contra o princípio "nada fake"
+// do PRODUCT.md. Com as seções reais no ar, vira só a porta de entrada.
 export default function SettingsPage() {
-  return (
-    <PlaceholderPage
-      eyebrow="Sistema"
-      title="Configuracoes"
-      description="Configuracoes operacionais do CRM, acessos, canais e preferencias da clinica."
-      items={['Usuarios e permissoes', 'Canais de atendimento — disponivel em Admin > Canais', 'Preferencias de operacao']}
-    />
-  );
+  redirect('/settings/channels');
 }
