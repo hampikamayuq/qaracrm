@@ -3432,3 +3432,162 @@ a.chip {
   border-radius: var(--r-md);
   padding: 8px;
 }
+
+/* ================================================================
+   Navegação — badges, footer dinâmico e paleta de comandos (Ctrl+K)
+   ================================================================ */
+
+.nav-badge {
+  background: var(--sidebar-accent);
+  border-radius: 99px;
+  color: #0e211d;
+  font-size: 10.5px;
+  font-weight: 700;
+  line-height: 1;
+  margin-left: auto;
+  min-width: 18px;
+  padding: 3px 5px;
+  text-align: center;
+}
+
+.sidebar-logout {
+  background: none;
+  border: none;
+  border-radius: 7px;
+  color: var(--sidebar-text-dim);
+  cursor: pointer;
+  display: inline-flex;
+  margin-left: auto;
+  padding: 6px;
+  transition: background var(--dur-1) var(--ease), color var(--dur-1) var(--ease);
+}
+
+.sidebar-logout:hover {
+  background: var(--sidebar-hover);
+  color: var(--sidebar-text);
+}
+
+.status-dot-ai {
+  background: #a78bfa;
+}
+
+.cmdk-trigger {
+  align-items: center;
+  background: var(--sidebar-hover);
+  border: 1px solid var(--sidebar-line);
+  border-radius: 8px;
+  color: var(--sidebar-text-dim);
+  cursor: pointer;
+  display: flex;
+  font-size: 12.5px;
+  gap: 8px;
+  margin: 0 0 10px;
+  padding: 7px 10px;
+  text-align: left;
+  transition: color var(--dur-1) var(--ease), border-color var(--dur-1) var(--ease);
+  width: 100%;
+}
+
+.cmdk-trigger:hover {
+  border-color: var(--sidebar-accent);
+  color: var(--sidebar-text);
+}
+
+.cmdk-trigger kbd {
+  border: 1px solid var(--sidebar-line);
+  border-radius: 4px;
+  font-family: inherit;
+  font-size: 10px;
+  margin-left: auto;
+  padding: 2px 5px;
+}
+
+.cmdk-overlay {
+  align-items: flex-start;
+  background: var(--overlay);
+  display: flex;
+  inset: 0;
+  justify-content: center;
+  padding: 12vh 16px 16px;
+  position: fixed;
+  z-index: 80;
+}
+
+.cmdk-panel {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 18px 50px rgba(12, 24, 21, 0.25);
+  max-width: 520px;
+  overflow: hidden;
+  width: 100%;
+}
+
+.cmdk-input-row {
+  align-items: center;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-3);
+  display: flex;
+  gap: 10px;
+  padding: 12px 14px;
+}
+
+.cmdk-input {
+  background: none;
+  border: none;
+  color: var(--text);
+  flex: 1;
+  font: inherit;
+  outline: none;
+}
+
+.cmdk-list {
+  list-style: none;
+  margin: 0;
+  max-height: 320px;
+  overflow-y: auto;
+  padding: 6px;
+}
+
+.cmdk-empty {
+  color: var(--text-3);
+  font-size: 13px;
+  padding: 14px 10px;
+}
+
+.cmdk-item {
+  align-items: center;
+  background: none;
+  border: none;
+  border-radius: 8px;
+  color: var(--text);
+  cursor: pointer;
+  display: flex;
+  font: inherit;
+  font-size: 13.5px;
+  gap: 10px;
+  padding: 9px 10px;
+  text-align: left;
+  width: 100%;
+}
+
+.cmdk-item svg {
+  color: var(--text-3);
+  flex: 0 0 auto;
+}
+
+.cmdk-item-active {
+  background: var(--accent-soft);
+}
+
+.cmdk-detail {
+  color: var(--text-3);
+  font-size: 11.5px;
+  margin-left: auto;
+}
+
+@media (max-width: 920px) {
+  .cmdk-trigger {
+    display: none;
+  }
+}

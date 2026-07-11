@@ -602,6 +602,25 @@ export const api = {
     return this.post('/auth/login', { email, password });
   },
 
+  async getMe(): Promise<{ id: string; name: string; email: string; role: string } | null> {
+    const res = await this.get<{ id: string; name: string; email: string; role: string }>('/auth/me');
+    return res.data ?? null;
+  },
+
+  // Contadores do sidebar (badges). Tolerante a falha: null = não mostra badge.
+  async getSidebarCounts(): Promise<{ aguardandoResposta: number; followupsAtrasados: number } | null> {
+    try {
+      const res = await this.get<DashboardSummary>('/dashboard/summary?period=7d');
+      if (!res.success || !res.data) return null;
+      return {
+        aguardandoResposta: res.data.aguardandoResposta,
+        followupsAtrasados: res.data.followupsAtrasados,
+      };
+    } catch {
+      return null;
+    }
+  },
+
   async getConversations(opts: {
     search?: string;
     status?: string;

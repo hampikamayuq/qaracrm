@@ -1,6 +1,8 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import { SidebarNav } from './sidebar-nav';
+import { SidebarFooter } from './sidebar-footer';
+import { CommandPalette } from './command-palette';
 import './globals.css';
 
 export const metadata: Metadata = {
@@ -21,17 +23,9 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
                 <small>Clínica dermatológica</small>
               </span>
             </Link>
+            <CommandPalette />
             <SidebarNav />
-            <div className="sidebar-footer">
-              <span className="user-avatar" aria-hidden="true">EQ</span>
-              <div className="user-meta">
-                <strong>Equipe QARA</strong>
-                <span>
-                  <span className="status-dot" aria-hidden="true" />
-                  Aprovação humana ativa
-                </span>
-              </div>
-            </div>
+            <SidebarFooter />
           </aside>
           <div className="content-shell">{children}</div>
         </div>
