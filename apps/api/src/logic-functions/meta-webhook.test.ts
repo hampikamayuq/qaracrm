@@ -15,10 +15,15 @@ const mocks = vi.hoisted(() => ({
   downloadDirectMedia: vi.fn(),
   isAudioTranscriptionEnabled: vi.fn().mockReturnValue(false),
   transcribeAudio: vi.fn(),
+  emitInboundMessage: vi.fn(),
 }));
 
 vi.mock('../lib/tools/sendWhatsApp', () => ({
   sendWhatsApp: mocks.sendWhatsApp,
+}));
+
+vi.mock('../lib/events', () => ({
+  emitInboundMessage: mocks.emitInboundMessage,
 }));
 
 vi.mock('./appointment-confirmation', () => ({
@@ -125,6 +130,16 @@ describe('handleMetaWebhook — inbound messages', () => {
       lastMessageAt: expect.any(String),
     });
     expect(result.processedMessages).toEqual([{ conversationId: 'conv-1', messageId: 'msg-1' }]);
+    // Notificação em tempo real (SSE) emitida no processamento da mensagem IN.
+    expect(mocks.emitInboundMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ conversationId: 'conv-1', preview: 'Oi, quero agendar' }),
+    );
+  });
+
+  it('does not emit the SSE event for duplicate messages', async () => {
+    const list = vi.fn().mockResolvedValueOnce([{ id: 'already' }]);
+    await handleMetaWebhook(waBody, api({ list }), processDebounce());
+    expect(mocks.emitInboundMessage).not.toHaveBeenCalled();
   });
 
   it('reuses an existing lead by phone when creating a new conversation for it', async () => {

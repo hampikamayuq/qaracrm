@@ -1,5 +1,6 @@
 import { type DataApi } from '../lib/data';
 import { runBotsForInbound } from '../lib/bots/runner';
+import { emitInboundMessage } from '../lib/events';
 import { defaultDebounce, type Debouncer } from '../lib/debounce';
 import {
   parseMetaEvent,
@@ -185,6 +186,11 @@ const ingestMessage = async (
     agentHandled: Boolean(onProcessedMessage) || optout || immediateGate?.status !== 'process',
   });
   const messageId = typeof created.id === 'string' ? created.id : '';
+
+  // Notificação em tempo real (SSE) para o Inbox. O nome do lead não está
+  // disponível aqui sem query extra — o front resolve pelo conversationId.
+  // emitInboundMessage é internamente protegida: nunca quebra o webhook.
+  emitInboundMessage({ conversationId: conversation.id, preview: msg.text });
 
   if (optout) {
     debounce.check(conversation.id, messageId || msg.externalId, msg.text);

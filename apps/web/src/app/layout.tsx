@@ -3,6 +3,7 @@ import Link from 'next/link';
 import { SidebarNav } from './sidebar-nav';
 import { SidebarFooter } from './sidebar-footer';
 import { CommandPalette } from './command-palette';
+import { LiveTitleBadge } from './live-title-badge';
 import './globals.css';
 
 export const metadata: Metadata = {
@@ -14,6 +15,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
   return (
     <html lang="pt-BR">
       <body>
+        <LiveTitleBadge />
         <div className="app-shell">
           <aside className="sidebar" aria-label="Barra lateral">
             <Link className="brand-block" href="/">

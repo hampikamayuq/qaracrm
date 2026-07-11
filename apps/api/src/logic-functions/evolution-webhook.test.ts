@@ -6,6 +6,11 @@ const mocks = vi.hoisted(() => ({
   getEvolutionMediaBase64: vi.fn(),
   isAudioTranscriptionEnabled: vi.fn().mockReturnValue(false),
   transcribeAudio: vi.fn(),
+  emitInboundMessage: vi.fn(),
+}));
+
+vi.mock('../lib/events', () => ({
+  emitInboundMessage: mocks.emitInboundMessage,
 }));
 
 vi.mock('../lib/evolution-client', async (importOriginal) => ({
@@ -95,6 +100,12 @@ describe('handleEvolutionWebhook — inbound (canal humano)', () => {
       expect.objectContaining({ needsHuman: true, status: 'PENDING_HUMAN', handoffReason: 'canal_qr' }),
     );
     expect(result).toEqual({ messages: 1, connections: 0 });
+    // Notificação em tempo real (SSE) emitida no processamento da mensagem IN.
+    expect(mocks.emitInboundMessage).toHaveBeenCalledWith({
+      conversationId: 'conv-1',
+      leadName: 'Maria Silva',
+      preview: 'Oi, quero agendar',
+    });
   });
 
   it('finds the conversation by channel + contact + instanceId', async () => {

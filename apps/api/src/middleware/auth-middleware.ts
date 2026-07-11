@@ -11,6 +11,21 @@ declare global {
   }
 }
 
+// Validação completa (JWT + Session no banco), compartilhada com o SSE
+// (/api/events/stream), onde o token chega via query string em vez do header.
+export const authenticateSessionToken = async (
+  token: string,
+): Promise<ReturnType<typeof verifyToken>> => {
+  const payload = verifyToken(token);
+  if (!payload) return null;
+
+  // [BLOQUEANTE] DB session check: session must exist and not be expired
+  const session = await prisma.session.findUnique({ where: { token } });
+  if (!session || session.expiresAt < new Date()) return null;
+
+  return payload;
+};
+
 export const authMiddleware = async (
   req: Request,
   res: Response,
@@ -22,17 +37,9 @@ export const authMiddleware = async (
     return;
   }
 
-  const token = header.slice(7);
-  const payload = verifyToken(token);
+  const payload = await authenticateSessionToken(header.slice(7));
   if (!payload) {
     res.status(401).json({ success: false, error: 'Invalid or expired token' });
-    return;
-  }
-
-  // [BLOQUEANTE] DB session check: session must exist and not be expired
-  const session = await prisma.session.findUnique({ where: { token } });
-  if (!session || session.expiresAt < new Date()) {
-    res.status(401).json({ success: false, error: 'Session revoked or expired' });
     return;
   }
 

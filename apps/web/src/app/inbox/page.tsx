@@ -4,11 +4,14 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { AlertTriangle, Bell, BellOff, Bot, Check, CheckCheck, FlaskConical, MessageSquareText, Plus, Search, Send, Sparkles, ThumbsDown, ThumbsUp, Undo2, X } from 'lucide-react';
 import { substituteVars } from '@qara/shared';
 import { api, type AgentState, type Conversation, type ConversationDetail } from '@/lib/api';
+import { useLiveEvents } from '@/lib/use-live-events';
 import { diffConversations, playNotificationSound, snapshotOf, type ConversationSnapshot } from './notifications';
 import { QuickReplyPicker } from './quick-reply-picker';
 
 const NOTIFY_STORAGE_KEY = 'qara-inbox-notify';
 const POLL_INTERVAL_MS = 15_000;
+// Com o SSE conectado o polling vira só fallback — cadência bem mais folgada.
+const POLL_INTERVAL_SSE_MS = 60_000;
 
 type StatusFilter = 'OPEN' | 'ALL' | 'HUMAN';
 
@@ -137,6 +140,16 @@ export default function InboxPage() {
   const snapshotRef = useRef<Map<string, ConversationSnapshot> | null>(null);
   const unseenRef = useRef(0);
   const baseTitleRef = useRef('');
+  // SSE (tempo real): o evento dispara o MESMO caminho do polling — o tick de
+  // notificações (diff + som + badge, sem som duplicado porque o snapshot é
+  // atualizado) e o refresh silencioso da lista visível.
+  const notifyTickRef = useRef<() => void>(() => {});
+  const reloadListRef = useRef<() => void>(() => {});
+  const sseConnected = useLiveEvents(useCallback(() => {
+    notifyTickRef.current();
+    reloadListRef.current();
+  }, []));
+  const pollMs = sseConnected ? POLL_INTERVAL_SSE_MS : POLL_INTERVAL_MS;
 
   useEffect(() => {
     const leadParam = new URLSearchParams(window.location.search).get('lead');
@@ -204,13 +217,14 @@ export default function InboxPage() {
         // polling silencioso: falha de rede não vira erro na UI
       }
     };
+    notifyTickRef.current = () => void tick();
     void tick();
-    const timer = window.setInterval(tick, POLL_INTERVAL_MS);
+    const timer = window.setInterval(tick, pollMs);
     return () => {
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, []);
+  }, [pollMs]);
 
   const reloadDetail = useCallback(async (id: string) => {
     setDetailLoading(true);
@@ -247,15 +261,16 @@ export default function InboxPage() {
         if (!silent) setLoading(false);
       });
     };
+    reloadListRef.current = () => load(true);
     const timer = window.setTimeout(() => load(false), 250);
     // Refresh silencioso na mesma cadência das notificações: a lista visível
     // acompanha o que o som/badge anunciam, sem piscar o "Carregando…".
-    const poll = window.setInterval(() => load(true), POLL_INTERVAL_MS);
+    const poll = window.setInterval(() => load(true), pollMs);
     return () => {
       window.clearTimeout(timer);
       window.clearInterval(poll);
     };
-  }, [search, status]);
+  }, [search, status, pollMs]);
 
   useEffect(() => {
     if (!selectedId) {

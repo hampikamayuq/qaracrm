@@ -2,6 +2,7 @@ import { defineLogicFunction } from 'twenty-sdk/define';
 import { Response, type RoutePayload } from 'twenty-sdk/logic-function';
 import { prisma } from 'src/lib/deps';
 import { createPrismaDataApi } from 'src/lib/prisma-data-api';
+import { emitInboundMessage } from 'src/lib/events';
 
 const data = createPrismaDataApi(prisma);
 
@@ -175,13 +176,18 @@ export const handleUniversalWebhook = async (event: RoutePayload): Promise<Respo
       conversationId = conv.id;
     }
 
+    const messageBody = typeof body?.mensagem === 'string' ? body.mensagem : 'Lead recebido via webhook universal';
     const message = await data.create('chatMessage', {
       conversationId,
       direction: 'IN',
-      body: typeof body?.mensagem === 'string' ? body.mensagem : 'Lead recebido via webhook universal',
+      body: messageBody,
       sentAt: new Date().toISOString(),
       agentHandled: false,
     });
+
+    // Notificação em tempo real (SSE) para o Inbox. emitInboundMessage é
+    // internamente protegida: nunca quebra o webhook.
+    emitInboundMessage({ conversationId, leadName: nome || undefined, preview: messageBody });
 
     return new Response(JSON.stringify({
       success: true,
