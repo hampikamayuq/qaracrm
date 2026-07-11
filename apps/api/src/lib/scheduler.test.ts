@@ -6,11 +6,17 @@ const mocks = vi.hoisted(() => ({
   sendWhatsAppTemplate: {
     execute: vi.fn().mockResolvedValue(JSON.stringify({ ok: true, sent: false })),
   },
+  evolution: {
+    isEvolutionConfigured: vi.fn().mockReturnValue(false),
+    getEvolutionConnectionState: vi.fn(),
+  },
 }));
 
 vi.mock('./tools/sendWhatsAppTemplate', () => ({
   sendWhatsAppTemplate: mocks.sendWhatsAppTemplate,
 }));
+
+vi.mock('./evolution-client', () => mocks.evolution);
 
 const api = (over: Partial<DataApi> = {}): DataApi => ({
   get: vi.fn().mockResolvedValue(null),
@@ -226,6 +232,52 @@ describe('scheduler', () => {
     await runSchedulerTick(api({ list }), now, { processPendingMetaWebhookEvents });
 
     expect(processPendingMetaWebhookEvents).toHaveBeenCalledWith({ now });
+  });
+
+  describe('runInstanceReconcileJob', () => {
+    it('não faz nada sem o gateway configurado', async () => {
+      mocks.evolution.isEvolutionConfigured.mockReturnValue(false);
+      const list = vi.fn();
+      const { runInstanceReconcileJob } = await import('./scheduler');
+
+      const result = await runInstanceReconcileJob(api({ list }));
+
+      expect(list).not.toHaveBeenCalled();
+      expect(result).toEqual({ checked: 0, updated: 0 });
+    });
+
+    it('corrige status stale consultando o connectionState (instância caiu sem webhook)', async () => {
+      mocks.evolution.isEvolutionConfigured.mockReturnValue(true);
+      mocks.evolution.getEvolutionConnectionState.mockResolvedValue('DISCONNECTED');
+      const list = vi.fn().mockResolvedValue([
+        { id: 'inst-1', instanceName: 'qara-recepcao', status: 'CONNECTED' },
+      ]);
+      const update = vi.fn().mockResolvedValue({ id: 'inst-1' });
+      const { runInstanceReconcileJob } = await import('./scheduler');
+
+      const result = await runInstanceReconcileJob(api({ list, update }));
+
+      expect(list).toHaveBeenCalledWith('whatsAppInstance', expect.objectContaining({
+        filter: { status: { notIn: ['DISCONNECTED'] } },
+      }));
+      expect(update).toHaveBeenCalledWith('whatsAppInstance', 'inst-1', { status: 'DISCONNECTED' });
+      expect(result).toEqual({ checked: 1, updated: 1 });
+    });
+
+    it('tolera erro do gateway sem quebrar o tick (best-effort)', async () => {
+      mocks.evolution.isEvolutionConfigured.mockReturnValue(true);
+      mocks.evolution.getEvolutionConnectionState.mockRejectedValue(new Error('down'));
+      const list = vi.fn().mockResolvedValue([
+        { id: 'inst-1', instanceName: 'qara-recepcao', status: 'CONNECTED' },
+      ]);
+      const update = vi.fn();
+      const { runInstanceReconcileJob } = await import('./scheduler');
+
+      const result = await runInstanceReconcileJob(api({ list, update }));
+
+      expect(update).not.toHaveBeenCalled();
+      expect(result).toEqual({ checked: 1, updated: 0 });
+    });
   });
 
   describe('runNpsJob', () => {

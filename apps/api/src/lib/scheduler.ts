@@ -1,4 +1,5 @@
 import type { DataApi } from './data';
+import { getEvolutionConnectionState, isEvolutionConfigured } from './evolution-client';
 import { metaGraphBreaker } from './tools/sendWhatsApp';
 import { sendWhatsAppTemplate } from './tools/sendWhatsAppTemplate';
 import { HSM_D1_REMINDER_TEMPLATE, HSM_FOLLOW_UP_TEMPLATE, HSM_NPS_TEMPLATE } from './templates/hsm-messages';
@@ -261,6 +262,45 @@ export const runNpsJob = async (
   return { checked: appointments.length, sent };
 };
 
+// Reconciliação de status das instâncias Evolution: o CONNECTION_UPDATE pode
+// se perder (deploy, gateway fora) e o envio pelo Inbox depende do status.
+// Best-effort: só instâncias não-DISCONNECTED, a cada ~5min.
+const INSTANCE_RECONCILE_INTERVAL_MS = 5 * 60_000;
+let nextInstanceReconcileAt = 0;
+export const resetInstanceReconcileClock = (): void => {
+  nextInstanceReconcileAt = 0;
+};
+
+export const runInstanceReconcileJob = async (
+  data: DataApi,
+): Promise<{ checked: number; updated: number }> => {
+  if (!isEvolutionConfigured()) return { checked: 0, updated: 0 };
+  const instances = await data.list('whatsAppInstance', {
+    filter: { status: { notIn: ['DISCONNECTED'] } },
+    select: { id: true, instanceName: true, status: true },
+  });
+  let updated = 0;
+  for (const instance of instances) {
+    const id = typeof instance.id === 'string' ? instance.id : '';
+    const instanceName = typeof instance.instanceName === 'string' ? instance.instanceName : '';
+    if (!id || !instanceName) continue;
+    try {
+      const remote = await getEvolutionConnectionState(instanceName);
+      if (remote && remote !== instance.status) {
+        await data.update('whatsAppInstance', id, {
+          status: remote,
+          ...(remote === 'CONNECTED' ? { lastConnectedAt: new Date().toISOString() } : {}),
+        });
+        updated++;
+      }
+    } catch (err) {
+      console.error('[scheduler] instance reconcile falhou (non-fatal):', (err as Error).message);
+    }
+  }
+  console.log(JSON.stringify({ event: 'scheduler_instance_reconcile', checked: instances.length, updated }));
+  return { checked: instances.length, updated };
+};
+
 export const runSchedulerTick = async (
   data: DataApi,
   now = new Date(),
@@ -271,6 +311,10 @@ export const runSchedulerTick = async (
   await runFollowUpJob(data, now);
   await runD1ReminderJob(data, now);
   await runNpsJob(data, now);
+  if (now.getTime() >= nextInstanceReconcileAt) {
+    nextInstanceReconcileAt = now.getTime() + INSTANCE_RECONCILE_INTERVAL_MS;
+    await runInstanceReconcileJob(data);
+  }
 };
 
 export const startScheduler = (
