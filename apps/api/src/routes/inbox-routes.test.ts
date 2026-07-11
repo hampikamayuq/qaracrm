@@ -274,6 +274,18 @@ describe('Inbox phase-3 actions', () => {
     });
   });
 
+  it('reply devolve 409 quando o envio falha (ex.: instância QR desconectada), sem mudar o estado', async () => {
+    mocks.prisma.conversation.findUnique.mockResolvedValue({ id: 'c1', status: 'PENDING_HUMAN' });
+    mocks.sendWhatsApp.execute.mockResolvedValue(JSON.stringify({ ok: false, error: 'instance_disconnected' }));
+    const { replyRoute } = await import('./inbox-routes');
+    const response = res();
+    await replyRoute(req({ params: { id: 'c1' }, body: { text: 'Oi' } }), response);
+
+    expect(response.status).toHaveBeenCalledWith(409);
+    expect(response.json).toHaveBeenCalledWith({ success: false, error: 'instance_disconnected' });
+    expect(mocks.prisma.conversation.updateMany).not.toHaveBeenCalled();
+  });
+
   it('reply em conversa RESOLVED não reabre o estado', async () => {
     mocks.prisma.conversation.findUnique.mockResolvedValue({ id: 'c1', status: 'RESOLVED' });
     mocks.sendWhatsApp.execute.mockResolvedValue(JSON.stringify({ ok: true, sent: true }));

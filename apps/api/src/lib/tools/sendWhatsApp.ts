@@ -3,6 +3,7 @@ import type { DataApi } from 'src/lib/data';
 import { CircuitBreaker } from 'src/lib/resilience/circuit-breaker';
 import { isMetaSendConfigured, sendViaMeta } from 'src/lib/whatsapp-client';
 import { isInstagramSendConfigured, sendViaInstagram } from 'src/lib/instagram-client';
+import { isEvolutionConfigured, sendEvolutionText } from 'src/lib/evolution-client';
 
 export const metaGraphBreaker = new CircuitBreaker('meta-graph', {
   threshold: 5,
@@ -10,6 +11,11 @@ export const metaGraphBreaker = new CircuitBreaker('meta-graph', {
 });
 
 export const igGraphBreaker = new CircuitBreaker('ig-graph', {
+  threshold: 5,
+  cooldownMs: 30_000,
+});
+
+export const evolutionBreaker = new CircuitBreaker('evolution', {
   threshold: 5,
   cooldownMs: 30_000,
 });
@@ -51,6 +57,7 @@ export const sendWhatsApp = {
       id: true,
       channel: true,
       externalId: true,
+      instanceId: true,
     });
     if (!conv) return JSON.stringify({ ok: false, error: 'conversation_not_found' });
 
@@ -62,13 +69,27 @@ export const sendWhatsApp = {
 
     // In test mode, never send to Meta - just record in CRM
     const isTestMode = ctx.testMode === true;
-    // Despacha por canal: WhatsApp via Cloud API, Instagram via Graph API.
+    // Despacha por canal: WhatsApp via Cloud API, Instagram via Graph API,
+    // número QR via gateway Evolution (instância da conversa).
     let externalId: string | null = null;
     if (!isTestMode && to.length > 0) {
       if (channel === 'WHATSAPP' && isMetaSendConfigured()) {
         externalId = await metaGraphBreaker.execute(() => sendViaMeta(to, args.text));
       } else if (channel === 'INSTAGRAM' && isInstagramSendConfigured()) {
         externalId = await igGraphBreaker.execute(() => sendViaInstagram(to, args.text));
+      } else if (channel === 'WHATSAPP_QR') {
+        // Sem instância conectada não há como entregar: erro claro para o
+        // Inbox, sem gravar mensagem fantasma no histórico.
+        const instanceId = typeof conv.instanceId === 'string' ? conv.instanceId : '';
+        const instance = instanceId
+          ? await ctx.get('whatsAppInstance', instanceId, { id: true, instanceName: true, status: true })
+          : null;
+        if (!instance || instance.status !== 'CONNECTED' || !isEvolutionConfigured()) {
+          return JSON.stringify({ ok: false, error: 'instance_disconnected' });
+        }
+        externalId = await evolutionBreaker.execute(() =>
+          sendEvolutionText(instance.instanceName as string, to, args.text),
+        );
       }
     }
 
