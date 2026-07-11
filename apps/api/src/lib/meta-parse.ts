@@ -27,9 +27,26 @@ export type MetaInboundMessage = {
 // Placeholder exibido no Inbox quando o áudio não é (ou não pôde ser) transcrito.
 export const AUDIO_PLACEHOLDER = '[áudio]';
 
+// Coexistence (número compartilhado entre o app WhatsApp Business e a Cloud
+// API): quando alguém da clínica responde pelo celular, a Meta espelha a
+// mensagem para nós via campo `smb_message_echoes`. `to` é o telefone do
+// paciente (wa_id) — a chave da conversa, já que o `from` é o nosso número.
+export type MetaEchoMessage = {
+  channel: 'WHATSAPP';
+  externalId: string;
+  to: string;
+  text: string;
+  sentAt: string;
+  messageType: MetaMessageType;
+};
+
 export type MetaDeliveryStatus = 'SENT' | 'DELIVERED' | 'READ' | 'FAILED';
 export type MetaStatusUpdate = { externalId: string; status: MetaDeliveryStatus };
-export type ParsedMetaEvent = { messages: MetaInboundMessage[]; statuses: MetaStatusUpdate[] };
+export type ParsedMetaEvent = {
+  messages: MetaInboundMessage[];
+  statuses: MetaStatusUpdate[];
+  echoes: MetaEchoMessage[];
+};
 
 type Rec = Record<string, unknown>;
 const asRec = (v: unknown): Rec => (v && typeof v === 'object' ? (v as Rec) : {});
@@ -79,6 +96,8 @@ const waContent = (
   }
   if (type === 'image')
     return { text: asStr(asRec(msg.image).caption) || '[imagem]', messageType: 'IMAGE' };
+  if (type === 'video')
+    return { text: asStr(asRec(msg.video).caption) || '[vídeo]', messageType: 'TEXT' };
   if (type === 'document')
     return { text: asStr(asRec(msg.document).caption) || '[documento]', messageType: 'DOCUMENT' };
   return { text: `[${type || 'desconhecido'}]`, messageType: 'TEXT' };
@@ -87,6 +106,7 @@ const waContent = (
 const parseWhatsApp = (body: Rec): ParsedMetaEvent => {
   const messages: MetaInboundMessage[] = [];
   const statuses: MetaStatusUpdate[] = [];
+  const echoes: MetaEchoMessage[] = [];
   for (const entry of asArr(body.entry)) {
     for (const change of asArr(asRec(entry).changes)) {
       const value = asRec(asRec(change).value);
@@ -94,6 +114,25 @@ const parseWhatsApp = (body: Rec): ParsedMetaEvent => {
         const status = STATUS_MAP[asStr(asRec(s).status)];
         const id = asStr(asRec(s).id);
         if (status && id) statuses.push({ externalId: id, status });
+      }
+      // Coexistence: espelho de mensagens enviadas pelo app WhatsApp Business.
+      // revoke/edit de mensagens do app ficam fora do escopo v1 — ignorados.
+      for (const e of asArr(value.message_echoes)) {
+        const echo = asRec(e);
+        const type = asStr(echo.type);
+        if (type === 'revoke' || type === 'edit') continue;
+        const id = asStr(echo.id);
+        const to = asStr(echo.to);
+        if (!id || !to) continue;
+        const { text, messageType } = waContent(echo);
+        echoes.push({
+          channel: 'WHATSAPP',
+          externalId: id,
+          to,
+          text,
+          sentAt: new Date(Number(asStr(echo.timestamp)) * 1000).toISOString(),
+          messageType,
+        });
       }
       for (const m of asArr(value.messages)) {
         const msg = asRec(m);
@@ -114,7 +153,7 @@ const parseWhatsApp = (body: Rec): ParsedMetaEvent => {
       }
     }
   }
-  return { messages, statuses };
+  return { messages, statuses, echoes };
 };
 
 const parseInstagram = (body: Rec): ParsedMetaEvent => {
@@ -148,7 +187,7 @@ const parseInstagram = (body: Rec): ParsedMetaEvent => {
       });
     }
   }
-  return { messages, statuses: [] };
+  return { messages, statuses: [], echoes: [] };
 };
 
 export const parseMetaEvent = (body: unknown): ParsedMetaEvent => {
@@ -157,5 +196,5 @@ export const parseMetaEvent = (body: unknown): ParsedMetaEvent => {
   // O Instagram Direct entrega os eventos ora como object='instagram', ora como
   // object='page' (via Página do Facebook vinculada). Mesmo shape entry[].messaging[].
   if (rec.object === 'instagram' || rec.object === 'page') return parseInstagram(rec);
-  return { messages: [], statuses: [] };
+  return { messages: [], statuses: [], echoes: [] };
 };

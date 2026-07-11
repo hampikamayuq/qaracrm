@@ -216,6 +216,95 @@ describe('parseMetaEvent — WhatsApp', () => {
   });
 });
 
+// Coexistence: espelhos de mensagens enviadas pelo app WhatsApp Business
+// chegam pelo campo smb_message_echoes com from=nosso número e to=paciente.
+const waEcho = (echo: object) => ({
+  object: 'whatsapp_business_account',
+  entry: [
+    {
+      id: '123',
+      changes: [
+        {
+          field: 'smb_message_echoes',
+          value: {
+            messaging_product: 'whatsapp',
+            metadata: { display_phone_number: '5511900001111', phone_number_id: 'PNID-1' },
+            message_echoes: [echo],
+          },
+        },
+      ],
+    },
+  ],
+});
+
+describe('parseMetaEvent — WhatsApp Coexistence (smb_message_echoes)', () => {
+  it('parses a text echo sent from the WhatsApp Business app', () => {
+    const { messages, statuses, echoes } = parseMetaEvent(
+      waEcho({
+        from: '5511900001111',
+        to: '5511999998888',
+        id: 'wamid.ECHO1',
+        timestamp: '1751650300',
+        type: 'text',
+        text: { body: 'Oi Maria, podemos sim!' },
+      }),
+    );
+    expect(messages).toEqual([]);
+    expect(statuses).toEqual([]);
+    expect(echoes).toEqual([
+      {
+        channel: 'WHATSAPP',
+        externalId: 'wamid.ECHO1',
+        to: '5511999998888',
+        text: 'Oi Maria, podemos sim!',
+        sentAt: new Date(1751650300 * 1000).toISOString(),
+        messageType: 'TEXT',
+      },
+    ]);
+  });
+
+  it('parses media echoes with placeholder text', () => {
+    const image = parseMetaEvent(
+      waEcho({ to: '5511999998888', id: 'wamid.E2', timestamp: '1751650300', type: 'image', image: {} }),
+    );
+    expect(image.echoes[0].text).toBe('[imagem]');
+    expect(image.echoes[0].messageType).toBe('IMAGE');
+
+    const video = parseMetaEvent(
+      waEcho({ to: '5511999998888', id: 'wamid.E3', timestamp: '1751650300', type: 'video', video: {} }),
+    );
+    expect(video.echoes[0].text).toBe('[vídeo]');
+  });
+
+  it('ignores revoke/edit echoes and echoes without id/to', () => {
+    const revoke = parseMetaEvent(
+      waEcho({ to: '5511999998888', id: 'wamid.E4', timestamp: '1751650300', type: 'revoke' }),
+    );
+    expect(revoke.echoes).toEqual([]);
+    const edit = parseMetaEvent(
+      waEcho({ to: '5511999998888', id: 'wamid.E5', timestamp: '1751650300', type: 'edit' }),
+    );
+    expect(edit.echoes).toEqual([]);
+    const noTo = parseMetaEvent(
+      waEcho({ id: 'wamid.E6', timestamp: '1751650300', type: 'text', text: { body: 'x' } }),
+    );
+    expect(noTo.echoes).toEqual([]);
+  });
+
+  it('does not leak echoes into inbound messages', () => {
+    const { messages } = parseMetaEvent(
+      waEcho({
+        to: '5511999998888',
+        id: 'wamid.E7',
+        timestamp: '1751650300',
+        type: 'text',
+        text: { body: 'resposta da clínica' },
+      }),
+    );
+    expect(messages).toEqual([]);
+  });
+});
+
 const igPageMessage = {
   object: 'page',
   entry: [
@@ -312,8 +401,8 @@ describe('parseMetaEvent — Instagram', () => {
 
 describe('parseMetaEvent — garbage in', () => {
   it('returns empty for null / non-object / unknown object', () => {
-    expect(parseMetaEvent(null)).toEqual({ messages: [], statuses: [] });
-    expect(parseMetaEvent('x')).toEqual({ messages: [], statuses: [] });
-    expect(parseMetaEvent({ object: 'page' })).toEqual({ messages: [], statuses: [] });
+    expect(parseMetaEvent(null)).toEqual({ messages: [], statuses: [], echoes: [] });
+    expect(parseMetaEvent('x')).toEqual({ messages: [], statuses: [], echoes: [] });
+    expect(parseMetaEvent({ object: 'page' })).toEqual({ messages: [], statuses: [], echoes: [] });
   });
 });

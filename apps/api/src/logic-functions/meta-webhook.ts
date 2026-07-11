@@ -1,7 +1,13 @@
 import { type DataApi } from '../lib/data';
 import { runBotsForInbound } from '../lib/bots/runner';
 import { defaultDebounce, type Debouncer } from '../lib/debounce';
-import { parseMetaEvent, type MetaInboundMessage, type MetaStatusUpdate } from '../lib/meta-parse';
+import {
+  parseMetaEvent,
+  type MetaChannel,
+  type MetaEchoMessage,
+  type MetaInboundMessage,
+  type MetaStatusUpdate,
+} from '../lib/meta-parse';
 import { downloadDirectMedia, downloadWhatsAppMedia } from '../lib/media-client';
 import { isAudioTranscriptionEnabled, transcribeAudio } from '../lib/transcription-client';
 import { sendWhatsApp } from '../lib/tools/sendWhatsApp';
@@ -28,43 +34,91 @@ const applyStatus = async (status: MetaStatusUpdate, data: DataApi): Promise<voi
   }
 };
 
+// Chave externa da conversa: telefone (WhatsApp) ou PSID/IGSID (Instagram) do
+// paciente — vem de `messages[].from` no inbound e de `message_echoes[].to`
+// no echo de Coexistence (onde o `from` é o nosso próprio número).
+type ConversationKey = { channel: MetaChannel; contact: string; sentAt: string };
+
 // Conversation.leadId é obrigatório no schema — todo primeiro contato precisa
 // de um Lead antes da conversa poder existir.
-const findOrCreateLead = async (msg: MetaInboundMessage, data: DataApi): Promise<string> => {
+const findOrCreateLead = async (key: ConversationKey, data: DataApi): Promise<string> => {
   const existing = await data.list('lead', {
-    filter: { phone: { eq: msg.from } },
+    filter: { phone: { eq: key.contact } },
     limit: 1,
     select: { id: true },
   });
   if (existing[0]) return existing[0].id as string;
   const created = await data.create('lead', {
-    name: msg.from,
-    phone: msg.from,
-    source: msg.channel,
+    name: key.contact,
+    phone: key.contact,
+    source: key.channel,
   });
   return created.id as string;
 };
 
 const findOrCreateConversation = async (
-  msg: MetaInboundMessage,
+  key: ConversationKey,
   data: DataApi,
-): Promise<{ id: string; leadId?: string | null }> => {
+): Promise<{ id: string; leadId?: string | null; status?: string | null }> => {
   const existing = await data.list('conversation', {
-    filter: { channel: { eq: msg.channel }, externalId: { eq: msg.from } },
+    filter: { channel: { eq: key.channel }, externalId: { eq: key.contact } },
     limit: 1,
-    select: { id: true, leadId: true },
+    select: { id: true, leadId: true, status: true },
   });
-  if (existing[0]) return { id: existing[0].id as string, leadId: existing[0].leadId as string | null | undefined };
+  if (existing[0]) {
+    return {
+      id: existing[0].id as string,
+      leadId: existing[0].leadId as string | null | undefined,
+      status: existing[0].status as string | null | undefined,
+    };
+  }
 
-  const leadId = await findOrCreateLead(msg, data);
+  const leadId = await findOrCreateLead(key, data);
   const created = await data.create('conversation', {
     leadId,
-    channel: msg.channel,
-    externalId: msg.from,
+    channel: key.channel,
+    externalId: key.contact,
     status: 'OPEN',
-    lastMessageAt: msg.sentAt,
+    lastMessageAt: key.sentAt,
   });
-  return { id: created.id as string, leadId };
+  return { id: created.id as string, leadId, status: 'OPEN' };
+};
+
+// Coexistence: alguém da clínica respondeu pelo app WhatsApp Business no
+// celular. Gravamos o espelho como OUT (o Inbox mostra a conversa completa) e
+// aplicamos o mesmo efeito da resposta manual pelo Inbox: humano assumiu —
+// a Tawany não fala por cima (o gate exige status OPEN) até "Devolver para a
+// Tawany". Echo NUNCA passa por debounce, bots ou Tawany.
+const ingestEcho = async (echo: MetaEchoMessage, data: DataApi): Promise<void> => {
+  const dup = await data.list('chatMessage', {
+    filter: { externalId: { eq: echo.externalId } },
+    limit: 1,
+    select: { id: true },
+  });
+  // Retry da Meta — ou mensagem que nós mesmos enviamos via Cloud API (já
+  // gravada com o mesmo wamid pelo sendWhatsApp).
+  if (dup.length > 0) return;
+
+  const conversation = await findOrCreateConversation(
+    { channel: echo.channel, contact: echo.to, sentAt: echo.sentAt },
+    data,
+  );
+  await data.create('chatMessage', {
+    conversationId: conversation.id,
+    direction: 'OUT',
+    body: echo.text,
+    sentAt: echo.sentAt,
+    externalId: echo.externalId,
+    messageType: echo.messageType,
+    deliveryStatus: 'SENT',
+    agentHandled: true,
+  });
+  const closed = conversation.status === 'RESOLVED' || conversation.status === 'CLOSED';
+  await data.update('conversation', conversation.id, {
+    lastMessageAt: echo.sentAt,
+    ...(closed ? {} : { needsHuman: false, status: 'PENDING_PATIENT' }),
+  });
+  console.log(JSON.stringify({ event: 'meta_echo', conversationId: conversation.id, messageId: echo.externalId }));
 };
 
 // Transcreve nota de voz/áudio inbound ANTES de gravar a mensagem e de liberar
@@ -110,7 +164,10 @@ const ingestMessage = async (
   });
   if (dup.length > 0) return null; // Meta retry — já processada
 
-  const conversation = await findOrCreateConversation(msg, data);
+  const conversation = await findOrCreateConversation(
+    { channel: msg.channel, contact: msg.from, sentAt: msg.sentAt },
+    data,
+  );
   // Áudio -> texto antes de gravar/debounce, para fluir como texto do paciente.
   await maybeTranscribeAudio(msg, data, conversation.id);
   const optout = debounce.isOptOut(msg.text);
@@ -209,9 +266,13 @@ export const handleMetaWebhook = async (
   debounce: Debouncer = defaultDebounce,
   onProcessedMessage?: ProcessedMessageHandler,
 ): Promise<MetaWebhookProcessingResult> => {
-  const { messages, statuses } = parseMetaEvent(body);
+  const { messages, statuses, echoes } = parseMetaEvent(body);
   const processedMessages: MetaWebhookProcessingResult['processedMessages'] = [];
   for (const status of statuses) await applyStatus(status, data);
+  // Echoes de Coexistence antes do inbound: se o mesmo payload trouxer a
+  // resposta da clínica e uma mensagem nova do paciente, o "humano assumiu"
+  // já vale quando a mensagem do paciente for processada.
+  for (const echo of echoes) await ingestEcho(echo, data);
   for (const msg of messages) {
     const processed = await ingestMessage(msg, data, debounce, onProcessedMessage);
     if (!processed) continue;
@@ -253,7 +314,12 @@ export const handleMetaWebhook = async (
   }
 
   console.log(
-    JSON.stringify({ event: 'meta_webhook', messages: messages.length, statuses: statuses.length }),
+    JSON.stringify({
+      event: 'meta_webhook',
+      messages: messages.length,
+      statuses: statuses.length,
+      echoes: echoes.length,
+    }),
   );
   return { processedMessages };
 };
