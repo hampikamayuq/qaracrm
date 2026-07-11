@@ -107,7 +107,7 @@ const lostReasonFromTags = (tags: string[]): string | null => {
   return found ? found.slice('status:perdido-'.length) : null;
 };
 
-const setTagPrefix = (tags: string[], prefix: string, value: string | null): string[] => {
+export const setTagPrefix = (tags: string[], prefix: string, value: string | null): string[] => {
   const filtered = tags.filter((t) => !t.startsWith(prefix));
   return value ? [...filtered, `${prefix}${value}`] : filtered;
 };

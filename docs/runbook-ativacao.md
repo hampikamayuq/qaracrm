@@ -166,8 +166,16 @@ curl -X POST https://cliniqara-crm.onrender.com/api/budgets \
 
 ```
 ENABLE_SCHEDULER=true
+ENABLE_D1_REMINDERS=true
 APPOINTMENT_CONFIRM_BUTTONS=true
 ```
+
+> `ENABLE_SCHEDULER` liga só o loop; cada job que envia mensagem tem flag
+> própria (default desligada): `ENABLE_D1_REMINDERS` (lembrete D-1),
+> `ENABLE_FOLLOWUP_HSM` (follow-up 48h — atenção: com backlog de conversas
+> OPEN antigas ele dispara para todas), `NPS_ENABLED` e `ENABLE_REACTIVATION`.
+> Isso elimina o efeito colateral antigo de ligar o D-1 e disparar junto uma
+> rajada de follow-ups.
 
 ### Passo 3: Validação
 
@@ -208,6 +216,37 @@ NPS_CAPTURE_WINDOW_HOURS=48
 # Responder com um número (0-10) dentro de 48h → interceptado como NPS
 # Verificar no banco: select * from Activity where type='NPS_CAPTURE'
 ```
+
+---
+
+## 5b. Reativação de perdidos (30/60d)
+
+### Passo 1: Aprovar Template HSM de Reativação
+
+1. Business Manager → Modelos de Mensagem
+2. Criar novo template `qara_reativacao`:
+   - **Categoria**: Marketing
+   - **Corpo**: "Olá {{1}}, sentimos sua falta! Ainda podemos te ajudar com sua consulta na QARA? É só responder aqui. 💜"
+   - **Parâmetros**: `{{1}}` = name
+3. Aguardar aprovação Meta
+
+### Passo 2: Setar Variáveis no Render
+
+```
+ENABLE_SCHEDULER=true
+ENABLE_REACTIVATION=true
+REACTIVATION_TEMPLATE=qara_reativacao   # opcional, é o default
+```
+
+### Passo 3: Como funciona / Validação
+
+- Lead com tag `status:perdido-sem-resposta` há 30 dias (data do stage_change
+  para perdido; fallback `updatedAt`), sem opt-out → recebe o template **1x**
+  e ganha a tag `reativacao:30d`; aos 60 dias, mais 1x (`reativacao:60d`) e o
+  ciclo encerra.
+- Se o paciente responder, o lead reabre automaticamente como `novo-lead` no
+  pipeline `reativacao` (Activity STAGE_CHANGE registrada).
+- Verificar logs: `grep "scheduler_reactivation"` e `grep "reactivation_reopened"`.
 
 ---
 
@@ -268,12 +307,23 @@ WHATSAPP_ACCESS_TOKEN=  # deixar vazio → usa META_ACCESS_TOKEN
 ### Confirmação D-1 com Botões
 
 - [ ] Aprovar template `qara_appointment_reminder_d1` com botões no Business Manager
-- [ ] Setar `ENABLE_SCHEDULER=true`, `APPOINTMENT_CONFIRM_BUTTONS=true`
+- [ ] Setar `ENABLE_SCHEDULER=true`, `ENABLE_D1_REMINDERS=true`, `APPOINTMENT_CONFIRM_BUTTONS=true`
 
 ### NPS pós-consulta
 
 - [ ] Aprovar template `qara_nps_pos_consulta` no Business Manager
 - [ ] Setar `ENABLE_SCHEDULER=true`, `NPS_ENABLED=true`, `NPS_TEMPLATE=qara_nps_pos_consulta`
+
+### Reativação de perdidos
+
+- [ ] Aprovar template `qara_reativacao` no Business Manager
+- [ ] Setar `ENABLE_SCHEDULER=true`, `ENABLE_REACTIVATION=true`
+
+### Follow-up 48h (HSM)
+
+- [ ] Aprovar template `qara_followup_48h` no Business Manager
+- [ ] Triar as conversas OPEN paradas há 48h+ no inbox (evita rajada no backlog)
+- [ ] Setar `ENABLE_SCHEDULER=true`, `ENABLE_FOLLOWUP_HSM=true`
 
 ### Transcrição de Áudios
 
@@ -291,7 +341,7 @@ WHATSAPP_ACCESS_TOKEN=  # deixar vazio → usa META_ACCESS_TOKEN
 5. **NPS pós-consulta** — melhora dados de satisfação
 6. **Confirmação D-1 com Botões** — última, agrega confirmação automática
 
-Cada uma pode ser ativada independentemente (gates separados). Scheduler (`ENABLE_SCHEDULER`) é compartilhado — ligar uma vez para ativar todas as jobs que precisam dele.
+Cada uma pode ser ativada independentemente (gates separados). Scheduler (`ENABLE_SCHEDULER`) é compartilhado e liga só o loop — cada job que envia mensagem tem sua flag própria (`ENABLE_D1_REMINDERS`, `ENABLE_FOLLOWUP_HSM`, `NPS_ENABLED`, `ENABLE_REACTIVATION`), todas default `false`.
 
 ---
 
@@ -302,11 +352,14 @@ Se algo der errado:
 ```bash
 # Shell do Render
 
-# Desligar scheduler (desativa D-1, NPS, follow-up)
+# Desligar scheduler (desativa D-1, NPS, follow-up, reativação)
 ENABLE_SCHEDULER=false
 
 # Desligar módulos específicos (sem afetar scheduler)
 AUDIO_TRANSCRIPTION_ENABLED=false
+ENABLE_D1_REMINDERS=false
+ENABLE_FOLLOWUP_HSM=false
+ENABLE_REACTIVATION=false
 NPS_ENABLED=false
 APPOINTMENT_CONFIRM_BUTTONS=false
 

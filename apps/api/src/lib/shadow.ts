@@ -1,26 +1,17 @@
 import type { AiClient } from './ai-client';
 import type { DataApi } from './data';
 import { runTawanyHandler, type TawanySendMode } from '../logic-functions/tawany-handler';
+import { getShadowMode, type ShadowMode } from './shadow-mode';
 
-export type ShadowMode = 'shadow' | 'human_approval' | 'autopilot';
+// Re-export para não quebrar os consumidores existentes de lib/shadow.
+export { getShadowMode, isAutopilotMode, isHumanApprovalMode, isShadowMode, type ShadowMode } from './shadow-mode';
+
 export type ProcessedShadowMessage = { conversationId: string; messageId: string };
 
 type FetchLike = (
   input: string,
   init: { method: 'POST'; headers: Record<string, string>; body: Buffer },
 ) => Promise<unknown>;
-
-const VALID_MODES = new Set<ShadowMode>(['shadow', 'human_approval', 'autopilot']);
-
-export const getShadowMode = (): ShadowMode => {
-  const mode = process.env.SHADOW_MODE ?? 'shadow';
-  if (!VALID_MODES.has(mode as ShadowMode)) throw new Error(`Invalid SHADOW_MODE: ${mode}`);
-  return mode as ShadowMode;
-};
-
-export const isShadowMode = (): boolean => getShadowMode() === 'shadow';
-export const isHumanApprovalMode = (): boolean => getShadowMode() === 'human_approval';
-export const isAutopilotMode = (): boolean => getShadowMode() === 'autopilot';
 
 export const forwardWebhookToTwenty = async (
   params: {
