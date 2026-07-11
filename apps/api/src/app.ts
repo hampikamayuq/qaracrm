@@ -2,6 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import authRoutes from './routes/auth-routes.js';
 import metaWebhookRoutes, { processPendingMetaWebhookEvents } from './routes/meta-webhook-routes.js';
+import evolutionWebhookRoutes, { processPendingEvolutionWebhookEvents } from './routes/evolution-webhook-routes.js';
 import tawanyRoutes from './routes/tawany-routes.js';
 import operationsRoutes from './routes/operations-routes.js';
 import inboxRoutes from './routes/inbox-routes.js';
@@ -50,6 +51,7 @@ app.use(
 
 app.use('/api/auth', authRoutes);
 app.use('/api/webhooks/meta', metaWebhookRoutes);
+app.use('/api/webhooks/evolution', evolutionWebhookRoutes);
 app.use('/api/tawany', tawanyRoutes);
 app.use('/api/operations', operationsRoutes);
 app.use('/api/inbox', inboxRoutes);
@@ -69,7 +71,10 @@ app.use('/api/reports', reportRoutes);
 app.use('/api/settings', settingsRoutes);
 app.use('/api/quick-replies', quickReplyRoutes);
 
-startScheduler(createPrismaDataApi(prisma), undefined, { processPendingMetaWebhookEvents });
+startScheduler(createPrismaDataApi(prisma), undefined, {
+  processPendingMetaWebhookEvents,
+  processPendingEvolutionWebhookEvents,
+});
 
 app.get('/api/health', (_req, res) => {
   res.json({ success: true, data: { status: 'ok' } });

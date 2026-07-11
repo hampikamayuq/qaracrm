@@ -7,6 +7,7 @@ import { isMetaSendConfigured, sendViaMeta } from './whatsapp-client';
 export type SchedulerHandle = { stop(): void };
 export type SchedulerJobs = {
   processPendingMetaWebhookEvents?: (options?: { now?: Date }) => Promise<unknown>;
+  processPendingEvolutionWebhookEvents?: (options?: { now?: Date }) => Promise<unknown>;
 };
 
 const SAO_PAULO_UTC_OFFSET_HOURS = 3;
@@ -266,6 +267,7 @@ export const runSchedulerTick = async (
   jobs: SchedulerJobs = {},
 ): Promise<void> => {
   await jobs.processPendingMetaWebhookEvents?.({ now });
+  await jobs.processPendingEvolutionWebhookEvents?.({ now });
   await runFollowUpJob(data, now);
   await runD1ReminderJob(data, now);
   await runNpsJob(data, now);
