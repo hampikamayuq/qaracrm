@@ -354,6 +354,28 @@ export type KnowledgeSection = {
   updatedByName: string | null;
 };
 
+// ---------------- trilha de auditoria ----------------
+
+export type AuditEntry = {
+  id: string;
+  userId: string | null;
+  userName: string | null;
+  action: string;
+  entity: string;
+  entityId: string;
+  before: unknown;
+  after: unknown;
+  createdAt: string;
+};
+
+export type AuditLogPage = {
+  items: AuditEntry[];
+  total: number;
+  page: number;
+  pageSize: number;
+  entities: string[];
+};
+
 export type TawanyExample = {
   id: string;
   question: string;
@@ -757,6 +779,21 @@ export const api = {
     autopilotIntents: string[] = [],
   ): Promise<ApiResponse<{ mode: AiOperationMode; autopilotIntents: string[] }>> {
     return this.fetch('/settings/ai', { method: 'PUT', body: JSON.stringify({ mode, autopilotIntents }) });
+  },
+
+  // ---------------- trilha de auditoria ----------------
+
+  async getAuditLog(filters: {
+    entity?: string;
+    action?: string;
+    userId?: string;
+    from?: string;
+    to?: string;
+    page?: number;
+    pageSize?: number;
+  } = {}): Promise<AuditLogPage> {
+    const res = await this.get<AuditLogPage>(`/audit${qs(filters)}`);
+    return res.data ?? { items: [], total: 0, page: 1, pageSize: 25, entities: [] };
   },
 
   setConversationStatus(conversationId: string, status: string): Promise<ApiResponse<{ status: string }>> {

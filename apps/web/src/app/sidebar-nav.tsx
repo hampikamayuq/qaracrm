@@ -14,6 +14,7 @@ import {
   KanbanSquare,
   LayoutDashboard,
   ListTodo,
+  ScrollText,
   Settings,
   Smartphone,
   Sparkles,
@@ -48,6 +49,7 @@ const NAV_GROUPS: NavGroup[] = [
       { href: '/settings/knowledge', label: 'Conhecimento', icon: BookOpen },
       { href: '/settings/ai', label: 'IA', icon: Sparkles },
       { href: '/settings/users', label: 'Usuários', icon: Users },
+      { href: '/settings/audit', label: 'Auditoria', icon: ScrollText },
     ],
   },
 ];

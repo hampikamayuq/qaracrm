@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   prisma: {
     knowledgeSection: {
       findMany: vi.fn(),
+      findFirst: vi.fn(),
       updateMany: vi.fn(),
       upsert: vi.fn(),
     },
@@ -16,6 +17,9 @@ const mocks = vi.hoisted(() => ({
     },
     session: {
       findUnique: vi.fn(),
+    },
+    auditLog: {
+      create: vi.fn(),
     },
   },
   invalidateKnowledgeCache: vi.fn(),
@@ -51,6 +55,8 @@ describe('Settings routes', () => {
       token: 'good-token',
       expiresAt: new Date(Date.now() + 3600_000),
     });
+    mocks.prisma.knowledgeSection.findMany.mockResolvedValue([]);
+    mocks.prisma.auditLog.create.mockResolvedValue({});
   });
 
   it('retorna 401 sem Authorization em todos os endpoints', async () => {
@@ -172,6 +178,58 @@ describe('Settings routes', () => {
     expect(JSON.parse(mocks.prisma.knowledgeSection.upsert.mock.calls[0][0].update.content)).toEqual({
       mode: 'hibrido',
       autopilotIntents: ['ENDERECO', 'HORARIO'],
+    });
+  });
+
+  it('PUT /ai grava auditoria com before/after do JSON de settings', async () => {
+    // Arrange
+    mocks.prisma.knowledgeSection.findMany.mockResolvedValue([
+      { content: JSON.stringify({ mode: 'shadow', autopilotIntents: [] }) },
+    ]);
+    mocks.prisma.knowledgeSection.upsert.mockResolvedValue({ id: 'cfg' });
+    const app = await makeApp();
+
+    // Act
+    const res = await request(app)
+      .put('/api/settings/ai')
+      .set(AUTH)
+      .send({ mode: 'hibrido', autopilotIntents: ['ENDERECO'] });
+
+    // Assert
+    expect(res.status).toBe(200);
+    expect(mocks.prisma.auditLog.create).toHaveBeenCalledWith({
+      data: {
+        userId: 'u1',
+        action: 'ai_settings.update',
+        entity: 'ai_settings',
+        entityId: '__ai_settings',
+        before: { mode: 'shadow', autopilotIntents: [] },
+        after: { mode: 'hibrido', autopilotIntents: ['ENDERECO'] },
+      },
+    });
+  });
+
+  it('PUT /knowledge/:slug grava auditoria truncando before/after em 200 chars', async () => {
+    // Arrange
+    const longContent = 'x'.repeat(500);
+    mocks.prisma.knowledgeSection.findFirst.mockResolvedValue({ content: 'conteúdo antigo' });
+    mocks.prisma.knowledgeSection.updateMany.mockResolvedValue({ count: 1 });
+    const app = await makeApp();
+
+    // Act
+    const res = await request(app).put('/api/settings/knowledge/tags').set(AUTH).send({ content: longContent });
+
+    // Assert
+    expect(res.status).toBe(200);
+    expect(mocks.prisma.auditLog.create).toHaveBeenCalledWith({
+      data: {
+        userId: 'u1',
+        action: 'knowledge.update',
+        entity: 'knowledge_section',
+        entityId: 'tags',
+        before: { content: 'conteúdo antigo' },
+        after: { content: 'x'.repeat(200) },
+      },
     });
   });
 });

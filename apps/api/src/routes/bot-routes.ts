@@ -13,6 +13,7 @@ import {
   type BotFlow,
 } from '../lib/bots/engine';
 import { LEADS_NOVOS_RISK_KEYWORDS } from '../lib/leads-novos/rules';
+import { recordAudit } from '../lib/audit';
 
 const router = Router();
 
@@ -104,6 +105,13 @@ export const toggleBotRoute = async (req: Request, res: Response): Promise<void>
       jsonError(res, 404, 'Bot not found');
       return;
     }
+    await recordAudit(prisma, {
+      userId: req.userId ?? null,
+      action: 'bot.toggle',
+      entity: 'bot',
+      entityId: id,
+      after: { active },
+    });
     res.json({ success: true, data: { id, active } });
   } catch (error) {
     jsonError(res, 500, (error as Error).message);
@@ -126,6 +134,13 @@ export const importBotRoute = async (req: Request, res: Response): Promise<void>
       ? await prisma.bot.update({ where: { id: existing.id }, data: { steps, trigger: 'inbound-message' } })
       : await prisma.bot.create({ data: { name, trigger: 'inbound-message', active: true, steps } });
 
+    await recordAudit(prisma, {
+      userId: req.userId ?? null,
+      action: 'bot.import',
+      entity: 'bot',
+      entityId: bot.id,
+      after: { name: bot.name, rules: flow.rules.length, replaced: Boolean(existing), source },
+    });
     res.json({
       success: true,
       data: { id: bot.id, name: bot.name, active: bot.active, rules: flow.rules.length, replaced: Boolean(existing) },
@@ -150,6 +165,13 @@ export const createBotRoute = async (req: Request, res: Response): Promise<void>
         active: req.body?.active === true,
         steps: parsed.flow as unknown as Prisma.InputJsonValue,
       },
+    });
+    await recordAudit(prisma, {
+      userId: req.userId ?? null,
+      action: 'bot.create',
+      entity: 'bot',
+      entityId: bot.id,
+      after: { name: bot.name, active: bot.active, rules: parsed.flow.rules.length },
     });
     res.json({
       success: true,
@@ -203,6 +225,15 @@ export const updateBotRoute = async (req: Request, res: Response): Promise<void>
     await prisma.bot.update({
       where: { id },
       data: { name: parsed.name, steps: parsed.flow as unknown as Prisma.InputJsonValue },
+    });
+    await recordAudit(prisma, {
+      userId: req.userId ?? null,
+      action: 'bot.update',
+      entity: 'bot',
+      entityId: id,
+      // Snapshot completo já vai para o versionamento (BOT_VERSION); aqui só o resumo.
+      before: { name: bot.name, rules: parseBotSteps(bot.steps)?.rules.length ?? 0 },
+      after: { name: parsed.name, rules: parsed.flow.rules.length },
     });
     res.json({ success: true, data: { id, name: parsed.name, rules: parsed.flow.rules.length } });
   } catch (error) {
@@ -363,11 +394,18 @@ export const testBotRoute = async (req: Request, res: Response): Promise<void> =
 
 export const deleteBotRoute = async (req: Request, res: Response): Promise<void> => {
   try {
-    const result = await prisma.bot.deleteMany({ where: { id: paramStr(req.params.id) } });
+    const id = paramStr(req.params.id);
+    const result = await prisma.bot.deleteMany({ where: { id } });
     if (result.count === 0) {
       jsonError(res, 404, 'Bot not found');
       return;
     }
+    await recordAudit(prisma, {
+      userId: req.userId ?? null,
+      action: 'bot.delete',
+      entity: 'bot',
+      entityId: id,
+    });
     res.json({ success: true, data: { deleted: true } });
   } catch (error) {
     jsonError(res, 500, (error as Error).message);
