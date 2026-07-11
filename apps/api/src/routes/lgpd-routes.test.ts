@@ -6,6 +6,11 @@ vi.mock('../middleware/auth-middleware', () => ({
   authMiddleware: vi.fn((_req, _res, next) => next()),
 }));
 
+// Evita PrismaClient real no teste — as rotas gravam auditoria via prisma.
+vi.mock('../lib/deps', () => ({
+  prisma: { auditLog: { create: vi.fn().mockResolvedValue({}) } },
+}));
+
 const req = (overrides: Partial<Request>): Request => overrides as Request;
 
 const res = () => {

@@ -23,6 +23,9 @@ const mocks = vi.hoisted(() => ({
     session: {
       findUnique: vi.fn(),
     },
+    auditLog: {
+      create: vi.fn().mockResolvedValue({}),
+    },
   },
 }));
 

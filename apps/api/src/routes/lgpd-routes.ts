@@ -4,6 +4,7 @@ import { prisma } from '../lib/deps';
 import type { DataApi } from '../lib/data';
 import { createPrismaDataApi } from '../lib/prisma-data-api';
 import { anonymizeLead, exportLeadData } from '../lib/lgpd';
+import { recordAudit } from '../lib/audit';
 import { logger } from '../lib/logger';
 import { authMiddleware } from '../middleware/auth-middleware';
 
@@ -36,6 +37,8 @@ export const exportLeadRoute = async (
   try {
     const exported = await exportLeadData(leadId, api);
     logger.info({ action: 'lgpd.export', leadId, actorId: req.userId }, 'LGPD export');
+    // Sem before/after: o dado exportado não deve ser duplicado na auditoria.
+    await recordAudit(prisma, { userId: req.userId ?? null, action: 'lgpd.export', entity: 'lead', entityId: leadId });
     res.json({ success: true, data: exported });
   } catch (error) {
     const message = (error as Error).message;
@@ -61,6 +64,7 @@ export const anonymizeLeadRoute = async (
   try {
     const result = await anonymizeLead(leadId, api);
     logger.warn({ action: 'lgpd.anonymize', leadId, actorId: req.userId, ...result }, 'LGPD anonymize');
+    await recordAudit(prisma, { userId: req.userId ?? null, action: 'lgpd.anonymize', entity: 'lead', entityId: leadId, after: result });
     res.json({ success: true, data: result });
   } catch (error) {
     const message = (error as Error).message;
