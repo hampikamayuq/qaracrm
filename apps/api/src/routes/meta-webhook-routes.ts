@@ -156,9 +156,12 @@ export const receiveMetaWebhook = async (req: Request, res: Response): Promise<v
           .catch((err) => console.error('[tawany] webhook run failed:', (err as Error).message));
       } catch (err) {
         console.error('[meta-webhook] async processing error:', (err as Error).message);
+        // Falha transiente (ex.: IA fora do ar) fica processed: false para o
+        // sweep tentar de novo; o catch do sweep é quem dead-lettera. Replay é
+        // idempotente: o ingest dedupa mensagens por externalId.
         await prisma.webhookEvent.update({
           where: { id: webhookEvent.id },
-          data: { processed: true, error: (err as Error).message.slice(0, 500) },
+          data: { processed: false, error: (err as Error).message.slice(0, 500) },
         });
       }
     });
