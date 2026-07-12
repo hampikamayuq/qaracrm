@@ -303,10 +303,13 @@ describe('handleEvolutionWebhook — bots no canal QR', () => {
   it('bot casa no QR: responde e a mensagem NÃO segue pra Tawany', async () => {
     const list = listWithBot([{ terms: ['quero agendar'], responses: ['Já te ajudo!'] }]);
     const create = vi.fn().mockResolvedValue({ id: 'msg-1' });
+    // gate do runner consulta a conversa via get
+    const get = vi.fn().mockImplementation(async (obj: string) =>
+      obj === 'conversation' ? { status: 'OPEN', needsHuman: false } : null);
 
     const result = await handleEvolutionWebhook(
       inboundBody({ message: { conversation: 'quero agendar' } }),
-      api({ list, create }),
+      api({ list, create, get }),
       processDebounce(),
     );
 

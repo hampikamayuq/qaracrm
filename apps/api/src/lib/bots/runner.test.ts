@@ -22,7 +22,9 @@ const bot = (id: string, rules: unknown[], name = `Bot ${id}`) => ({
 });
 
 const api = (over: Partial<DataApi> = {}): DataApi => ({
-  get: vi.fn().mockResolvedValue(null),
+  // default: conversa OPEN sem handoff (o gate deixa o bot rodar); lead sem nome
+  get: vi.fn().mockImplementation(async (obj: string) =>
+    obj === 'conversation' ? { status: 'OPEN', needsHuman: false } : null),
   list: vi.fn().mockResolvedValue([]),
   create: vi.fn().mockResolvedValue({ id: 'created' }),
   update: vi.fn().mockResolvedValue({ id: 'updated' }),
@@ -140,7 +142,9 @@ describe('runBotsForInbound', () => {
     const list = vi.fn().mockResolvedValue([
       bot('b1', [{ terms: ['oi'], responses: ['Olá {{nome}} , bem-vinda!'] }]),
     ]);
-    const get = vi.fn().mockResolvedValue(null);
+    // conversa OPEN (passa o gate) mas sem leadId → nome vazio na interpolação
+    const get = vi.fn().mockImplementation(async (obj: string) =>
+      obj === 'conversation' ? { status: 'OPEN', needsHuman: false } : null);
 
     await runBotsForInbound({ conversationId: 'c1', text: 'oi' }, api({ list, get }));
 
@@ -148,6 +152,26 @@ describe('runBotsForInbound', () => {
       { conversationId: 'c1', text: 'Olá , bem-vinda!' },
       expect.anything(),
     );
+  });
+
+  it('gate: conversa com handoff pendente (needsHuman) não recebe bot', async () => {
+    const get = vi.fn().mockResolvedValue({ status: 'OPEN', needsHuman: true });
+    const list = vi.fn();
+
+    const outcome = await runBotsForInbound({ conversationId: 'c1', text: 'oi' }, api({ get, list }));
+
+    expect(outcome).toBeNull();
+    expect(list).not.toHaveBeenCalled();
+    expect(mocks.sendExecute).not.toHaveBeenCalled();
+  });
+
+  it('gate: conversa RESOLVED/fechada não recebe bot', async () => {
+    const get = vi.fn().mockResolvedValue({ status: 'RESOLVED', needsHuman: false });
+
+    const outcome = await runBotsForInbound({ conversationId: 'c1', text: 'oi' }, api({ get }));
+
+    expect(outcome).toBeNull();
+    expect(mocks.sendExecute).not.toHaveBeenCalled();
   });
 
   it('falha ao gravar BotReply nunca segura a resposta (non-fatal)', async () => {

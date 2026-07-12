@@ -127,9 +127,15 @@ export const sendEvolutionText = async (
   number: string,
   text: string,
 ): Promise<string> => {
+  // delay: a Evolution simula "digitando…" e espaça o envio. Sem isso,
+  // mensagens consecutivas (ex.: bot com 2+ respostas, 1s de intervalo) são
+  // aceitas pelo gateway mas silenciosamente descartadas pelo WhatsApp —
+  // visto em produção (4 SENT com id, só a 1ª entregue).
+  const delay = Number.parseInt(process.env.EVOLUTION_SEND_DELAY_MS ?? '1200', 10);
   const json = await request('POST', `/message/sendText/${encodeURIComponent(instanceName)}`, {
     number,
     text,
+    ...(Number.isFinite(delay) && delay > 0 ? { delay } : {}),
   });
   const key = (json.key ?? {}) as Record<string, unknown>;
   const id = typeof key.id === 'string' ? key.id : '';

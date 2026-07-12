@@ -297,11 +297,15 @@ describe('handleMetaWebhook — bots com action', () => {
       return [];
     });
 
+  // O gate do runner consulta a conversa: OPEN sem handoff deixa o bot rodar.
+  const openConvGet = () => vi.fn().mockImplementation(async (obj: string) =>
+    obj === 'conversation' ? { status: 'OPEN', needsHuman: false } : null);
+
   it('bot reply casa: envia, grava botReply e NÃO segue pra Tawany', async () => {
     const list = withBot([{ terms: ['quero agendar'], responses: ['Já te ajudo!'] }]);
     const create = vi.fn().mockResolvedValue({ id: 'x' });
 
-    const result = await handleMetaWebhook(waBody, api({ list, create }), processDebounce());
+    const result = await handleMetaWebhook(waBody, api({ list, create, get: openConvGet() }), processDebounce());
 
     expect(mocks.sendWhatsApp.execute).toHaveBeenCalledWith(
       expect.objectContaining({ text: 'Já te ajudo!' }),
@@ -315,7 +319,7 @@ describe('handleMetaWebhook — bots com action', () => {
     const list = withBot([{ terms: ['quero agendar'], responses: [], action: 'tawany' }]);
     const create = vi.fn().mockResolvedValue({ id: 'msg-1' });
 
-    const result = await handleMetaWebhook(waBody, api({ list, create }), processDebounce());
+    const result = await handleMetaWebhook(waBody, api({ list, create, get: openConvGet() }), processDebounce());
 
     expect(mocks.sendWhatsApp.execute).not.toHaveBeenCalled();
     expect(create).toHaveBeenCalledWith('botReply', expect.objectContaining({ action: 'tawany' }));

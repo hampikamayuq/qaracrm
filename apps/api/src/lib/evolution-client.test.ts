@@ -128,7 +128,18 @@ describe('sendEvolutionText', () => {
     const id = await sendEvolutionText('qara-recepcao', '5511999998888', 'Olá');
     expect(id).toBe('EVOMSG1');
     const init = fetchMock.mock.calls[0][1] as { body: string };
+    // delay: Evolution simula digitação e espaça envios consecutivos (default 1200ms)
+    expect(JSON.parse(init.body)).toEqual({ number: '5511999998888', text: 'Olá', delay: 1200 });
+  });
+
+  it('EVOLUTION_SEND_DELAY_MS=0 desliga o delay', async () => {
+    setEnv();
+    process.env.EVOLUTION_SEND_DELAY_MS = '0';
+    const fetchMock = stubFetch({ key: { id: 'EVOMSG2' } });
+    await sendEvolutionText('qara-recepcao', '5511999998888', 'Olá');
+    const init = fetchMock.mock.calls[0][1] as { body: string };
     expect(JSON.parse(init.body)).toEqual({ number: '5511999998888', text: 'Olá' });
+    delete process.env.EVOLUTION_SEND_DELAY_MS;
   });
 
   it('throws on HTTP error and on missing id', async () => {
