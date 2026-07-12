@@ -315,6 +315,17 @@ export type BotTestResult = {
   responses: string[];
 };
 
+export type WhatsAppTemplate = {
+  id: string;
+  name: string;
+  status: string; // APPROVED | PENDING | REJECTED
+  category: string;
+  language: string;
+  body: string;
+  footer: string | null;
+  rejectedReason: string | null;
+};
+
 export type ConversationDetail = Omit<Conversation, 'messages' | 'aiSuggestions' | 'lead'> & {
   classification?: unknown;
   lead: NonNullable<Conversation['lead']> & {
@@ -690,6 +701,21 @@ export const api = {
   } = {}): Promise<{ items: Conversation[]; total: number; page: number }> {
     const res = await this.get<{ items: Conversation[]; total: number; page: number }>(`/inbox/list${qs(opts)}`);
     return res.data ?? { items: [], total: 0, page: 1 };
+  },
+
+  async getTemplates(): Promise<{ configured: boolean; templates: WhatsAppTemplate[] } | null> {
+    const res = await this.get<{ configured: boolean; templates: WhatsAppTemplate[] }>('/templates');
+    return res.data ?? null;
+  },
+
+  createTemplate(input: {
+    name: string; category: string; body: string; footer?: string; examples?: string[];
+  }): Promise<ApiResponse<{ name: string; status: string }>> {
+    return this.post('/templates', input);
+  },
+
+  deleteTemplate(name: string): Promise<ApiResponse<{ deleted: string }>> {
+    return this.fetch(`/templates/${encodeURIComponent(name)}`, { method: 'DELETE' });
   },
 
   // Inicia (ou reabre) conversa a partir de um contato/lead.
