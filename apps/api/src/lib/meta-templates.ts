@@ -9,15 +9,22 @@ const DEFAULT_GRAPH_BASE_URL = 'https://graph.facebook.com/v20.0';
 export type MetaTemplateStatus = 'APPROVED' | 'PENDING' | 'REJECTED' | string;
 export type MetaTemplateCategory = 'UTILITY' | 'MARKETING' | 'AUTHENTICATION';
 
+// Botões do template: resposta rápida (QUICK_REPLY, só texto) ou link (URL).
+export type TemplateButton =
+  | { type: 'QUICK_REPLY'; text: string }
+  | { type: 'URL'; text: string; url: string };
+
 export type MetaTemplate = {
   id: string;
   name: string;
   status: MetaTemplateStatus;
   category: string;
   language: string;
-  // Texto do BODY (e FOOTER, se houver) extraído dos components.
+  // Componentes extraídos para exibição (header texto, body, footer, botões).
+  header: string | null;
   body: string;
   footer: string | null;
+  buttons: TemplateButton[];
   rejectedReason: string | null;
 };
 
@@ -26,7 +33,9 @@ export type CreateTemplateInput = {
   category: MetaTemplateCategory;
   language: string;
   body: string;
+  header?: string;
   footer?: string;
+  buttons?: TemplateButton[];
   // Valores de exemplo para {{1}}..{{n}} — a Meta exige quando há placeholder.
   examples?: string[];
 };
@@ -63,7 +72,8 @@ const graphError = async (res: Response): Promise<Error> => {
   return new Error(`Meta Templates API: ${detail}`);
 };
 
-type GraphComponent = { type?: string; text?: string };
+type GraphButton = { type?: string; text?: string; url?: string };
+type GraphComponent = { type?: string; format?: string; text?: string; buttons?: GraphButton[] };
 type GraphTemplate = {
   id?: string;
   name?: string;
@@ -74,6 +84,13 @@ type GraphTemplate = {
   rejected_reason?: string;
 };
 
+const parseButtons = (raw: GraphButton[] | undefined): TemplateButton[] =>
+  (raw ?? []).flatMap((b): TemplateButton[] => {
+    if (b.type === 'URL' && b.url) return [{ type: 'URL', text: String(b.text ?? ''), url: b.url }];
+    if (b.type === 'QUICK_REPLY') return [{ type: 'QUICK_REPLY', text: String(b.text ?? '') }];
+    return [];
+  });
+
 export const listMetaTemplates = async (): Promise<MetaTemplate[]> => {
   const res = await graphFetch(
     '/message_templates?fields=id,name,status,category,language,components,rejected_reason&limit=100',
@@ -82,16 +99,18 @@ export const listMetaTemplates = async (): Promise<MetaTemplate[]> => {
   const json = (await res.json()) as { data?: GraphTemplate[] };
   return (json.data ?? []).map((t) => {
     const components = t.components ?? [];
-    const body = components.find((c) => c.type === 'BODY')?.text ?? '';
-    const footer = components.find((c) => c.type === 'FOOTER')?.text ?? null;
+    const headerComp = components.find((c) => c.type === 'HEADER' && c.format === 'TEXT');
+    const buttonsComp = components.find((c) => c.type === 'BUTTONS');
     return {
       id: String(t.id ?? ''),
       name: String(t.name ?? ''),
       status: String(t.status ?? 'PENDING'),
       category: String(t.category ?? ''),
       language: String(t.language ?? ''),
-      body,
-      footer,
+      header: headerComp?.text ?? null,
+      body: components.find((c) => c.type === 'BODY')?.text ?? '',
+      footer: components.find((c) => c.type === 'FOOTER')?.text ?? null,
+      buttons: parseButtons(buttonsComp?.buttons),
       rejectedReason: t.rejected_reason ?? null,
     };
   });
@@ -108,17 +127,28 @@ export const countPlaceholders = (body: string): number => {
 
 export const createMetaTemplate = async (input: CreateTemplateInput): Promise<{ id: string; status: string }> => {
   const placeholders = countPlaceholders(input.body);
-  const components: Array<Record<string, unknown>> = [
-    {
-      type: 'BODY',
-      text: input.body,
-      ...(placeholders > 0
-        ? { example: { body_text: [(input.examples ?? []).slice(0, placeholders)] } }
-        : {}),
-    },
-  ];
+  const components: Array<Record<string, unknown>> = [];
+  if (input.header?.trim()) {
+    components.push({ type: 'HEADER', format: 'TEXT', text: input.header.trim() });
+  }
+  components.push({
+    type: 'BODY',
+    text: input.body,
+    ...(placeholders > 0
+      ? { example: { body_text: [(input.examples ?? []).slice(0, placeholders)] } }
+      : {}),
+  });
   if (input.footer?.trim()) {
     components.push({ type: 'FOOTER', text: input.footer.trim() });
+  }
+  if (input.buttons && input.buttons.length > 0) {
+    components.push({
+      type: 'BUTTONS',
+      buttons: input.buttons.map((b) =>
+        b.type === 'URL'
+          ? { type: 'URL', text: b.text, url: b.url }
+          : { type: 'QUICK_REPLY', text: b.text }),
+    });
   }
   const res = await graphFetch('/message_templates', {
     method: 'POST',

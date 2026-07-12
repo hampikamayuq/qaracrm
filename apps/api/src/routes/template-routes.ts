@@ -11,6 +11,7 @@ import {
   isMetaTemplatesConfigured,
   listMetaTemplates,
   type MetaTemplateCategory,
+  type TemplateButton,
 } from '../lib/meta-templates';
 
 // Templates HSM (WhatsApp oficial): criar/submeter pra aprovação da Meta,
@@ -25,6 +26,30 @@ const jsonError = (res: Response, status: number, error: string): void => {
 const CATEGORIES = new Set<MetaTemplateCategory>(['UTILITY', 'MARKETING', 'AUTHENTICATION']);
 // Regra da Meta: minúsculas, números e underscore.
 const NAME_PATTERN = /^[a-z0-9_]{1,120}$/;
+const MAX_BUTTONS = 3;
+
+// Valida/normaliza os botões vindos do editor. Retorna string de erro ou a
+// lista pronta pra Meta. QUICK_REPLY = só texto; URL = texto + link https.
+const parseButtons = (raw: unknown): { error: string } | { buttons: TemplateButton[] } => {
+  if (raw === undefined) return { buttons: [] };
+  if (!Array.isArray(raw)) return { error: 'buttons deve ser uma lista' };
+  if (raw.length > MAX_BUTTONS) return { error: `Máximo de ${MAX_BUTTONS} botões` };
+  const buttons: TemplateButton[] = [];
+  for (const [i, item] of raw.entries()) {
+    const b = (item && typeof item === 'object' ? item : {}) as Record<string, unknown>;
+    const text = typeof b.text === 'string' ? b.text.trim() : '';
+    if (!text) return { error: `Botão ${i + 1}: texto obrigatório` };
+    if (text.length > 25) return { error: `Botão ${i + 1}: texto até 25 caracteres` };
+    if (b.type === 'URL') {
+      const url = typeof b.url === 'string' ? b.url.trim() : '';
+      if (!/^https?:\/\/.+/.test(url)) return { error: `Botão ${i + 1}: informe um link válido (https://…)` };
+      buttons.push({ type: 'URL', text, url });
+    } else {
+      buttons.push({ type: 'QUICK_REPLY', text });
+    }
+  }
+  return { buttons };
+};
 
 export const listTemplatesRoute = async (_req: Request, res: Response): Promise<void> => {
   try {
@@ -48,6 +73,7 @@ export const createTemplateRoute = async (req: Request, res: Response): Promise<
     const name = typeof req.body?.name === 'string' ? req.body.name.trim() : '';
     const category = typeof req.body?.category === 'string' ? req.body.category : '';
     const body = typeof req.body?.body === 'string' ? req.body.body.trim() : '';
+    const header = typeof req.body?.header === 'string' ? req.body.header.trim() : '';
     const footer = typeof req.body?.footer === 'string' ? req.body.footer.trim() : '';
     const language = typeof req.body?.language === 'string' && req.body.language.trim()
       ? req.body.language.trim()
@@ -73,13 +99,24 @@ export const createTemplateRoute = async (req: Request, res: Response): Promise<
       jsonError(res, 400, `A Meta exige exemplo para cada variável: informe ${placeholders} exemplo(s) para {{1}}..{{${placeholders}}}.`);
       return;
     }
+    if (header.length > 60) {
+      jsonError(res, 400, 'header: até 60 caracteres');
+      return;
+    }
+    const parsedButtons = parseButtons(req.body?.buttons);
+    if ('error' in parsedButtons) {
+      jsonError(res, 400, parsedButtons.error);
+      return;
+    }
 
     const created = await createMetaTemplate({
       name,
       category: category as MetaTemplateCategory,
       language,
       body,
+      ...(header ? { header } : {}),
       ...(footer ? { footer } : {}),
+      ...(parsedButtons.buttons.length > 0 ? { buttons: parsedButtons.buttons } : {}),
       examples,
     });
     await recordAudit(prisma, {

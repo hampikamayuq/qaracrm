@@ -315,14 +315,20 @@ export type BotTestResult = {
   responses: string[];
 };
 
+export type TemplateButton =
+  | { type: 'QUICK_REPLY'; text: string }
+  | { type: 'URL'; text: string; url: string };
+
 export type WhatsAppTemplate = {
   id: string;
   name: string;
   status: string; // APPROVED | PENDING | REJECTED
   category: string;
   language: string;
+  header: string | null;
   body: string;
   footer: string | null;
+  buttons: TemplateButton[];
   rejectedReason: string | null;
 };
 
@@ -709,7 +715,8 @@ export const api = {
   },
 
   createTemplate(input: {
-    name: string; category: string; body: string; footer?: string; examples?: string[];
+    name: string; category: string; body: string;
+    header?: string; footer?: string; examples?: string[]; buttons?: TemplateButton[];
   }): Promise<ApiResponse<{ name: string; status: string }>> {
     return this.post('/templates', input);
   },
