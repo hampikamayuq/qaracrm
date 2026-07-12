@@ -692,6 +692,11 @@ export const api = {
     return res.data ?? { items: [], total: 0, page: 1 };
   },
 
+  // Inicia (ou reabre) conversa a partir de um contato/lead.
+  startConversation(input: { leadId?: string; patientId?: string }): Promise<ApiResponse<{ conversationId: string; created: boolean }>> {
+    return this.post('/inbox/start', input);
+  },
+
   async getConversation(id: string): Promise<ConversationDetail | null> {
     const res = await this.get<ConversationDetail>(`/inbox/${id}`);
     return res.data ?? null;
