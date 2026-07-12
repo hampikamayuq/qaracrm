@@ -4,6 +4,12 @@ import { hashPassword } from '../auth';
 async function main() {
   console.log('Seeding database...');
 
+  if (process.env.NODE_ENV === 'production' && !process.env.ADMIN_PASSWORD) {
+    throw new Error(
+      'ADMIN_PASSWORD é obrigatória em produção. Defina a variável de ambiente antes de rodar o seed — o fallback "admin123" só vale em desenvolvimento.',
+    );
+  }
+
   // Default admin user
   const adminPassword = await hashPassword(process.env.ADMIN_PASSWORD ?? 'admin123');
   await prisma.user.upsert({

@@ -69,6 +69,9 @@ model Lead {
   // Filtrado por janela em dashboard/summary, leads-per-day, sources e
   // report/comercial (createdAt >= start / range).
   @@index([createdAt])
+  // Lookup por telefone em TODO webhook de entrada (evolution-webhook,
+  // meta-webhook) — hot-path do ingest.
+  @@index([phone])
 }
 
 model Patient {
@@ -180,6 +183,9 @@ model ChatMessage {
   // report/atendimento filtra mensagens por janela (sentAt range) sem
   // conversationId — o índice composto acima não cobre range só em sentAt.
   @@index([sentAt])
+  // Dedup do ingest filtra por externalId sozinho — o @@unique acima começa
+  // por conversationId, então não serve essa query.
+  @@index([externalId])
 }
 
 model AiSuggestion {
