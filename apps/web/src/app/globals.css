@@ -3659,3 +3659,98 @@ a.chip {
   max-width: 720px;
   width: min(720px, 100vw);
 }
+
+/* ================================================================
+   Templates HSM — editor com prévia estilo WhatsApp
+   ================================================================ */
+
+.template-editor {
+  align-items: start;
+  display: grid;
+  gap: 16px;
+  grid-template-columns: minmax(0, 1fr) 300px;
+}
+
+.template-preview-col {
+  display: grid;
+  gap: 6px;
+  position: sticky;
+  top: 14px;
+}
+
+.template-button-row {
+  align-items: center;
+  display: flex;
+  gap: 6px;
+}
+
+.template-button-row .select {
+  flex: 0 0 auto;
+}
+
+/* Balão de mensagem estilo WhatsApp (fundo do app + bolha verde-clara) */
+.wa-preview {
+  background: #e5ddd5;
+  background-image: linear-gradient(rgba(229, 221, 213, 0.9), rgba(229, 221, 213, 0.9));
+  border-radius: 12px;
+  display: grid;
+  gap: 6px;
+  padding: 14px 12px;
+}
+
+.wa-bubble {
+  background: #fff;
+  border-radius: 8px;
+  box-shadow: 0 1px 1px rgba(0, 0, 0, 0.12);
+  display: grid;
+  gap: 4px;
+  padding: 8px 10px;
+  position: relative;
+}
+
+.wa-header {
+  color: #111b21;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.wa-body {
+  color: #111b21;
+  font-size: 13.5px;
+  line-height: 1.4;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.wa-footer {
+  color: #667781;
+  font-size: 11.5px;
+}
+
+.wa-buttons {
+  display: grid;
+  gap: 4px;
+}
+
+.wa-button {
+  align-items: center;
+  background: #fff;
+  border-radius: 8px;
+  box-shadow: 0 1px 1px rgba(0, 0, 0, 0.12);
+  color: #0a7cff;
+  display: flex;
+  font-size: 13.5px;
+  font-weight: 500;
+  gap: 6px;
+  justify-content: center;
+  padding: 8px;
+}
+
+@media (max-width: 860px) {
+  .template-editor {
+    grid-template-columns: 1fr;
+  }
+  .template-preview-col {
+    position: static;
+  }
+}

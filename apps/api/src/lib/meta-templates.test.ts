@@ -86,6 +86,59 @@ describe('meta-templates', () => {
     expect(result).toEqual({ id: 't9', status: 'PENDING' });
   });
 
+  it('lista extrai HEADER (texto) e BUTTONS dos components', async () => {
+    fetchMock.mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        data: [{
+          id: 't2', name: 'qara_lembrete', status: 'APPROVED', category: 'UTILITY', language: 'pt_BR',
+          components: [
+            { type: 'HEADER', format: 'TEXT', text: 'Lembrete' },
+            { type: 'BODY', text: 'Oi {{1}}' },
+            { type: 'BUTTONS', buttons: [
+              { type: 'QUICK_REPLY', text: 'Confirmar' },
+              { type: 'URL', text: 'Agendar', url: 'https://qara.example/agendar' },
+            ] },
+          ],
+        }],
+      }),
+    });
+
+    const [t] = await listMetaTemplates();
+
+    expect(t.header).toBe('Lembrete');
+    expect(t.buttons).toEqual([
+      { type: 'QUICK_REPLY', text: 'Confirmar' },
+      { type: 'URL', text: 'Agendar', url: 'https://qara.example/agendar' },
+    ]);
+  });
+
+  it('cria com HEADER, BUTTONS (quick-reply + url) na ordem certa dos components', async () => {
+    fetchMock.mockResolvedValue({ ok: true, json: async () => ({ id: 't3', status: 'PENDING' }) });
+
+    await createMetaTemplate({
+      name: 'qara_confirma',
+      category: 'UTILITY',
+      language: 'pt_BR',
+      header: 'Confirmação',
+      body: 'Oi {{1}}, confirma?',
+      footer: 'QARA',
+      examples: ['Maria'],
+      buttons: [
+        { type: 'QUICK_REPLY', text: 'Sim' },
+        { type: 'URL', text: 'Remarcar', url: 'https://qara.example/remarcar' },
+      ],
+    });
+
+    const payload = JSON.parse(fetchMock.mock.calls[0][1].body as string);
+    expect(payload.components.map((c: { type: string }) => c.type)).toEqual(['HEADER', 'BODY', 'FOOTER', 'BUTTONS']);
+    expect(payload.components[0]).toEqual({ type: 'HEADER', format: 'TEXT', text: 'Confirmação' });
+    expect(payload.components[3].buttons).toEqual([
+      { type: 'QUICK_REPLY', text: 'Sim' },
+      { type: 'URL', text: 'Remarcar', url: 'https://qara.example/remarcar' },
+    ]);
+  });
+
   it('erros da Graph API viram mensagem legível (error_user_msg)', async () => {
     fetchMock.mockResolvedValue({
       ok: false,

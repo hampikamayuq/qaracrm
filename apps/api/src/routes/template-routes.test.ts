@@ -106,6 +106,39 @@ describe('Template routes', () => {
     });
   });
 
+  it('POST valida botões (máx 3, URL exige link) e repassa header', async () => {
+    const { createTemplateRoute } = await import('./template-routes');
+
+    const badUrl = res();
+    await createTemplateRoute(
+      req({ body: { name: 'qara_ok', category: 'UTILITY', body: 'oi', buttons: [{ type: 'URL', text: 'ir', url: 'nao-e-url' }] } }),
+      badUrl,
+    );
+    expect(badUrl.status).toHaveBeenCalledWith(400);
+
+    const tooMany = res();
+    await createTemplateRoute(
+      req({ body: { name: 'qara_ok', category: 'UTILITY', body: 'oi', buttons: [
+        { type: 'QUICK_REPLY', text: 'a' }, { type: 'QUICK_REPLY', text: 'b' },
+        { type: 'QUICK_REPLY', text: 'c' }, { type: 'QUICK_REPLY', text: 'd' },
+      ] } }),
+      tooMany,
+    );
+    expect(tooMany.status).toHaveBeenCalledWith(400);
+    expect(mocks.createMetaTemplate).not.toHaveBeenCalled();
+
+    mocks.createMetaTemplate.mockResolvedValue({ id: 't1', status: 'PENDING' });
+    const ok = res();
+    await createTemplateRoute(
+      req({ body: { name: 'qara_ok', category: 'UTILITY', header: 'Título', body: 'oi', buttons: [{ type: 'QUICK_REPLY', text: 'Confirmar' }] } }),
+      ok,
+    );
+    expect(mocks.createMetaTemplate).toHaveBeenCalledWith(expect.objectContaining({
+      header: 'Título',
+      buttons: [{ type: 'QUICK_REPLY', text: 'Confirmar' }],
+    }));
+  });
+
   it('DELETE exclui na Meta e audita; erro da Graph vira 502 legível', async () => {
     const { deleteTemplateRoute } = await import('./template-routes');
     const ok = res();
