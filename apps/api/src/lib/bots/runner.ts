@@ -71,6 +71,14 @@ export const runBotsForInbound = async (
   params: { conversationId: string; text: string },
   data: DataApi,
 ): Promise<BotOutcome | null> => {
+  // Mesmo gate da Tawany: conversa com humano (handoff pendente) ou fora de
+  // OPEN não recebe bot — visto em produção o bot repetindo boas-vindas numa
+  // conversa já resolvida/assumida por humano.
+  const conv = await data.get('conversation', params.conversationId, { status: true, needsHuman: true });
+  if (!conv || conv.needsHuman === true || (typeof conv.status === 'string' && conv.status !== 'OPEN')) {
+    return null;
+  }
+
   const match = await matchActiveBots(data, params.text);
   if (!match) return null;
 
