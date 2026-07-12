@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
     whatsAppInstance: {
       findMany: vi.fn(),
       findUnique: vi.fn(),
+      findFirst: vi.fn(),
       create: vi.fn(),
       update: vi.fn(),
       delete: vi.fn(),
@@ -14,6 +15,7 @@ const mocks = vi.hoisted(() => ({
   evolution: {
     isEvolutionConfigured: vi.fn().mockReturnValue(true),
     createEvolutionInstance: vi.fn().mockResolvedValue(undefined),
+    setEvolutionWebhook: vi.fn().mockResolvedValue(undefined),
     connectEvolutionInstance: vi.fn(),
     getEvolutionConnectionState: vi.fn(),
     logoutEvolutionInstance: vi.fn().mockResolvedValue(undefined),
@@ -207,5 +209,48 @@ describe('channel routes', () => {
       await route(req({ params: { id: 'nope' } }), response);
       expect(response.status).toHaveBeenCalledWith(404);
     }
+  });
+
+  describe('linkChannelRoute (instância existente no Evolution)', () => {
+    it('valida payload e evita vínculo duplicado', async () => {
+      const { linkChannelRoute } = await import('./channel-routes');
+
+      const missing = res();
+      await linkChannelRoute(req({ body: { name: 'Clinica' } }), missing);
+      expect(missing.status).toHaveBeenCalledWith(400);
+
+      mocks.prisma.whatsAppInstance.findFirst.mockResolvedValueOnce({ id: 'w1' });
+      const dup = res();
+      await linkChannelRoute(req({ body: { name: 'Clinica', instanceName: 'qara222' } }), dup);
+      expect(dup.status).toHaveBeenCalledWith(409);
+    });
+
+    it('404 quando a instância não existe no gateway', async () => {
+      mocks.prisma.whatsAppInstance.findFirst.mockResolvedValue(null);
+      mocks.evolution.getEvolutionConnectionState.mockRejectedValueOnce(new Error('Evolution API error: 404'));
+      const { linkChannelRoute } = await import('./channel-routes');
+      const response = res();
+
+      await linkChannelRoute(req({ body: { name: 'Clinica', instanceName: 'nao-existe' } }), response);
+
+      expect(response.status).toHaveBeenCalledWith(404);
+      expect(mocks.evolution.setEvolutionWebhook).not.toHaveBeenCalled();
+    });
+
+    it('vincula: configura webhook no gateway e registra com o status remoto', async () => {
+      mocks.prisma.whatsAppInstance.findFirst.mockResolvedValue(null);
+      mocks.evolution.getEvolutionConnectionState.mockResolvedValueOnce('CONNECTED');
+      mocks.prisma.whatsAppInstance.create.mockResolvedValueOnce({ id: 'w9', name: 'Clinica Qara', instanceName: 'qara222', status: 'CONNECTED' });
+      const { linkChannelRoute } = await import('./channel-routes');
+      const response = res();
+
+      await linkChannelRoute(req({ body: { name: 'Clinica Qara', instanceName: 'qara222' } }), response);
+
+      expect(mocks.evolution.setEvolutionWebhook).toHaveBeenCalledWith('qara222');
+      expect(mocks.prisma.whatsAppInstance.create).toHaveBeenCalledWith(expect.objectContaining({
+        data: expect.objectContaining({ name: 'Clinica Qara', instanceName: 'qara222', status: 'CONNECTED' }),
+      }));
+      expect(response.status).toHaveBeenCalledWith(201);
+    });
   });
 });
