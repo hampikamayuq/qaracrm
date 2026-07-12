@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
-import { Pencil, Plus, RefreshCw, Search, UserRound, X } from 'lucide-react';
+import { MessageSquareText, Pencil, Plus, RefreshCw, Search, UserRound, X } from 'lucide-react';
+import { useRouter } from 'next/navigation';
 import { api, type Patient, type PatientDetail, type PatientInput } from '@/lib/api';
 import { ActivityTimeline } from '../activity-timeline';
 
@@ -208,6 +209,26 @@ const PatientDetailPanel = ({
   loading: boolean;
   onEdit: () => void;
 }) => {
+  const router = useRouter();
+  const [starting, setStarting] = useState(false);
+  const [startError, setStartError] = useState('');
+
+  const startConversation = async () => {
+    if (!detail) return;
+    setStarting(true);
+    setStartError('');
+    try {
+      const res = await api.startConversation({ patientId: detail.id });
+      if (res.success && res.data) {
+        router.push(`/inbox?conversationId=${res.data.conversationId}`);
+      } else {
+        setStartError(res.error ?? 'Falha ao iniciar a conversa.');
+      }
+    } finally {
+      setStarting(false);
+    }
+  };
+
   if (loading && !detail) {
     return <div className="contact-panel"><div className="muted">Carregando paciente…</div></div>;
   }
@@ -232,8 +253,18 @@ const PatientDetailPanel = ({
             <span className="faint">cadastro direto</span>
           )}
         </div>
+        <button
+          type="button"
+          className="btn btn-primary"
+          disabled={starting}
+          title={detail.phone ? 'Abrir (ou iniciar) a conversa no Inbox' : 'Cadastre o telefone antes de conversar'}
+          onClick={startConversation}
+        >
+          <MessageSquareText size={14} /> {starting ? 'Abrindo…' : 'Conversar'}
+        </button>
         <button type="button" className="btn" onClick={onEdit}><Pencil size={14} /> Editar</button>
       </div>
+      {startError ? <p className="error" style={{ margin: '6px 0 0' }}>{startError}</p> : null}
 
       <div className="panel-block">
         <h3>Dados</h3>

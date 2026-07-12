@@ -7,10 +7,22 @@ const mocks = vi.hoisted(() => ({
       findMany: vi.fn(),
       count: vi.fn(),
       findUnique: vi.fn(),
+      findFirst: vi.fn(),
+      create: vi.fn(),
       updateMany: vi.fn(),
     },
     lead: {
       update: vi.fn(),
+      findUnique: vi.fn(),
+      findFirst: vi.fn(),
+      create: vi.fn(),
+    },
+    patient: {
+      findUnique: vi.fn(),
+      update: vi.fn().mockResolvedValue({}),
+    },
+    whatsAppInstance: {
+      findFirst: vi.fn().mockResolvedValue(null),
     },
     aiSuggestion: {
       findMany: vi.fn(),
@@ -403,6 +415,110 @@ describe('Inbox phase-3 actions', () => {
     expect(mocks.prisma.lead.update).toHaveBeenCalledWith({
       where: { id: 'l1' },
       data: { tags: ['unha'] },
+    });
+  });
+
+  describe('startConversationRoute', () => {
+    beforeEach(() => {
+      delete process.env.META_ACCESS_TOKEN;
+      delete process.env.META_PHONE_NUMBER_ID;
+    });
+
+    it('400 sem leadId/patientId e 404 para patient inexistente', async () => {
+      const { startConversationRoute } = await import('./inbox-routes');
+      const r1 = res();
+      await startConversationRoute(req({ body: {} }), r1);
+      expect(r1.status).toHaveBeenCalledWith(400);
+
+      mocks.prisma.patient.findUnique.mockResolvedValue(null);
+      const r2 = res();
+      await startConversationRoute(req({ body: { patientId: 'p-x' } }), r2);
+      expect(r2.status).toHaveBeenCalledWith(404);
+    });
+
+    it('400 quando o contato não tem telefone', async () => {
+      mocks.prisma.patient.findUnique.mockResolvedValue({ id: 'p1', name: 'Maria', phone: null, leadId: null });
+      const { startConversationRoute } = await import('./inbox-routes');
+      const response = res();
+      await startConversationRoute(req({ body: { patientId: 'p1' } }), response);
+      expect(response.status).toHaveBeenCalledWith(400);
+    });
+
+    it('devolve a conversa existente do lead em vez de duplicar', async () => {
+      mocks.prisma.lead.findUnique.mockResolvedValue({ id: 'l1', name: 'Maria', phone: '55 (11) 99999-8888' });
+      mocks.prisma.conversation.findFirst.mockResolvedValue({ id: 'conv-1' });
+      const { startConversationRoute } = await import('./inbox-routes');
+      const response = res();
+
+      await startConversationRoute(req({ body: { leadId: 'l1' } }), response);
+
+      expect(response.json).toHaveBeenCalledWith({
+        success: true,
+        data: { conversationId: 'conv-1', created: false },
+      });
+      expect(mocks.prisma.conversation.create).not.toHaveBeenCalled();
+    });
+
+    it('cria conversa nova conduzida por humano com telefone normalizado', async () => {
+      mocks.prisma.lead.findUnique.mockResolvedValue({ id: 'l1', name: 'Maria', phone: '+55 (11) 99999-8888' });
+      mocks.prisma.conversation.findFirst.mockResolvedValue(null);
+      mocks.prisma.conversation.create.mockResolvedValue({ id: 'conv-new' });
+      const { startConversationRoute } = await import('./inbox-routes');
+      const response = res();
+
+      await startConversationRoute(req({ body: { leadId: 'l1' } }), response);
+
+      expect(mocks.prisma.conversation.create).toHaveBeenCalledWith(expect.objectContaining({
+        data: expect.objectContaining({
+          leadId: 'l1',
+          externalId: '5511999998888',
+          status: 'OPEN',
+          needsHuman: true,
+          handoffReason: 'conversa_iniciada_pela_equipe',
+        }),
+      }));
+      expect(response.json).toHaveBeenCalledWith({
+        success: true,
+        data: { conversationId: 'conv-new', created: true },
+      });
+    });
+
+    it('paciente sem lead: cria lead por telefone e liga o paciente', async () => {
+      mocks.prisma.patient.findUnique.mockResolvedValue({ id: 'p1', name: 'Ana', phone: '5511988887777', leadId: null });
+      mocks.prisma.lead.findFirst.mockResolvedValue(null);
+      mocks.prisma.lead.create.mockResolvedValue({ id: 'lead-new' });
+      mocks.prisma.conversation.findFirst.mockResolvedValue(null);
+      mocks.prisma.conversation.create.mockResolvedValue({ id: 'conv-new' });
+      const { startConversationRoute } = await import('./inbox-routes');
+      const response = res();
+
+      await startConversationRoute(req({ body: { patientId: 'p1' } }), response);
+
+      expect(mocks.prisma.lead.create).toHaveBeenCalledWith(expect.objectContaining({
+        data: expect.objectContaining({ phone: '5511988887777', source: 'CRM' }),
+      }));
+      expect(mocks.prisma.patient.update).toHaveBeenCalledWith(expect.objectContaining({
+        where: { id: 'p1' },
+        data: { leadId: 'lead-new' },
+      }));
+      expect(mocks.prisma.conversation.create).toHaveBeenCalledWith(expect.objectContaining({
+        data: expect.objectContaining({ leadId: 'lead-new', patientId: 'p1' }),
+      }));
+    });
+
+    it('sem Meta configurado usa a primeira instância QR conectada', async () => {
+      mocks.prisma.lead.findUnique.mockResolvedValue({ id: 'l1', name: 'Maria', phone: '5511999998888' });
+      mocks.prisma.conversation.findFirst.mockResolvedValue(null);
+      mocks.prisma.whatsAppInstance.findFirst.mockResolvedValue({ id: 'inst-1' });
+      mocks.prisma.conversation.create.mockResolvedValue({ id: 'conv-qr' });
+      const { startConversationRoute } = await import('./inbox-routes');
+      const response = res();
+
+      await startConversationRoute(req({ body: { leadId: 'l1' } }), response);
+
+      expect(mocks.prisma.conversation.create).toHaveBeenCalledWith(expect.objectContaining({
+        data: expect.objectContaining({ channel: 'WHATSAPP_QR', instanceId: 'inst-1' }),
+      }));
     });
   });
 });

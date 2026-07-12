@@ -5,6 +5,7 @@ import { prisma } from '../lib/deps';
 import { createPrismaDataApi } from '../lib/prisma-data-api';
 import { authMiddleware } from '../middleware/auth-middleware';
 import { sendWhatsApp } from '../lib/tools/sendWhatsApp';
+import { isMetaSendConfigured } from '../lib/whatsapp-client';
 
 const router = Router();
 const data = createPrismaDataApi(prisma);
@@ -217,6 +218,114 @@ export const getInboxDetailRoute = async (req: Request, res: Response): Promise<
   }
 };
 
+// Inicia (ou reabre) uma conversa a partir de um contato — até aqui conversa
+// só nascia de mensagem RECEBIDA via webhook. Aceita leadId ou patientId;
+// paciente sem lead ganha um (find-or-create por telefone, mesmo padrão dos
+// webhooks). Se o lead já tem conversa, devolve a mais recente em vez de
+// duplicar. Canal da conversa nova: oficial quando o envio Meta está
+// configurado; senão a primeira instância QR conectada; senão oficial mesmo
+// (em dev sem Meta o envio grava a mensagem como PENDING, sem quebrar).
+export const startConversationRoute = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const leadIdInput = typeof req.body?.leadId === 'string' ? req.body.leadId : '';
+    const patientIdInput = typeof req.body?.patientId === 'string' ? req.body.patientId : '';
+    if (!leadIdInput && !patientIdInput) {
+      jsonError(res, 400, 'leadId ou patientId required');
+      return;
+    }
+
+    let leadId = leadIdInput;
+    let name = '';
+    let phone = '';
+
+    if (patientIdInput) {
+      const patient = await prisma.patient.findUnique({
+        where: { id: patientIdInput },
+        select: { id: true, name: true, phone: true, leadId: true },
+      });
+      if (!patient) {
+        jsonError(res, 404, 'Patient not found');
+        return;
+      }
+      name = patient.name;
+      phone = (patient.phone ?? '').replace(/\D/g, '');
+      leadId = patient.leadId ?? '';
+    }
+
+    if (leadId) {
+      const lead = await prisma.lead.findUnique({
+        where: { id: leadId },
+        select: { id: true, name: true, phone: true },
+      });
+      if (!lead) {
+        jsonError(res, 404, 'Lead not found');
+        return;
+      }
+      name = name || lead.name;
+      phone = phone || (lead.phone ?? '').replace(/\D/g, '');
+    }
+
+    if (!phone) {
+      jsonError(res, 400, 'Contato sem telefone — cadastre o telefone antes de iniciar a conversa.');
+      return;
+    }
+
+    // Paciente sem lead: find-or-create por telefone (Conversation.leadId é obrigatório).
+    if (!leadId) {
+      const existingLead = await prisma.lead.findFirst({ where: { phone }, select: { id: true } });
+      leadId = existingLead
+        ? existingLead.id
+        : (await prisma.lead.create({ data: { name: name || phone, phone, source: 'CRM' } })).id;
+      // Liga o paciente ao lead para as próximas vezes.
+      await prisma.patient.update({ where: { id: patientIdInput }, data: { leadId } }).catch(() => {});
+    }
+
+    const existing = await prisma.conversation.findFirst({
+      where: { leadId },
+      orderBy: [{ lastMessageAt: 'desc' }, { updatedAt: 'desc' }],
+      select: { id: true },
+    });
+    if (existing) {
+      res.json({ success: true, data: { conversationId: existing.id, created: false } });
+      return;
+    }
+
+    let channel = 'WHATSAPP';
+    let instanceId: string | null = null;
+    if (!isMetaSendConfigured()) {
+      const instance = await prisma.whatsAppInstance.findFirst({
+        where: { status: 'CONNECTED' },
+        orderBy: { createdAt: 'asc' },
+        select: { id: true },
+      });
+      if (instance) {
+        channel = 'WHATSAPP_QR';
+        instanceId = instance.id;
+      }
+    }
+
+    const conversation = await prisma.conversation.create({
+      data: {
+        leadId,
+        ...(patientIdInput ? { patientId: patientIdInput } : {}),
+        channel,
+        instanceId,
+        externalId: phone,
+        status: 'OPEN',
+        // Conversa iniciada pela equipe é conduzida por humano — a Tawany só
+        // entra se alguém devolver pra ela no Inbox.
+        needsHuman: true,
+        handoffReason: 'conversa_iniciada_pela_equipe',
+        lastMessageAt: new Date(),
+      },
+      select: { id: true },
+    });
+    res.json({ success: true, data: { conversationId: conversation.id, created: true } });
+  } catch (error) {
+    jsonError(res, 500, (error as Error).message);
+  }
+};
+
 export const replyRoute = async (req: Request, res: Response): Promise<void> => {
   try {
     const id = paramStr(req.params.id);
@@ -367,6 +476,7 @@ export const removeTagRoute = async (req: Request, res: Response): Promise<void>
 
 router.get('/list', authMiddleware, listInboxRoute);
 router.get('/:id', authMiddleware, getInboxDetailRoute);
+router.post('/start', authMiddleware, startConversationRoute);
 router.post('/:id/reply', authMiddleware, replyRoute);
 router.post('/:id/handoff', authMiddleware, handoffRoute);
 router.post('/:id/devolver-tawany', authMiddleware, devolverTawanyRoute);
