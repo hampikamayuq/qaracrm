@@ -1,18 +1,39 @@
 'use client';
 
-// Editor de fluxo de bot — form estruturado (sem canvas de nós).
-// Schema real do engine: { rules: [{ terms: string[], responses: string[] }] },
-// first-match com normalized-contains. O engine NÃO suporta condições, variáveis
-// nem ação por regra (regra que casa = responde e encerra; sem match = Tawany;
-// termo de risco = humano, sempre) — por isso nada disso aparece aqui.
+// Editor visual de fluxo de bot — construtor vertical estilo Kommo.
+// Cada regra é uma coluna de blocos encadeados: Gatilho → Respostas → Ação
+// final. Honesto com o motor (first-match linear, sem ramificações): a
+// primeira regra que casar executa sua ação e encerra a disputa.
+// Ações do engine: reply (responde e encerra) | handoff (responde se houver
+// e encaminha pro humano) | tawany (não responde; a Tawany assume).
 
-import { useState } from 'react';
-import { AlertTriangle, ArrowDown, ArrowUp, FlaskConical, Plus, Trash2, X } from 'lucide-react';
-import { api, type BotRuleInput, type BotTestResult } from '@/lib/api';
+import { useEffect, useRef, useState } from 'react';
+import {
+  AlertTriangle,
+  ArrowDown,
+  ArrowUp,
+  Bot,
+  FlaskConical,
+  GripVertical,
+  MessageSquareText,
+  Plus,
+  Trash2,
+  UserRound,
+  X,
+  Zap,
+} from 'lucide-react';
+import { api, type BotAction, type BotRuleInput, type BotTestResult } from '@/lib/api';
 
 const MAX_RESPONSES = 4;
+const LIVE_TEST_DEBOUNCE_MS = 400;
 
-type EditorRule = { terms: string[]; responses: string[]; termDraft: string };
+type EditorRule = {
+  terms: string[];
+  responses: string[];
+  action: BotAction;
+  handoffReason: string;
+  termDraft: string;
+};
 
 export type EditorBot = { id: string | null; name: string; rules: BotRuleInput[] };
 
@@ -23,27 +44,40 @@ type Props = {
   onSaved: (message: string) => void;
 };
 
+const ACTION_META: Record<BotAction, { label: string; hint: string }> = {
+  reply: { label: 'Responder e encerrar', hint: 'Envia as respostas acima e encerra — a Tawany não entra.' },
+  handoff: { label: 'Encaminhar p/ humano', hint: 'Envia as respostas (se houver) e marca a conversa como aguardando humano.' },
+  tawany: { label: 'Deixar com a Tawany', hint: 'Não responde nada — encerra a disputa de bots e a Tawany assume.' },
+};
+
 const toEditorRules = (rules: BotRuleInput[]): EditorRule[] => {
   const shaped = rules.map((rule) => ({
     terms: [...rule.terms],
     responses: rule.responses.length > 0 ? [...rule.responses] : [''],
+    action: rule.action ?? ('reply' as BotAction),
+    handoffReason: rule.handoffReason ?? '',
     termDraft: '',
   }));
-  return shaped.length > 0 ? shaped : [{ terms: [], responses: [''], termDraft: '' }];
+  return shaped.length > 0 ? shaped : [{ terms: [], responses: [''], action: 'reply', handoffReason: '', termDraft: '' }];
 };
 
-// Regras completas prontas para a API (respostas vazias descartadas).
+// Regras completas prontas para a API (respostas vazias descartadas;
+// tawany nunca envia respostas, então elas não vão no payload).
 const cleanRules = (rules: EditorRule[]): BotRuleInput[] =>
   rules
     .map((rule) => ({
       terms: rule.terms,
-      responses: rule.responses.map((text) => text.trim()).filter(Boolean),
+      responses: rule.action === 'tawany' ? [] : rule.responses.map((text) => text.trim()).filter(Boolean),
+      ...(rule.action !== 'reply' ? { action: rule.action } : {}),
+      ...(rule.action === 'handoff' && rule.handoffReason.trim() ? { handoffReason: rule.handoffReason.trim() } : {}),
     }))
-    .filter((rule) => rule.terms.length > 0 && rule.responses.length > 0);
+    .filter((rule) => rule.terms.length > 0 && (rule.responses.length > 0 || rule.action === 'handoff' || rule.action === 'tawany'));
 
 const ruleError = (rule: EditorRule): string | null => {
   if (rule.terms.length === 0) return 'Adicione ao menos um gatilho (palavra-chave).';
-  if (rule.responses.every((text) => !text.trim())) return 'Escreva ao menos uma resposta.';
+  if (rule.action === 'reply' && rule.responses.every((text) => !text.trim())) {
+    return 'Escreva ao menos uma resposta (ou troque a ação final).';
+  }
   return null;
 };
 
@@ -54,8 +88,9 @@ export function BotEditor({ bot, riskTerms, onClose, onSaved }: Props) {
   const [saving, setSaving] = useState(false);
   const [serverError, setServerError] = useState('');
   const [testText, setTestText] = useState('');
-  const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<BotTestResult | null>(null);
+  const [dragIndex, setDragIndex] = useState<number | null>(null);
+  const testSeq = useRef(0);
 
   const patchRule = (index: number, patch: Partial<EditorRule>) => {
     setRules((current) => current.map((rule, i) => (i === index ? { ...rule, ...patch } : rule)));
@@ -81,6 +116,42 @@ export function BotEditor({ bot, riskTerms, onClose, onSaved }: Props) {
     });
   };
 
+  const dropOn = (target: number) => {
+    if (dragIndex === null || dragIndex === target) {
+      setDragIndex(null);
+      return;
+    }
+    setRules((current) => {
+      const next = [...current];
+      const [moved] = next.splice(dragIndex, 1);
+      next.splice(target, 0, moved);
+      return next;
+    });
+    setDragIndex(null);
+  };
+
+  // Teste ao vivo: debounce + contador anti-stale (resposta velha não
+  // sobrescreve a nova). Sem texto ou sem regra completa, limpa o resultado.
+  useEffect(() => {
+    const text = testText.trim();
+    const flow = cleanRules(rules);
+    if (!text || flow.length === 0) {
+      setTestResult(null);
+      return;
+    }
+    const seq = ++testSeq.current;
+    const timer = window.setTimeout(() => {
+      void api.testBot(text, { rules: flow })
+        .then((res) => {
+          if (seq === testSeq.current) setTestResult(res.data ?? { matched: false, responses: [] });
+        })
+        .catch(() => {
+          if (seq === testSeq.current) setTestResult(null);
+        });
+    }, LIVE_TEST_DEBOUNCE_MS);
+    return () => window.clearTimeout(timer);
+  }, [testText, rules]);
+
   const save = async () => {
     setSubmitted(true);
     setServerError('');
@@ -100,23 +171,22 @@ export function BotEditor({ bot, riskTerms, onClose, onSaved }: Props) {
     }
   };
 
-  const runTest = async () => {
-    const text = testText.trim();
-    const flow = cleanRules(rules);
-    if (!text || flow.length === 0) return;
-    setTesting(true);
-    try {
-      const res = await api.testBot(text, { rules: flow });
-      setTestResult(res.data ?? { matched: false, responses: [] });
-    } finally {
-      setTesting(false);
+  // ruleIndex do teste é sobre as regras COMPLETAS (cleanRules); mapeia de
+  // volta pro índice do editor para acender o card certo.
+  const hitEditorIndex = (() => {
+    if (!testResult?.matched || testResult.ruleIndex === undefined) return -1;
+    let complete = -1;
+    for (let i = 0; i < rules.length; i++) {
+      if (!ruleError(rules[i]) && rules[i].terms.length > 0) complete++;
+      if (complete === testResult.ruleIndex) return i;
     }
-  };
+    return -1;
+  })();
 
   return (
     <div className="drawer-root" role="dialog" aria-modal="true" aria-labelledby="bot-editor-title">
       <div className="drawer-backdrop" />
-      <aside className="drawer" onClick={(e) => e.stopPropagation()}>
+      <aside className="drawer drawer-wide" onClick={(e) => e.stopPropagation()}>
         <header className="drawer-head">
           <h2 id="bot-editor-title">{bot.id ? 'Editar fluxo' : 'Novo bot'}</h2>
           <button onClick={onClose} className="icon-btn" type="button" aria-label="Fechar editor">
@@ -151,53 +221,53 @@ export function BotEditor({ bot, riskTerms, onClose, onSaved }: Props) {
           </section>
 
           <section className="drawer-section">
-            <h3>Regras</h3>
-            <p className="muted" style={{ margin: '4px 0 8px' }}>
-              Primeira regra que casar responde e encerra. Sem match, a mensagem segue para a Tawany.
+            <h3>Fluxo</h3>
+            <p className="muted" style={{ margin: '4px 0 10px' }}>
+              A disputa é de cima pra baixo: a primeira regra que casar executa a ação final e encerra.
+              Arraste pelo punho pra reordenar. Nas respostas, {'{{nome}}'} e {'{{primeiro_nome}}'} viram o nome do paciente.
             </p>
             {submitted && rules.length === 0 ? <p className="error">Adicione ao menos uma regra.</p> : null}
 
-            <div style={{ display: 'grid', gap: '10px' }}>
+            <div className="flow-rules">
               {rules.map((rule, index) => {
                 const error = submitted ? ruleError(rule) : null;
+                const isHit = index === hitEditorIndex;
                 return (
-                  <article className="panel-block" key={index} style={{ display: 'grid', gap: '8px' }}>
-                    <div style={{ alignItems: 'center', display: 'flex', justifyContent: 'space-between' }}>
-                      <strong style={{ fontSize: '12.5px' }}>Regra {index + 1}</strong>
-                      <span style={{ display: 'inline-flex', gap: '4px' }}>
-                        <button
-                          className="icon-btn"
-                          type="button"
-                          aria-label={`Subir regra ${index + 1}`}
-                          disabled={index === 0}
-                          onClick={() => moveRule(index, -1)}
-                        >
+                  <article
+                    className={`flow-rule ${dragIndex === index ? 'dragging' : ''} ${isHit ? 'hit' : ''}`}
+                    key={index}
+                    onDragOver={(e) => e.preventDefault()}
+                    onDrop={() => dropOn(index)}
+                  >
+                    <div className="flow-rule-head">
+                      <span
+                        className="flow-grip"
+                        draggable
+                        role="button"
+                        aria-label={`Arrastar regra ${index + 1}`}
+                        title="Arrastar para reordenar"
+                        onDragStart={() => setDragIndex(index)}
+                        onDragEnd={() => setDragIndex(null)}
+                      >
+                        <GripVertical size={14} />
+                      </span>
+                      <strong>Regra {index + 1}</strong>
+                      {isHit ? <span className="chip chip-ok">casou o teste</span> : null}
+                      <span className="flow-rule-tools">
+                        <button className="icon-btn" type="button" aria-label={`Subir regra ${index + 1}`} disabled={index === 0} onClick={() => moveRule(index, -1)}>
                           <ArrowUp size={14} />
                         </button>
-                        <button
-                          className="icon-btn"
-                          type="button"
-                          aria-label={`Descer regra ${index + 1}`}
-                          disabled={index === rules.length - 1}
-                          onClick={() => moveRule(index, 1)}
-                        >
+                        <button className="icon-btn" type="button" aria-label={`Descer regra ${index + 1}`} disabled={index === rules.length - 1} onClick={() => moveRule(index, 1)}>
                           <ArrowDown size={14} />
                         </button>
-                        <button
-                          className="icon-btn"
-                          type="button"
-                          aria-label={`Remover regra ${index + 1}`}
-                          onClick={() => setRules((current) => current.filter((_, i) => i !== index))}
-                        >
+                        <button className="icon-btn" type="button" aria-label={`Remover regra ${index + 1}`} onClick={() => setRules((current) => current.filter((_, i) => i !== index))}>
                           <Trash2 size={14} />
                         </button>
                       </span>
                     </div>
 
-                    <div>
-                      <span className="muted" style={{ display: 'block', fontSize: '12px', marginBottom: '4px' }}>
-                        Gatilhos (palavras-chave)
-                      </span>
+                    <div className="flow-block flow-block-trigger">
+                      <div className="flow-block-label"><Zap size={12} />Se a mensagem contiver</div>
                       <div className="chips" style={{ marginBottom: rule.terms.length > 0 ? '6px' : 0 }}>
                         {rule.terms.map((term) => (
                           <span className="chip chip-removable" key={term}>
@@ -231,53 +301,84 @@ export function BotEditor({ bot, riskTerms, onClose, onSaved }: Props) {
                       </div>
                     </div>
 
-                    <div style={{ display: 'grid', gap: '6px' }}>
-                      <span className="muted" style={{ fontSize: '12px' }}>Respostas (enviadas em sequência)</span>
-                      {rule.responses.map((response, rIndex) => (
-                        <div key={rIndex} style={{ alignItems: 'flex-start', display: 'flex', gap: '6px' }}>
-                          <textarea
-                            className="textarea"
-                            rows={2}
-                            style={{ flex: 1 }}
-                            placeholder="Texto enviado ao paciente"
-                            value={response}
-                            onChange={(e) =>
-                              patchRule(index, {
-                                responses: rule.responses.map((r, i) => (i === rIndex ? e.target.value : r)),
-                              })
-                            }
-                          />
-                          {rule.responses.length > 1 ? (
+                    {rule.action !== 'tawany' ? (
+                      <>
+                        <div className="flow-connector" aria-hidden="true" />
+                        <div className="flow-block flow-block-responses">
+                          <div className="flow-block-label"><MessageSquareText size={12} />Respostas (em sequência)</div>
+                          {rule.responses.map((response, rIndex) => (
+                            <div key={rIndex} style={{ alignItems: 'flex-start', display: 'flex', gap: '6px' }}>
+                              <textarea
+                                className="textarea"
+                                rows={2}
+                                style={{ flex: 1 }}
+                                placeholder="Texto enviado ao paciente — {{primeiro_nome}} vira o nome"
+                                value={response}
+                                onChange={(e) =>
+                                  patchRule(index, {
+                                    responses: rule.responses.map((r, i) => (i === rIndex ? e.target.value : r)),
+                                  })
+                                }
+                              />
+                              {rule.responses.length > 1 ? (
+                                <button
+                                  className="icon-btn"
+                                  type="button"
+                                  aria-label={`Remover resposta ${rIndex + 1}`}
+                                  onClick={() => patchRule(index, { responses: rule.responses.filter((_, i) => i !== rIndex) })}
+                                >
+                                  <X size={14} />
+                                </button>
+                              ) : null}
+                            </div>
+                          ))}
+                          {rule.responses.length < MAX_RESPONSES ? (
                             <button
-                              className="icon-btn"
+                              className="btn"
                               type="button"
-                              aria-label={`Remover resposta ${rIndex + 1}`}
-                              onClick={() =>
-                                patchRule(index, { responses: rule.responses.filter((_, i) => i !== rIndex) })
-                              }
+                              style={{ justifySelf: 'start' }}
+                              onClick={() => patchRule(index, { responses: [...rule.responses, ''] })}
                             >
-                              <X size={14} />
+                              <Plus size={14} />Adicionar resposta
                             </button>
-                          ) : null}
+                          ) : (
+                            <span className="faint" style={{ fontSize: '11.5px' }}>Máximo de {MAX_RESPONSES} respostas por regra.</span>
+                          )}
                         </div>
-                      ))}
-                      {rule.responses.length < MAX_RESPONSES ? (
-                        <button
-                          className="btn"
-                          type="button"
-                          style={{ justifySelf: 'start' }}
-                          onClick={() => patchRule(index, { responses: [...rule.responses, ''] })}
-                        >
-                          <Plus size={14} />Adicionar resposta
-                        </button>
-                      ) : (
-                        <span className="faint" style={{ fontSize: '11.5px' }}>Máximo de {MAX_RESPONSES} respostas por regra.</span>
-                      )}
+                      </>
+                    ) : null}
+
+                    <div className="flow-connector" aria-hidden="true" />
+                    <div className="flow-block flow-action">
+                      <div className="flow-block-label">
+                        {rule.action === 'handoff' ? <UserRound size={12} /> : <Bot size={12} />}
+                        Ação final
+                      </div>
+                      <div className="segmented" role="tablist" aria-label={`Ação final da regra ${index + 1}`}>
+                        {(Object.keys(ACTION_META) as BotAction[]).map((action) => (
+                          <button
+                            key={action}
+                            type="button"
+                            role="tab"
+                            aria-selected={rule.action === action}
+                            className={rule.action === action ? 'seg-active' : ''}
+                            onClick={() => patchRule(index, { action })}
+                          >
+                            {ACTION_META[action].label}
+                          </button>
+                        ))}
+                      </div>
+                      <span className="faint" style={{ fontSize: '11.5px' }}>{ACTION_META[rule.action].hint}</span>
+                      {rule.action === 'handoff' ? (
+                        <input
+                          className="input"
+                          placeholder="Motivo do encaminhamento (opcional — aparece no Inbox)"
+                          value={rule.handoffReason}
+                          onChange={(e) => patchRule(index, { handoffReason: e.target.value })}
+                        />
+                      ) : null}
                     </div>
 
-                    <span className="faint" style={{ fontSize: '11.5px' }}>
-                      Ação: responder e encerrar (única ação suportada pelo motor).
-                    </span>
                     {error ? <p className="error">{error}</p> : null}
                   </article>
                 );
@@ -288,37 +389,23 @@ export function BotEditor({ bot, riskTerms, onClose, onSaved }: Props) {
               className="btn"
               type="button"
               style={{ marginTop: '10px' }}
-              onClick={() => setRules((current) => [...current, { terms: [], responses: [''], termDraft: '' }])}
+              onClick={() => setRules((current) => [...current, { terms: [], responses: [''], action: 'reply', handoffReason: '', termDraft: '' }])}
             >
               <Plus size={14} />Nova regra
             </button>
           </section>
 
-          <section className="drawer-section">
-            <h3><FlaskConical size={13} style={{ verticalAlign: '-2px', marginRight: '4px' }} />Testar este fluxo</h3>
+          <section className="drawer-section flow-test-panel">
+            <h3><FlaskConical size={13} style={{ verticalAlign: '-2px', marginRight: '4px' }} />Teste ao vivo</h3>
             <p className="muted" style={{ margin: '4px 0 8px' }}>
-              Simula uma mensagem contra o fluxo do editor (sem salvar). Nada é enviado ao WhatsApp.
+              Digite como paciente: a regra que casar acende acima. Nada é salvo nem enviado.
             </p>
-            <div className="inline-form">
-              <input
-                className="input"
-                placeholder="Ex.: quanto custa a consulta?"
-                value={testText}
-                onChange={(e) => setTestText(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && runTest()}
-              />
-              <button
-                className="btn btn-primary"
-                type="button"
-                disabled={testing || !testText.trim() || cleanRules(rules).length === 0}
-                onClick={runTest}
-              >
-                {testing ? 'Testando…' : 'Testar'}
-              </button>
-            </div>
-            {cleanRules(rules).length === 0 ? (
-              <p className="faint" style={{ margin: '6px 0 0', fontSize: '11.5px' }}>Complete ao menos uma regra (gatilho + resposta) para testar.</p>
-            ) : null}
+            <input
+              className="input"
+              placeholder="Ex.: quanto custa a consulta?"
+              value={testText}
+              onChange={(e) => setTestText(e.target.value)}
+            />
             {testResult ? (
               <div className="panel-block" style={{ marginTop: '8px', display: 'grid', gap: '6px' }}>
                 {testResult.blockedByRisk ? (
@@ -328,10 +415,8 @@ export function BotEditor({ bot, riskTerms, onClose, onSaved }: Props) {
                 ) : testResult.matched ? (
                   <>
                     <div className="chips">
-                      <span className="chip chip-ok">casou: Regra {(testResult.ruleIndex ?? 0) + 1}</span>
-                      {(testResult.terms ?? []).map((term) => (
-                        <span className="chip" key={term}>{term}</span>
-                      ))}
+                      <span className="chip chip-ok">casou: Regra {hitEditorIndex + 1}</span>
+                      <span className="chip chip-ai">{ACTION_META[testResult.action ?? 'reply'].label}</span>
                     </div>
                     {testResult.responses.map((response, i) => (
                       <article className="message-bubble message-out" key={i} style={{ alignSelf: 'flex-start' }}>

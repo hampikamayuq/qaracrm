@@ -259,12 +259,32 @@ export type BotSummary = {
   name: string;
   trigger: string;
   active: boolean;
+  priority: number;
   rules: number;
   createdAt: string;
   updatedAt: string;
 };
 
-export type BotRuleInput = { terms: string[]; responses: string[] };
+export type BotAction = 'reply' | 'handoff' | 'tawany';
+
+export type BotRuleInput = {
+  terms: string[];
+  responses: string[];
+  action?: BotAction;
+  handoffReason?: string;
+};
+
+export type BotMetrics = {
+  counts: Array<{ botId: string; d7: number; d30: number }>;
+  recent: Array<{
+    botId: string;
+    botName: string;
+    conversationId: string;
+    ruleIndex: number;
+    action: BotAction;
+    createdAt: string;
+  }>;
+};
 
 export type BotDetail = {
   id: string;
@@ -290,6 +310,7 @@ export type BotTestResult = {
   blockedByRisk?: boolean;
   botName?: string;
   ruleIndex?: number;
+  action?: BotAction;
   terms?: string[];
   responses: string[];
 };
@@ -828,6 +849,19 @@ export const api = {
   async getBots(): Promise<BotSummary[]> {
     const res = await this.get<BotSummary[]>('/bots');
     return res.data ?? [];
+  },
+
+  async getBotMetrics(): Promise<BotMetrics | null> {
+    try {
+      const res = await this.get<BotMetrics>('/bots/metrics');
+      return res.data ?? null;
+    } catch {
+      return null; // métricas nunca seguram a lista
+    }
+  },
+
+  reorderBots(ids: string[]): Promise<ApiResponse<{ reordered: number }>> {
+    return this.fetch('/bots/reorder', { method: 'PUT', body: JSON.stringify({ ids }) });
   },
 
   toggleBot(id: string, active: boolean): Promise<ApiResponse<{ active: boolean }>> {

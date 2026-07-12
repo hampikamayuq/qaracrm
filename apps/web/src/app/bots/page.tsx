@@ -1,8 +1,8 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { Bot, Copy, FlaskConical, History, Pencil, Plus, Trash2, Upload, X, Zap } from 'lucide-react';
-import { api, type BotSummary, type BotVersion } from '@/lib/api';
+import { ArrowDown, ArrowUp, BarChart3, Bot, Copy, FlaskConical, History, Pencil, Plus, Trash2, Upload, X, Zap } from 'lucide-react';
+import { api, type BotAction, type BotMetrics, type BotSummary, type BotVersion } from '@/lib/api';
 import { BotEditor, type EditorBot } from './bot-editor';
 
 // Modal de histórico de versões: quando, quem e "Reverter para esta".
@@ -89,6 +89,12 @@ function HistoryModal({ bot, onClose, onReverted }: {
   );
 }
 
+const ACTION_LABEL: Record<BotAction, string> = {
+  reply: 'respondeu',
+  handoff: 'encaminhou p/ humano',
+  tawany: 'deixou com a Tawany',
+};
+
 export default function BotsPage() {
   const [bots, setBots] = useState<BotSummary[]>([]);
   const [loading, setLoading] = useState(true);
@@ -99,14 +105,32 @@ export default function BotsPage() {
   const [editor, setEditor] = useState<EditorBot | null>(null);
   const [riskTerms, setRiskTerms] = useState<string[]>([]);
   const [historyBot, setHistoryBot] = useState<BotSummary | null>(null);
+  const [metrics, setMetrics] = useState<BotMetrics | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
 
   const reload = async () => {
     setLoading(true);
     try {
-      setBots(await api.getBots());
+      const [list, usage] = await Promise.all([api.getBots(), api.getBotMetrics()]);
+      setBots(list);
+      setMetrics(usage);
     } finally {
       setLoading(false);
+    }
+  };
+
+  // Reordena a disputa first-match: troca com o vizinho e persiste a ordem
+  // completa (idempotente — cada clique envia a lista inteira).
+  const move = async (index: number, delta: -1 | 1) => {
+    const target = index + delta;
+    if (target < 0 || target >= bots.length) return;
+    const next = [...bots];
+    [next[index], next[target]] = [next[target], next[index]];
+    setBots(next);
+    const res = await api.reorderBots(next.map((b) => b.id));
+    if (!res.success) {
+      flash(res.error ?? 'Falha ao reordenar.');
+      await reload();
     }
   };
 
@@ -236,8 +260,35 @@ export default function BotsPage() {
                 <span className="chip chip-info"><Zap size={11} />gatilho: {bot.trigger}</span>
                 <span className="chip">{bot.rules} regras</span>
                 <span className={`chip ${bot.active ? 'chip-ok' : 'chip-warning'}`}>{bot.active ? 'ativo' : 'pausado'}</span>
+                {(() => {
+                  const usage = metrics?.counts.find((c) => c.botId === bot.id);
+                  return usage ? (
+                    <span className="chip chip-ai" title="Disparos nos últimos 7 / 30 dias">
+                      <BarChart3 size={11} />{usage.d7} (7d) · {usage.d30} (30d)
+                    </span>
+                  ) : null;
+                })()}
               </div>
               <div className="toolbar-right">
+                <button
+                  className="btn"
+                  type="button"
+                  aria-label={`Subir prioridade de ${bot.name}`}
+                  title="Disputa first-match: mais acima responde primeiro"
+                  disabled={bots.indexOf(bot) === 0}
+                  onClick={() => move(bots.indexOf(bot), -1)}
+                >
+                  <ArrowUp size={14} />
+                </button>
+                <button
+                  className="btn"
+                  type="button"
+                  aria-label={`Descer prioridade de ${bot.name}`}
+                  disabled={bots.indexOf(bot) === bots.length - 1}
+                  onClick={() => move(bots.indexOf(bot), 1)}
+                >
+                  <ArrowDown size={14} />
+                </button>
                 <button className="btn" type="button" onClick={() => openEdit(bot)}>
                   <Pencil size={14} />Editar
                 </button>
@@ -295,6 +346,25 @@ export default function BotsPage() {
           )
         ) : null}
       </section>
+
+      {metrics && metrics.recent.length > 0 ? (
+        <section className="card" style={{ marginTop: '16px', display: 'grid', gap: '8px' }}>
+          <h2 className="section-title"><BarChart3 size={16} />Últimos disparos</h2>
+          <ul className="history-list">
+            {metrics.recent.map((entry, index) => (
+              <li className="history-item" key={`${entry.conversationId}-${entry.createdAt}-${index}`}>
+                <span className="history-move">
+                  {entry.botName} — {ACTION_LABEL[entry.action] ?? entry.action} (regra {entry.ruleIndex + 1})
+                </span>
+                <span className="muted">
+                  {new Date(entry.createdAt).toLocaleString('pt-BR')} ·{' '}
+                  <a href={`/inbox?conversationId=${entry.conversationId}`}>abrir conversa</a>
+                </span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
 
       {editor ? (
         <BotEditor
