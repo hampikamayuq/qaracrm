@@ -3537,3 +3537,125 @@ a.chip {
     display: none;
   }
 }
+
+/* ================================================================
+   Bots — construtor visual vertical (estilo Kommo)
+   ================================================================ */
+
+.flow-rules {
+  display: grid;
+  gap: 14px;
+}
+
+.flow-rule {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  display: grid;
+  gap: 0;
+  padding: 12px;
+  transition: border-color var(--dur-1) var(--ease), box-shadow var(--dur-1) var(--ease), opacity var(--dur-1) var(--ease);
+}
+
+.flow-rule.dragging {
+  opacity: 0.45;
+}
+
+.flow-rule.hit {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.flow-rule-head {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.flow-rule-head strong {
+  font-size: 12.5px;
+}
+
+.flow-rule-tools {
+  display: inline-flex;
+  gap: 4px;
+  margin-left: auto;
+}
+
+.flow-grip {
+  color: var(--text-3);
+  cursor: grab;
+  display: inline-flex;
+  padding: 2px;
+}
+
+.flow-grip:active {
+  cursor: grabbing;
+}
+
+.flow-block {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  display: grid;
+  gap: 8px;
+  padding: 10px 12px;
+}
+
+.flow-block-trigger {
+  border-left: 3px solid var(--info);
+}
+
+.flow-block-responses {
+  border-left: 3px solid var(--accent);
+}
+
+.flow-action {
+  border-left: 3px solid var(--ai);
+}
+
+.flow-block-label {
+  align-items: center;
+  color: var(--text-2);
+  display: flex;
+  font-size: 11.5px;
+  font-weight: 600;
+  gap: 6px;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+/* Conector vertical entre blocos: linha + seta */
+.flow-connector {
+  height: 18px;
+  justify-self: center;
+  position: relative;
+  width: 2px;
+  background: var(--border-strong);
+}
+
+.flow-connector::after {
+  border-left: 5px solid transparent;
+  border-right: 5px solid transparent;
+  border-top: 6px solid var(--border-strong);
+  bottom: -1px;
+  content: '';
+  left: 50%;
+  position: absolute;
+  transform: translateX(-50%);
+}
+
+/* Painel de teste ao vivo gruda no fim do drawer enquanto rola */
+.flow-test-panel {
+  background: var(--surface);
+  bottom: 0;
+  position: sticky;
+  z-index: 2;
+}
+
+/* Drawer mais largo pro editor visual respirar */
+.drawer-wide {
+  max-width: 720px;
+  width: min(720px, 100vw);
+}
