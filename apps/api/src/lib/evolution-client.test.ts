@@ -132,13 +132,17 @@ describe('sendEvolutionText', () => {
     expect(JSON.parse(init.body)).toEqual({ number: '5511999998888', text: 'Olá', delay: 1200 });
   });
 
-  it('EVOLUTION_SEND_DELAY_MS=0 desliga o delay', async () => {
+  it('aplica o piso de 1200ms quando EVOLUTION_SEND_DELAY_MS é 0 ou inválido', async () => {
+    // Piso obrigatório: sem delay o WhatsApp descarta mensagens consecutivas
+    // (incidente de produção). '0' e 'abc' caem no default 1200ms, nunca omitem.
     setEnv();
-    process.env.EVOLUTION_SEND_DELAY_MS = '0';
-    const fetchMock = stubFetch({ key: { id: 'EVOMSG2' } });
-    await sendEvolutionText('qara-recepcao', '5511999998888', 'Olá');
-    const init = fetchMock.mock.calls[0][1] as { body: string };
-    expect(JSON.parse(init.body)).toEqual({ number: '5511999998888', text: 'Olá' });
+    for (const value of ['0', 'abc']) {
+      process.env.EVOLUTION_SEND_DELAY_MS = value;
+      const fetchMock = stubFetch({ key: { id: 'EVOMSG2' } });
+      await sendEvolutionText('qara-recepcao', '5511999998888', 'Olá');
+      const init = fetchMock.mock.calls[0][1] as { body: string };
+      expect(JSON.parse(init.body)).toEqual({ number: '5511999998888', text: 'Olá', delay: 1200 });
+    }
     delete process.env.EVOLUTION_SEND_DELAY_MS;
   });
 

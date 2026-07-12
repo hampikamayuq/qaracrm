@@ -131,11 +131,14 @@ export const sendEvolutionText = async (
   // mensagens consecutivas (ex.: bot com 2+ respostas, 1s de intervalo) são
   // aceitas pelo gateway mas silenciosamente descartadas pelo WhatsApp —
   // visto em produção (4 SENT com id, só a 1ª entregue).
-  const delay = Number.parseInt(process.env.EVOLUTION_SEND_DELAY_MS ?? '1200', 10);
+  // Piso obrigatório: se o env vier vazio, NaN ou <=0, cai em 1200ms. O delay
+  // NUNCA é omitido — sem ele o WhatsApp descarta mensagens consecutivas.
+  const parsed = Number.parseInt(process.env.EVOLUTION_SEND_DELAY_MS ?? '', 10);
+  const delay = Number.isFinite(parsed) && parsed > 0 ? parsed : 1200;
   const json = await request('POST', `/message/sendText/${encodeURIComponent(instanceName)}`, {
     number,
     text,
-    ...(Number.isFinite(delay) && delay > 0 ? { delay } : {}),
+    delay,
   });
   const key = (json.key ?? {}) as Record<string, unknown>;
   const id = typeof key.id === 'string' ? key.id : '';

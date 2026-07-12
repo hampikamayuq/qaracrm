@@ -1,3 +1,4 @@
+import { timingSafeEqual } from 'node:crypto';
 import { Router } from 'express';
 import type { Request, Response } from 'express';
 import { prisma } from '../lib/deps';
@@ -40,7 +41,14 @@ const dispatchProcessedMessages = async (
 const isValidWebhookSecret = (req: Request): boolean => {
   const secret = process.env.EVOLUTION_WEBHOOK_SECRET;
   if (!secret) return false; // fail-closed
-  return req.headers['x-webhook-secret'] === secret;
+  const received = req.headers['x-webhook-secret'];
+  if (typeof received !== 'string') return false;
+  // Comparação em tempo constante (mesmo desenho do meta-signature): compara
+  // tamanho antes para não vazar timing e evitar throw do timingSafeEqual.
+  const receivedBuf = Buffer.from(received, 'utf8');
+  const secretBuf = Buffer.from(secret, 'utf8');
+  if (receivedBuf.length !== secretBuf.length) return false;
+  return timingSafeEqual(receivedBuf, secretBuf);
 };
 
 type PendingSweepOptions = {

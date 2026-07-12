@@ -150,6 +150,66 @@ describe('runTawany — falha dura de envio em autopilot', () => {
   });
 });
 
+describe('runTawany — gate pré-envio (TOCTOU: takeover humano durante o run)', () => {
+  it('não envia e deixa a sugestão PENDING quando needsHuman vira true entre a entrada e o envio', async () => {
+    const data = makeData();
+    (data.create as ReturnType<typeof vi.fn>).mockImplementation(async (obj: string) =>
+      obj === 'aiSuggestion' ? { id: 's1' } : { id: 'm-out' },
+    );
+    // A conversa está OPEN na entrada (buildTawanyContext) mas um humano
+    // assume antes do envio: o segundo get('conversation') (gate pré-envio)
+    // já vê needsHuman=true.
+    let convGets = 0;
+    (data.get as ReturnType<typeof vi.fn>).mockImplementation(async (obj: string) => {
+      if (obj === 'conversation') {
+        convGets++;
+        const needsHuman = convGets >= 2;
+        return { id: UUID, leadId: LEAD_ID, status: 'OPEN', needsHuman };
+      }
+      if (obj === 'lead') return { id: LEAD_ID, name: 'Maria Silva', phone: null, stageId: null, score: 50, intent: null, source: 'INDICACAO', tags: [] };
+      return { id: LEAD_ID, name: 'Maria Silva', phone: null, stageId: null, score: 50, intent: null, tags: [] };
+    });
+
+    const r = await runTawany(
+      { messageId: 'm1', conversationId: UUID },
+      { ai: makeAi(chatResult({ content: 'Olá Maria!', finishReason: 'stop', modelUsed: 'minimax/minimax-m3' })), data, sendMode: 'send' },
+    );
+
+    expect(r.status).toBe('replied');
+    // Gate ativo: nenhuma mensagem OUT, sugestão nunca vira SENT (fica PENDING).
+    expect(data.create).not.toHaveBeenCalledWith('chatMessage', expect.objectContaining({ direction: 'OUT' }));
+    expect(data.update).not.toHaveBeenCalledWith('aiSuggestion', 's1', { status: 'SENT' });
+    expect(recordAiRun).toHaveBeenCalledWith(data, expect.objectContaining({
+      reason: 'send_gated_human_takeover',
+    }));
+  });
+
+  it('não envia quando o status deixa de ser OPEN entre a entrada e o envio', async () => {
+    const data = makeData();
+    (data.create as ReturnType<typeof vi.fn>).mockImplementation(async (obj: string) =>
+      obj === 'aiSuggestion' ? { id: 's1' } : { id: 'm-out' },
+    );
+    let convGets = 0;
+    (data.get as ReturnType<typeof vi.fn>).mockImplementation(async (obj: string) => {
+      if (obj === 'conversation') {
+        convGets++;
+        return { id: UUID, leadId: LEAD_ID, status: convGets >= 2 ? 'PENDING_PATIENT' : 'OPEN', needsHuman: false };
+      }
+      if (obj === 'lead') return { id: LEAD_ID, name: 'Maria Silva', phone: null, stageId: null, score: 50, intent: null, source: 'INDICACAO', tags: [] };
+      return { id: LEAD_ID, name: 'Maria Silva', phone: null, stageId: null, score: 50, intent: null, tags: [] };
+    });
+
+    const r = await runTawany(
+      { messageId: 'm1', conversationId: UUID },
+      { ai: makeAi(chatResult({ content: 'Olá Maria!', finishReason: 'stop', modelUsed: 'minimax/minimax-m3' })), data, sendMode: 'send' },
+    );
+
+    expect(r.status).toBe('replied');
+    expect(data.create).not.toHaveBeenCalledWith('chatMessage', expect.objectContaining({ direction: 'OUT' }));
+    expect(data.update).not.toHaveBeenCalledWith('aiSuggestion', 's1', { status: 'SENT' });
+  });
+});
+
 describe('runTawany', () => {
   it('replies with a PENDING suggestion (no auto-send) when guard passes, outside autopilot', async () => {
     const data = makeData();

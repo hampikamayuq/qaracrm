@@ -181,6 +181,34 @@ describe('Tawany routes', () => {
     expect(response.json).toHaveBeenCalledWith({ success: false, error: 'Failed to send approved suggestion' });
   });
 
+  it('reverts to PENDING and returns 502 when sendWhatsApp reports ok:false (sem throw)', async () => {
+    // sendWhatsApp devolve {ok:false} em falha de negócio (ex.: instância QR
+    // desconectada) sem lançar. A sugestão NÃO pode ficar SENT sem ter enviado.
+    const { sendWhatsApp } = await import('../lib/tools/sendWhatsApp');
+    mocks.prisma.aiSuggestion.findUnique.mockResolvedValue({
+      body: 'original',
+      status: 'PENDING',
+      conversationId: 'c1',
+    });
+    mocks.prisma.aiSuggestion.updateMany.mockResolvedValue({ count: 1 });
+    vi.mocked(sendWhatsApp.execute).mockResolvedValue(JSON.stringify({ ok: false, error: 'instance_disconnected' }));
+    const { approveSuggestionRoute } = await import('./tawany-routes');
+    const response = res();
+
+    await approveSuggestionRoute(req({ body: { suggestionId: 's1' }, userId: 'u1' }), response);
+
+    expect(mocks.prisma.aiSuggestion.update).toHaveBeenCalledWith({
+      where: { id: 's1' },
+      data: expect.objectContaining({ status: 'PENDING', decidedAt: null, approvedById: null }),
+    });
+    // nunca marcou SENT
+    expect(mocks.prisma.aiSuggestion.update).not.toHaveBeenCalledWith(
+      expect.objectContaining({ data: { status: 'SENT' } }),
+    );
+    expect(response.status).toHaveBeenCalledWith(502);
+    expect(response.json).toHaveBeenCalledWith({ success: false, error: 'Failed to send approved suggestion' });
+  });
+
   it('rejects a pending suggestion atomically', async () => {
     mocks.prisma.aiSuggestion.updateMany.mockResolvedValue({ count: 1 });
     const { rejectSuggestionRoute } = await import('./tawany-routes');
