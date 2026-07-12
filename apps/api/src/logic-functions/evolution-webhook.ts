@@ -1,4 +1,5 @@
 import type { DataApi } from '../lib/data';
+import { runBotsForInbound } from '../lib/bots/runner';
 import { defaultDebounce, type Debouncer } from '../lib/debounce';
 import { emitInboundMessage } from '../lib/events';
 import { getEvolutionMediaBase64, mapEvolutionState } from '../lib/evolution-client';
@@ -10,12 +11,11 @@ import {
 import { isAudioTranscriptionEnabled, transcribeAudio } from '../lib/transcription-client';
 
 // Pipeline do canal WHATSAPP_QR (números extras pareados por QR via Evolution).
-// Decisão de produto (2026-07-11): a Tawany atende este canal com o MESMO
-// fluxo do oficial (debounce → Tawany), inclusive auto-envio nos modos
-// autônomos. Única diferença deliberada: sem confirmação D-1/NPS/bots aqui
-// (HSM e botões são exclusivos do canal oficial; bots por palavra-chave ficam
-// de fora até decisão própria). Falha dura de envio (instância desconectada)
-// vira handoff no tawany-handler — nunca SENT sem envio real.
+// Decisão de produto (2026-07-11, ampliada 2026-07-12): mesmo fluxo do canal
+// oficial — debounce → bots → Tawany, inclusive auto-envio nos modos
+// autônomos. Única diferença deliberada: sem confirmação D-1/NPS (HSM e
+// botões são exclusivos do oficial). Falha dura de envio (instância
+// desconectada) vira handoff no tawany-handler — nunca SENT sem envio real.
 
 export type ProcessedMessageHandler = (message: {
   conversationId: string;
@@ -221,7 +221,16 @@ const ingestMessage = async (
 
   const processReadyMessage = async (ready: { conversationId: string; messageId: string; text: string }): Promise<void> => {
     await data.update('chatMessage', ready.messageId, { agentHandled: false });
-    await onProcessedMessage?.({ conversationId: ready.conversationId, messageId: ready.messageId });
+    // Bots antes da Tawany, como no oficial. Falha de bot nunca segura a mensagem.
+    let handled = false;
+    try {
+      handled = (await runBotsForInbound({ conversationId: ready.conversationId, text: ready.text }, data))?.handled ?? false;
+    } catch (err) {
+      console.error('[evolution-webhook] bot runner failed (non-fatal):', (err as Error).message);
+    }
+    if (!handled) {
+      await onProcessedMessage?.({ conversationId: ready.conversationId, messageId: ready.messageId });
+    }
   };
 
   const gate = immediateGate ?? debounce.check(
@@ -270,7 +279,17 @@ export const handleEvolutionWebhook = async (
     } else {
       const result = await ingestMessage(event, instance, data, debounce, onProcessedMessage);
       if (result.counted) messages++;
-      if (result.processed) processedMessages.push(result.processed);
+      if (result.processed) {
+        // Caminho imediato (gate 'process'): bots antes da Tawany, espelhando
+        // o processReadyMessage. event.text já inclui transcrição de áudio.
+        let handled = false;
+        try {
+          handled = (await runBotsForInbound({ conversationId: result.processed.conversationId, text: event.text }, data))?.handled ?? false;
+        } catch (err) {
+          console.error('[evolution-webhook] bot runner failed (non-fatal):', (err as Error).message);
+        }
+        if (!handled) processedMessages.push(result.processed);
+      }
     }
   }
 

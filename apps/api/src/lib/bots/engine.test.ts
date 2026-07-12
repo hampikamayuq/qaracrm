@@ -100,4 +100,36 @@ describe('parseBotSteps', () => {
     expect(parseBotSteps({ foo: 'bar' })).toBeNull();
     expect(parseBotSteps(null)).toBeNull();
   });
+
+  it('steps antigos sem action passam intactos (retrocompat de snapshots)', () => {
+    const flow = parseBotSteps({ rules: [{ terms: ['oi'], responses: ['olá'] }] });
+    expect(flow?.rules[0]).toEqual({ blockId: undefined, targetBlock: undefined, terms: ['oi'], responses: ['olá'] });
+    expect(flow?.rules[0].action).toBeUndefined();
+  });
+
+  it('preserva action handoff/tawany e handoffReason', () => {
+    const flow = parseBotSteps({ rules: [
+      { terms: ['atendente'], responses: ['Já chamo!'], action: 'handoff', handoffReason: 'pediu humano' },
+      { terms: ['plano'], responses: [], action: 'tawany' },
+    ] });
+    expect(flow?.rules[0]).toMatchObject({ action: 'handoff', handoffReason: 'pediu humano' });
+    expect(flow?.rules[1]).toMatchObject({ action: 'tawany', responses: [] });
+  });
+
+  it('regra handoff/tawany sobrevive sem responses; reply sem responses é descartada', () => {
+    const flow = parseBotSteps({ rules: [
+      { terms: ['reagendar'], responses: [], action: 'handoff' },
+      { terms: ['solto'], responses: [] },
+    ] });
+    expect(flow?.rules).toHaveLength(1);
+    expect(flow?.rules[0].terms).toEqual(['reagendar']);
+  });
+
+  it('action inválida vira undefined (= reply) e handoffReason fora de handoff é descartado', () => {
+    const flow = parseBotSteps({ rules: [
+      { terms: ['oi'], responses: ['olá'], action: 'explodir', handoffReason: 'x' },
+    ] });
+    expect(flow?.rules[0].action).toBeUndefined();
+    expect(flow?.rules[0].handoffReason).toBeUndefined();
+  });
 });

@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   isAudioTranscriptionEnabled: vi.fn().mockReturnValue(false),
   transcribeAudio: vi.fn(),
   emitInboundMessage: vi.fn(),
+  sendExecute: vi.fn().mockResolvedValue(JSON.stringify({ ok: true })),
 }));
 
 vi.mock('../lib/events', () => ({
@@ -21,6 +22,10 @@ vi.mock('../lib/evolution-client', async (importOriginal) => ({
 vi.mock('../lib/transcription-client', () => ({
   isAudioTranscriptionEnabled: mocks.isAudioTranscriptionEnabled,
   transcribeAudio: mocks.transcribeAudio,
+}));
+
+vi.mock('../lib/tools/sendWhatsApp', () => ({
+  sendWhatsApp: { execute: mocks.sendExecute },
 }));
 
 const api = (over: Partial<DataApi> = {}): DataApi => ({
@@ -246,7 +251,9 @@ describe('handleEvolutionWebhook — inbound (Tawany atende, como no canal ofici
       .fn()
       .mockResolvedValueOnce([INSTANCE])
       .mockResolvedValueOnce([])
-      .mockResolvedValueOnce([{ id: 'conv-1', leadId: 'lead-1', status: 'OPEN' }]);
+      .mockResolvedValueOnce([{ id: 'conv-1', leadId: 'lead-1', status: 'OPEN' }])
+      // chamadas seguintes (ex.: bots ativos no flush) devolvem vazio
+      .mockResolvedValue([]);
     const create = vi.fn().mockResolvedValue({ id: 'msg-1' });
     const update = vi.fn().mockResolvedValue({ id: 'x' });
     const onProcessed = vi.fn().mockResolvedValue(undefined);
@@ -265,6 +272,9 @@ describe('handleEvolutionWebhook — inbound (Tawany atende, como no canal ofici
       deferringDebounce,
       onProcessed,
     );
+    // O flush do debounce é uma promise flutuante — drena os microtasks
+    // (update + bots + dispatch) antes de asserir.
+    await new Promise((resolve) => setImmediate(resolve));
 
     // Nasce reservada (onProcessedMessage presente)...
     expect(create).toHaveBeenCalledWith('chatMessage', expect.objectContaining({ agentHandled: true }));
@@ -273,6 +283,71 @@ describe('handleEvolutionWebhook — inbound (Tawany atende, como no canal ofici
     expect(onProcessed).toHaveBeenCalledWith({ conversationId: 'conv-1', messageId: 'msg-1' });
     // defer: nada retorna no lote síncrono.
     expect(result.processedMessages).toEqual([]);
+  });
+});
+
+describe('handleEvolutionWebhook — bots no canal QR', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.isAudioTranscriptionEnabled.mockReturnValue(false);
+    mocks.sendExecute.mockResolvedValue(JSON.stringify({ ok: true }));
+  });
+
+  const listWithBot = (rules: unknown[]) => vi.fn().mockImplementation(async (obj: string) => {
+    if (obj === 'whatsAppInstance') return [INSTANCE];
+    if (obj === 'bot') return [{ id: 'b1', name: 'FAQ QR', steps: { rules } }];
+    if (obj === 'conversation') return [{ id: 'conv-1', leadId: 'lead-1', status: 'OPEN' }];
+    return []; // dedup e demais
+  });
+
+  it('bot casa no QR: responde e a mensagem NÃO segue pra Tawany', async () => {
+    const list = listWithBot([{ terms: ['quero agendar'], responses: ['Já te ajudo!'] }]);
+    const create = vi.fn().mockResolvedValue({ id: 'msg-1' });
+
+    const result = await handleEvolutionWebhook(
+      inboundBody({ message: { conversation: 'quero agendar' } }),
+      api({ list, create }),
+      processDebounce(),
+    );
+
+    expect(mocks.sendExecute).toHaveBeenCalledWith(
+      expect.objectContaining({ conversationId: 'conv-1', text: 'Já te ajudo!' }),
+      expect.anything(),
+    );
+    expect(create).toHaveBeenCalledWith('botReply', expect.objectContaining({ botId: 'b1', action: 'reply' }));
+    expect(result.processedMessages).toEqual([]);
+  });
+
+  it('erro no runner de bots é non-fatal: a mensagem segue pra Tawany', async () => {
+    const list = vi.fn().mockImplementation(async (obj: string) => {
+      if (obj === 'whatsAppInstance') return [INSTANCE];
+      if (obj === 'bot') throw new Error('db down');
+      if (obj === 'conversation') return [{ id: 'conv-1', leadId: 'lead-1', status: 'OPEN' }];
+      return [];
+    });
+    const create = vi.fn().mockResolvedValue({ id: 'msg-1' });
+
+    const result = await handleEvolutionWebhook(
+      inboundBody(),
+      api({ list, create }),
+      processDebounce(),
+    );
+
+    expect(result.processedMessages).toHaveLength(1);
+  });
+
+  it('termo de risco: bots pulam e a mensagem segue pra Tawany', async () => {
+    const list = listWithBot([{ terms: ['melanoma'], responses: ['nunca respondido'] }]);
+    const create = vi.fn().mockResolvedValue({ id: 'msg-1' });
+
+    const result = await handleEvolutionWebhook(
+      inboundBody({ message: { conversation: 'apareceu uma pinta, pode ser melanoma?' } }),
+      api({ list, create }),
+      processDebounce(),
+    );
+
+    expect(mocks.sendExecute).not.toHaveBeenCalled();
+    expect(result.processedMessages).toHaveLength(1);
   });
 });
 

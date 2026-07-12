@@ -9,7 +9,9 @@ import {
   parseBotFlow,
   parseBotSteps,
   findMatchingRule,
+  BOT_ACTIONS,
   MAX_RESPONSES_PER_RULE,
+  type BotAction,
   type BotFlow,
 } from '../lib/bots/engine';
 import { LEADS_NOVOS_RISK_KEYWORDS } from '../lib/leads-novos/rules';
@@ -41,12 +43,27 @@ const parseEditorPayload = (body: unknown): { name: string; flow: BotFlow } | { 
     const responses = Array.isArray(rule.responses)
       ? rule.responses.map((response) => String(response).replace(/\r/g, '').trim()).filter(Boolean)
       : [];
+    // Ação inválida/ausente = reply (comportamento clássico).
+    const action: BotAction = BOT_ACTIONS.includes(rule.action as BotAction)
+      ? (rule.action as BotAction)
+      : 'reply';
+    const handoffReason = action === 'handoff' && typeof rule.handoffReason === 'string' && rule.handoffReason.trim()
+      ? rule.handoffReason.trim()
+      : undefined;
     if (terms.length === 0) return { error: `Regra ${index + 1}: adicione ao menos um gatilho` };
-    if (responses.length === 0) return { error: `Regra ${index + 1}: adicione ao menos uma resposta` };
+    // Regra reply exige resposta; handoff/tawany podem seguir sem responder.
+    if (responses.length === 0 && action === 'reply') {
+      return { error: `Regra ${index + 1}: adicione ao menos uma resposta` };
+    }
     if (responses.length > MAX_RESPONSES_PER_RULE) {
       return { error: `Regra ${index + 1}: máximo de ${MAX_RESPONSES_PER_RULE} respostas` };
     }
-    rules.push({ terms, responses });
+    rules.push({
+      terms,
+      responses,
+      ...(action !== 'reply' ? { action } : {}),
+      ...(handoffReason ? { handoffReason } : {}),
+    });
   }
   return { name, flow: { mode: 'first-match', match: 'normalized-contains', rules } };
 };
@@ -54,6 +71,8 @@ const parseEditorPayload = (body: unknown): { name: string; flow: BotFlow } | { 
 // Versionamento enxuto: reusa o modelo Activity (targetType 'bot', type
 // 'BOT_VERSION'), mesmo padrão do histórico de movimentação do pipeline —
 // sem tabela nova nem migration. body = snapshot JSON { name, steps }.
+// priority fica fora do snapshot de propósito: revert restaura conteúdo,
+// não a posição na fila de disputa.
 type BotSnapshot = { name: string; steps: unknown };
 
 const recordBotVersion = async (
@@ -74,7 +93,7 @@ const recordBotVersion = async (
 
 export const listBotsRoute = async (_req: Request, res: Response): Promise<void> => {
   try {
-    const bots = await prisma.bot.findMany({ orderBy: { createdAt: 'asc' } });
+    const bots = await prisma.bot.findMany({ orderBy: [{ priority: 'asc' }, { createdAt: 'asc' }] });
     res.json({
       success: true,
       data: bots.map((bot) => ({
@@ -82,6 +101,7 @@ export const listBotsRoute = async (_req: Request, res: Response): Promise<void>
         name: bot.name,
         trigger: bot.trigger,
         active: bot.active,
+        priority: bot.priority,
         rules: parseBotSteps(bot.steps)?.rules.length ?? 0,
         createdAt: bot.createdAt,
         updatedAt: bot.updatedAt,
@@ -89,6 +109,67 @@ export const listBotsRoute = async (_req: Request, res: Response): Promise<void>
     });
   } catch (error) {
     jsonError(res, 500, (error as Error).message);
+  }
+};
+
+// Métricas de uso agregadas (a lista renderiza tudo numa chamada só):
+// contagem de disparos por bot em 7/30 dias + últimos 10 disparos.
+export const botMetricsRoute = async (_req: Request, res: Response): Promise<void> => {
+  try {
+    const now = Date.now();
+    const d7 = new Date(now - 7 * 24 * 3600_000);
+    const d30 = new Date(now - 30 * 24 * 3600_000);
+    const [counts7, counts30, recent] = await Promise.all([
+      prisma.botReply.groupBy({ by: ['botId'], where: { createdAt: { gte: d7 } }, _count: { _all: true } }),
+      prisma.botReply.groupBy({ by: ['botId'], where: { createdAt: { gte: d30 } }, _count: { _all: true } }),
+      prisma.botReply.findMany({
+        orderBy: { createdAt: 'desc' },
+        take: 10,
+        select: { botId: true, botName: true, conversationId: true, ruleIndex: true, action: true, createdAt: true },
+      }),
+    ]);
+    const d7Map = new Map(counts7.map((row) => [row.botId, row._count._all]));
+    const botIds = new Set([...counts7.map((r) => r.botId), ...counts30.map((r) => r.botId)]);
+    res.json({
+      success: true,
+      data: {
+        counts: [...botIds].map((botId) => ({
+          botId,
+          d7: d7Map.get(botId) ?? 0,
+          d30: counts30.find((r) => r.botId === botId)?._count._all ?? 0,
+        })),
+        recent,
+      },
+    });
+  } catch (error) {
+    jsonError(res, 500, (error as Error).message);
+  }
+};
+
+// Reordena a disputa: priority = índice na lista enviada (denso 0..n-1).
+// Sem BOT_VERSION — reorder não é edição de conteúdo; 1 audit resume tudo.
+export const reorderBotsRoute = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const ids = req.body?.ids;
+    if (!Array.isArray(ids) || ids.length === 0 || !ids.every((id) => typeof id === 'string' && id)) {
+      jsonError(res, 400, 'ids (array de ids de bots, na nova ordem) required');
+      return;
+    }
+    await prisma.$transaction(
+      ids.map((id: string, index: number) =>
+        prisma.bot.update({ where: { id }, data: { priority: index } })),
+    );
+    await recordAudit(prisma, {
+      userId: req.userId ?? null,
+      action: 'bot.reorder',
+      entity: 'bot',
+      entityId: 'all',
+      after: { order: ids },
+    });
+    res.json({ success: true, data: { reordered: ids.length } });
+  } catch (error) {
+    // id inexistente derruba a transação inteira (P2025) — nada foi persistido.
+    jsonError(res, 400, (error as Error).message);
   }
 };
 
@@ -368,12 +449,21 @@ export const testBotRoute = async (req: Request, res: Response): Promise<void> =
       res.json({
         success: true,
         data: rule
-          ? { matched: true, ruleIndex: flow.rules.indexOf(rule), terms: rule.terms, responses: rule.responses }
+          ? {
+              matched: true,
+              ruleIndex: flow.rules.indexOf(rule),
+              action: rule.action ?? 'reply',
+              terms: rule.terms,
+              responses: rule.responses,
+            }
           : { matched: false, responses: [] },
       });
       return;
     }
-    const bots = await prisma.bot.findMany({ where: { active: true }, orderBy: { createdAt: 'asc' } });
+    const bots = await prisma.bot.findMany({
+      where: { active: true },
+      orderBy: [{ priority: 'asc' }, { createdAt: 'asc' }],
+    });
     for (const bot of bots) {
       const flow = parseBotSteps(bot.steps);
       if (!flow) continue;
@@ -381,7 +471,14 @@ export const testBotRoute = async (req: Request, res: Response): Promise<void> =
       if (rule) {
         res.json({
           success: true,
-          data: { matched: true, botId: bot.id, botName: bot.name, responses: rule.responses },
+          data: {
+            matched: true,
+            botId: bot.id,
+            botName: bot.name,
+            ruleIndex: flow.rules.indexOf(rule),
+            action: rule.action ?? 'reply',
+            responses: rule.responses,
+          },
         });
         return;
       }
@@ -413,8 +510,9 @@ export const deleteBotRoute = async (req: Request, res: Response): Promise<void>
 };
 
 router.get('/', authMiddleware, listBotsRoute);
-// /risk-terms antes de /:id para o param não capturar a rota fixa.
+// Rotas fixas antes de /:id para o param não capturá-las.
 router.get('/risk-terms', authMiddleware, riskTermsRoute);
+router.get('/metrics', authMiddleware, botMetricsRoute);
 router.get('/:id/versions', authMiddleware, listBotVersionsRoute);
 router.get('/:id', authMiddleware, getBotRoute);
 router.post('/', authMiddleware, requireAdmin, createBotRoute);
@@ -422,6 +520,7 @@ router.post('/import', authMiddleware, requireAdmin, importBotRoute);
 router.post('/test', authMiddleware, testBotRoute);
 router.post('/:id/duplicate', authMiddleware, requireAdmin, duplicateBotRoute);
 router.post('/:id/revert', authMiddleware, requireAdmin, revertBotRoute);
+router.put('/reorder', authMiddleware, requireAdmin, reorderBotsRoute);
 router.put('/:id', authMiddleware, requireAdmin, updateBotRoute);
 router.patch('/:id', authMiddleware, requireAdmin, toggleBotRoute);
 router.delete('/:id', authMiddleware, requireAdmin, deleteBotRoute);
