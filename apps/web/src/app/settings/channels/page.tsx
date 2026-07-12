@@ -95,6 +95,33 @@ export default function ChannelsPage() {
     }, STATUS_POLL_MS);
   };
 
+  const [linkName, setLinkName] = useState('');
+  const [linkInstance, setLinkInstance] = useState('');
+  const [linking, setLinking] = useState(false);
+
+  // Instância criada direto no manager do Evolution (ex.: "qara222"):
+  // vincula ao CRM (registra + aponta o webhook) sem re-parear o número.
+  const link = async () => {
+    if (!linkName.trim() || !linkInstance.trim()) {
+      flash('Informe o nome de exibição e o nome da instância no Evolution.');
+      return;
+    }
+    setLinking(true);
+    try {
+      const res = await api.linkChannel(linkName.trim(), linkInstance.trim());
+      if (!res.success) {
+        flash(res.error ?? 'Falha ao vincular a instância.');
+        return;
+      }
+      setLinkName('');
+      setLinkInstance('');
+      flash(`Instância "${res.data?.instanceName}" vinculada — mensagens novas já entram no Inbox.`);
+      await reload();
+    } finally {
+      setLinking(false);
+    }
+  };
+
   const create = async () => {
     if (!newName.trim()) {
       flash('Dê um nome ao número (ex.: Recepção, Comercial).');
@@ -268,11 +295,42 @@ export default function ChannelsPage() {
           </div>
         </div>
 
+        <div className="card">
+          <label className="field">
+            <span>Vincular instância já existente no Evolution</span>
+            <input
+              className="input"
+              value={linkName}
+              onChange={(event) => setLinkName(event.target.value)}
+              placeholder="Nome de exibição — ex.: Clínica Qara"
+              disabled={!evolutionConfigured}
+            />
+            <input
+              className="input"
+              value={linkInstance}
+              onChange={(event) => setLinkInstance(event.target.value)}
+              placeholder="Nome da instância no Evolution — ex.: qara222"
+              disabled={!evolutionConfigured}
+            />
+          </label>
+          <div className="suggestion-actions">
+            <button
+              className="btn"
+              type="button"
+              disabled={linking || !evolutionConfigured}
+              onClick={() => void link()}
+            >
+              <Plus size={14} />{linking ? 'Vinculando…' : 'Vincular instância'}
+            </button>
+            <span className="faint">Pra números já pareados no manager do Evolution — configura o webhook e registra aqui, sem novo QR.</span>
+          </div>
+        </div>
+
         <div className="test-banner" role="note">
-          <Power size={14} /> Números conectados por QR são <strong>atendimento humano apenas</strong>:
-          sem Tawany, bots, follow-ups ou lembretes automáticos. A conexão usa um gateway não-oficial
-          (fora dos termos do WhatsApp) — há risco de banimento do número. Use somente números
-          secundários; o número principal da clínica fica na Cloud API oficial.
+          <Power size={14} /> Números conectados por QR atendem com <strong>Tawany e bots</strong> (mesmo
+          fluxo do oficial), mas sem templates HSM, lembretes D-1 e NPS (exclusivos da Cloud API). A
+          conexão usa um gateway não-oficial (fora dos termos do WhatsApp) — há risco de banimento do
+          número. Use somente números secundários; o número principal da clínica fica na Cloud API oficial.
         </div>
       </section>
     </main>

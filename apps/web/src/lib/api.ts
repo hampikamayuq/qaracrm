@@ -797,6 +797,11 @@ export const api = {
     return res.data ?? { items: [], evolutionConfigured: false };
   },
 
+  // Vincula instância já existente no gateway Evolution (criada pelo manager).
+  linkChannel(name: string, instanceName: string): Promise<ApiResponse<WhatsAppChannel>> {
+    return this.post('/channels/link', { name, instanceName });
+  },
+
   createChannel(name: string): Promise<ApiResponse<WhatsAppChannel>> {
     return this.post('/channels', { name });
   },

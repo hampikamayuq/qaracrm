@@ -7,6 +7,7 @@ import { requireAdmin } from '../middleware/authorization';
 import {
   connectEvolutionInstance,
   createEvolutionInstance,
+  setEvolutionWebhook,
   deleteEvolutionInstance,
   getEvolutionConnectionState,
   isEvolutionConfigured,
@@ -75,6 +76,51 @@ export const createChannelRoute = async (req: Request, res: Response): Promise<v
     await createEvolutionInstance(instanceName);
     const created = await prisma.whatsAppInstance.create({
       data: { name, instanceName },
+      select: INSTANCE_SELECT,
+    });
+    res.status(201).json({ success: true, data: created });
+  } catch (error) {
+    jsonError(res, 500, (error as Error).message);
+  }
+};
+
+// Vincula uma instância JÁ EXISTENTE no Evolution (criada pelo manager, ex.:
+// "qara222"): valida que ela existe no gateway, aponta o webhook pro CRM
+// (com o secret) e registra no banco. Sem isso, eventos dela são descartados
+// como instância desconhecida.
+export const linkChannelRoute = async (req: Request, res: Response): Promise<void> => {
+  try {
+    if (!isEvolutionConfigured()) {
+      jsonError(res, 503, 'Gateway Evolution não configurado (EVOLUTION_* envs)');
+      return;
+    }
+    const name = typeof req.body?.name === 'string' ? req.body.name.trim() : '';
+    const instanceName = typeof req.body?.instanceName === 'string' ? req.body.instanceName.trim() : '';
+    if (!name || !instanceName) {
+      jsonError(res, 400, 'name e instanceName required');
+      return;
+    }
+    const existing = await prisma.whatsAppInstance.findFirst({ where: { instanceName }, select: { id: true } });
+    if (existing) {
+      jsonError(res, 409, 'Instância já vinculada a um canal');
+      return;
+    }
+    // Existe no gateway? (404 do Evolution vira erro aqui)
+    let state: Awaited<ReturnType<typeof getEvolutionConnectionState>> = null;
+    try {
+      state = await getEvolutionConnectionState(instanceName);
+    } catch {
+      jsonError(res, 404, `Instância "${instanceName}" não encontrada no Evolution`);
+      return;
+    }
+    await setEvolutionWebhook(instanceName);
+    const created = await prisma.whatsAppInstance.create({
+      data: {
+        name,
+        instanceName,
+        status: state ?? 'DISCONNECTED',
+        ...(state === 'CONNECTED' ? { lastConnectedAt: new Date() } : {}),
+      },
       select: INSTANCE_SELECT,
     });
     res.status(201).json({ success: true, data: created });
@@ -193,6 +239,7 @@ export const deleteChannelRoute = async (req: Request, res: Response): Promise<v
 
 router.get('/', authMiddleware, listChannelsRoute);
 router.post('/', authMiddleware, requireAdmin, createChannelRoute);
+router.post('/link', authMiddleware, requireAdmin, linkChannelRoute);
 router.get('/:id/qr', authMiddleware, channelQrRoute);
 router.get('/:id/status', authMiddleware, channelStatusRoute);
 router.post('/:id/disconnect', authMiddleware, requireAdmin, disconnectChannelRoute);

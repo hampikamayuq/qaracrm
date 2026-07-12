@@ -68,6 +68,22 @@ export const createEvolutionInstance = async (instanceName: string): Promise<voi
   });
 };
 
+// Configura o webhook numa instância JÁ EXISTENTE no Evolution (criada fora
+// do CRM, ex.: pelo manager) — mesmo payload do create, apontando pro CRM
+// com o secret no header. É o que torna uma instância externa "vinculável".
+export const setEvolutionWebhook = async (instanceName: string): Promise<void> => {
+  const { webhookSecret, webhookUrl } = env();
+  await request('POST', `/webhook/set/${encodeURIComponent(instanceName)}`, {
+    webhook: {
+      enabled: true,
+      url: webhookUrl,
+      base64: false,
+      headers: { 'x-webhook-secret': webhookSecret },
+      events: WEBHOOK_EVENTS,
+    },
+  });
+};
+
 // Inicia/renova o pareamento e retorna o QR em base64 (o Evolution devolve
 // `base64` já como data-uri na v2; alguns builds mandam só `code`).
 export const connectEvolutionInstance = async (
