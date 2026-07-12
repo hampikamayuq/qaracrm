@@ -251,7 +251,7 @@ const ingestMessage = async (
     }
     if (!handled) {
       try {
-        handled = (await runBotsForInbound({ conversationId: ready.conversationId, text: ready.text }, data)) !== null;
+        handled = (await runBotsForInbound({ conversationId: ready.conversationId, text: ready.text }, data))?.handled ?? false;
       } catch (err) {
         console.error('[meta-webhook] bot runner failed (non-fatal):', (err as Error).message);
       }
@@ -323,7 +323,7 @@ export const handleMetaWebhook = async (
     // importado casa, ele responde e a mensagem não segue para a IA.
     if (!handled) {
       try {
-        handled = (await runBotsForInbound({ conversationId: processed.conversationId, text: msg.text }, data)) !== null;
+        handled = (await runBotsForInbound({ conversationId: processed.conversationId, text: msg.text }, data))?.handled ?? false;
       } catch (err) {
         console.error('[meta-webhook] bot runner failed (non-fatal):', (err as Error).message);
       }

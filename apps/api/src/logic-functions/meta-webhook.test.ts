@@ -285,6 +285,44 @@ describe('handleMetaWebhook — inbound messages', () => {
   });
 });
 
+describe('handleMetaWebhook — bots com action', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  const withBot = (rules: unknown[]) => vi
+    .fn()
+    .mockImplementation(async (obj: string) => {
+      if (obj === 'bot') return [{ id: 'b1', name: 'FAQ', steps: { rules } }];
+      return [];
+    });
+
+  it('bot reply casa: envia, grava botReply e NÃO segue pra Tawany', async () => {
+    const list = withBot([{ terms: ['quero agendar'], responses: ['Já te ajudo!'] }]);
+    const create = vi.fn().mockResolvedValue({ id: 'x' });
+
+    const result = await handleMetaWebhook(waBody, api({ list, create }), processDebounce());
+
+    expect(mocks.sendWhatsApp.execute).toHaveBeenCalledWith(
+      expect.objectContaining({ text: 'Já te ajudo!' }),
+      expect.anything(),
+    );
+    expect(create).toHaveBeenCalledWith('botReply', expect.objectContaining({ botId: 'b1', action: 'reply' }));
+    expect(result.processedMessages).toEqual([]);
+  });
+
+  it('regra com action tawany casa: nada é enviado e a mensagem segue pra Tawany', async () => {
+    const list = withBot([{ terms: ['quero agendar'], responses: [], action: 'tawany' }]);
+    const create = vi.fn().mockResolvedValue({ id: 'msg-1' });
+
+    const result = await handleMetaWebhook(waBody, api({ list, create }), processDebounce());
+
+    expect(mocks.sendWhatsApp.execute).not.toHaveBeenCalled();
+    expect(create).toHaveBeenCalledWith('botReply', expect.objectContaining({ action: 'tawany' }));
+    expect(result.processedMessages).toHaveLength(1);
+  });
+});
+
 describe('handleMetaWebhook — appointment confirmation interception', () => {
   beforeEach(() => {
     vi.clearAllMocks();

@@ -27,6 +27,7 @@ const MODEL_MAP: Record<string, keyof PrismaClient> = {
   budget: 'budget',
   payment: 'payment',
   bot: 'bot',
+  botReply: 'botReply',
   tag: 'tag',
   quickReply: 'quickReply',
 };

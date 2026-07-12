@@ -485,6 +485,24 @@ model Bot {
   trigger   String
   active    Boolean  @default(true)
   steps     Json
+  // Ordem de disputa (first-match): menor primeiro; desempate por createdAt.
+  priority  Int      @default(0)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+}
+
+// Registro de cada disparo de regra de bot (métrica de uso). Sem FK de
+// propósito: o histórico sobrevive à exclusão do bot; botName desnormalizado
+// mantém o nome exibível depois do delete.
+model BotReply {
+  id             String   @id @default(uuid())
+  botId          String
+  botName        String
+  ruleIndex      Int
+  action         String   @default("reply")
+  conversationId String
+  createdAt      DateTime @default(now())
+
+  @@index([botId, createdAt])
+  @@index([createdAt])
 }

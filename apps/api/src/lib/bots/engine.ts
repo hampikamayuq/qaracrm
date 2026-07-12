@@ -4,11 +4,21 @@
 
 import { LEADS_NOVOS_RISK_KEYWORDS } from '../leads-novos/rules';
 
+// Ação da regra ao casar: 'reply' (default: responde e encerra),
+// 'handoff' (responde se houver respostas e marca a conversa pro humano),
+// 'tawany' (não responde nada; encerra a disputa de bots e deixa a mensagem
+// seguir pra Tawany).
+export type BotAction = 'reply' | 'handoff' | 'tawany';
+
+export const BOT_ACTIONS: readonly BotAction[] = ['reply', 'handoff', 'tawany'];
+
 export type BotRule = {
   blockId?: number;
   targetBlock?: number;
   terms: string[];
   responses: string[];
+  action?: BotAction;
+  handoffReason?: string;
 };
 
 export type BotFlow = {
@@ -63,13 +73,27 @@ export const parseBotSteps = (value: unknown): BotFlow | null => {
     mode: 'first-match',
     match: 'normalized-contains',
     rules: flow.rules
-      .map((rule) => ({
-        blockId: rule.blockId,
-        targetBlock: rule.targetBlock,
-        terms: (rule.terms ?? []).map(cleanText).filter(Boolean),
-        responses: (rule.responses ?? []).map(cleanText).filter(Boolean),
-      }))
-      .filter((rule) => rule.terms.length > 0 && rule.responses.length > 0),
+      .map((rule) => {
+        // Ação inválida/ausente vira undefined (= reply): steps antigos e
+        // snapshots BOT_VERSION passam intactos.
+        const action = BOT_ACTIONS.includes(rule.action as BotAction) && rule.action !== 'reply'
+          ? (rule.action as BotAction)
+          : undefined;
+        const handoffReason = action === 'handoff' && typeof rule.handoffReason === 'string' && rule.handoffReason.trim()
+          ? cleanText(rule.handoffReason)
+          : undefined;
+        return {
+          blockId: rule.blockId,
+          targetBlock: rule.targetBlock,
+          terms: (rule.terms ?? []).map(cleanText).filter(Boolean),
+          responses: (rule.responses ?? []).map(cleanText).filter(Boolean),
+          ...(action ? { action } : {}),
+          ...(handoffReason ? { handoffReason } : {}),
+        };
+      })
+      // Regra reply precisa de resposta; handoff/tawany podem não responder nada.
+      .filter((rule) => rule.terms.length > 0
+        && (rule.responses.length > 0 || rule.action === 'handoff' || rule.action === 'tawany')),
   };
 };
 

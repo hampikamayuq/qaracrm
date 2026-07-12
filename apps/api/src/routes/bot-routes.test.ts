@@ -26,6 +26,11 @@ const mocks = vi.hoisted(() => ({
     auditLog: {
       create: vi.fn().mockResolvedValue({}),
     },
+    botReply: {
+      groupBy: vi.fn().mockResolvedValue([]),
+      findMany: vi.fn().mockResolvedValue([]),
+    },
+    $transaction: vi.fn(async (ops: unknown[]) => Promise.all(ops as Promise<unknown>[])),
   },
 }));
 
@@ -411,5 +416,79 @@ describe('Bot routes', () => {
 
     expect(res.status).toBe(200);
     expect(res.body.data).toEqual({ matched: false, blockedByRisk: true, responses: [] });
+  });
+
+  it('GET /metrics agrega contagens 7/30 dias e últimos disparos', async () => {
+    mocks.prisma.botReply.groupBy
+      .mockResolvedValueOnce([{ botId: 'b1', _count: { _all: 3 } }])
+      .mockResolvedValueOnce([{ botId: 'b1', _count: { _all: 9 } }, { botId: 'b2', _count: { _all: 1 } }]);
+    mocks.prisma.botReply.findMany.mockResolvedValueOnce([
+      { botId: 'b1', botName: 'FAQ', conversationId: 'c1', ruleIndex: 0, action: 'reply', createdAt: new Date() },
+    ]);
+    const app = await makeApp();
+
+    const res = await request(app).get('/api/bots/metrics').set(AUTH);
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.counts).toEqual(expect.arrayContaining([
+      { botId: 'b1', d7: 3, d30: 9 },
+      { botId: 'b2', d7: 0, d30: 1 },
+    ]));
+    expect(res.body.data.recent).toHaveLength(1);
+    expect(res.body.data.recent[0]).toMatchObject({ botId: 'b1', botName: 'FAQ', action: 'reply' });
+  });
+
+  it('PUT /reorder persiste priority denso na ordem enviada (admin-only)', async () => {
+    mocks.prisma.bot.update.mockResolvedValue({});
+    const app = await makeApp();
+
+    const forbidden = await request(app).put('/api/bots/reorder').set(RECEPTION_AUTH).send({ ids: ['b1'] });
+    expect(forbidden.status).toBe(403);
+
+    const res = await request(app).put('/api/bots/reorder').set(AUTH).send({ ids: ['b2', 'b1'] });
+    expect(res.status).toBe(200);
+    expect(mocks.prisma.bot.update).toHaveBeenCalledWith({ where: { id: 'b2' }, data: { priority: 0 } });
+    expect(mocks.prisma.bot.update).toHaveBeenCalledWith({ where: { id: 'b1' }, data: { priority: 1 } });
+
+    const invalid = await request(app).put('/api/bots/reorder').set(AUTH).send({ ids: [] });
+    expect(invalid.status).toBe(400);
+  });
+
+  it('POST /test devolve ruleIndex e action nos dois caminhos (salvos e inline)', async () => {
+    mocks.prisma.bot.findMany.mockResolvedValueOnce([
+      { id: 'b1', name: 'FAQ', steps: { rules: [
+        { terms: ['endereco'], responses: ['Rua X'] },
+        { terms: ['atendente'], responses: [], action: 'handoff' },
+      ] } },
+    ]);
+    const app = await makeApp();
+
+    const saved = await request(app).post('/api/bots/test').set(AUTH).send({ text: 'atendente' });
+    expect(saved.body.data).toMatchObject({ matched: true, botId: 'b1', ruleIndex: 1, action: 'handoff' });
+
+    const inline = await request(app).post('/api/bots/test').set(AUTH).send({
+      text: 'plano',
+      flow: { rules: [{ terms: ['plano'], responses: [], action: 'tawany' }] },
+    });
+    expect(inline.body.data).toMatchObject({ matched: true, ruleIndex: 0, action: 'tawany' });
+  });
+
+  it('POST / aceita action por regra; reply sem resposta continua 400', async () => {
+    mocks.prisma.bot.create.mockResolvedValue({ id: 'b9', name: 'Novo', active: false });
+    const app = await makeApp();
+
+    const ok = await request(app).post('/api/bots').set(AUTH).send({
+      name: 'Novo',
+      rules: [{ terms: ['atendente'], responses: [], action: 'handoff', handoffReason: 'pediu humano' }],
+    });
+    expect(ok.status).toBe(200);
+    const steps = mocks.prisma.bot.create.mock.calls[0][0].data.steps;
+    expect(steps.rules[0]).toMatchObject({ action: 'handoff', handoffReason: 'pediu humano' });
+
+    const bad = await request(app).post('/api/bots').set(AUTH).send({
+      name: 'Quebrado',
+      rules: [{ terms: ['oi'], responses: [] }],
+    });
+    expect(bad.status).toBe(400);
   });
 });
