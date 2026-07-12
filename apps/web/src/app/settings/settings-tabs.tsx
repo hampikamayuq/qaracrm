@@ -7,6 +7,7 @@ const TABS = [
   { href: '/settings/channels', label: 'Canais' },
   { href: '/settings/knowledge', label: 'Conhecimento' },
   { href: '/settings/ai', label: 'IA' },
+  { href: '/settings/templates', label: 'Templates' },
   { href: '/settings/users', label: 'Usuários' },
   { href: '/settings/audit', label: 'Auditoria' },
 ];

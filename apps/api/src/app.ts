@@ -25,6 +25,7 @@ import quickReplyRoutes from './routes/quick-reply-routes.js';
 import channelRoutes from './routes/channel-routes.js';
 import eventsRoutes from './routes/events-routes.js';
 import auditRoutes from './routes/audit-routes.js';
+import templateRoutes from './routes/template-routes.js';
 import { prisma } from './lib/deps.js';
 import { createPrismaDataApi } from './lib/prisma-data-api.js';
 import { startScheduler } from './lib/scheduler.js';
@@ -78,6 +79,7 @@ app.use('/api/quick-replies', quickReplyRoutes);
 app.use('/api/channels', channelRoutes);
 app.use('/api/events', eventsRoutes);
 app.use('/api/audit', auditRoutes);
+app.use('/api/templates', templateRoutes);
 
 startScheduler(createPrismaDataApi(prisma), undefined, {
   processPendingMetaWebhookEvents,
