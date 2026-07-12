@@ -563,8 +563,9 @@ export default function InboxPage() {
                   ) : (
                     <span className="chip">Humano assumiu</span>
                   )}
-                  {/* Canal QR não tem Tawany — o botão seria estado fake (PRODUCT.md). */}
-                  {agentStateOf(selected) !== 'tawany_ativa' && selected.channel !== 'WHATSAPP_QR' ? (
+                  {/* Tawany atende o canal QR desde os PRs #12/#15 — o botão vale
+                      para todos os canais em que ela responde. */}
+                  {agentStateOf(selected) !== 'tawany_ativa' ? (
                     <button className="btn" type="button" onClick={devolverTawany}>
                       <Undo2 size={14} />Devolver para a Tawany
                     </button>
