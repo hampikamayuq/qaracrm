@@ -39,6 +39,8 @@ const res = () => {
   return response as unknown as Response & typeof response;
 };
 
+const flushImmediates = () => new Promise((resolve) => setImmediate(resolve));
+
 describe('Meta Webhook Routes', () => {
   beforeEach(() => {
     process.env.META_VERIFY_TOKEN = 'test-verify-token';
@@ -237,6 +239,60 @@ describe('Meta Webhook Routes', () => {
     );
 
     expect(response.sendStatus).toHaveBeenCalledWith(403);
+  });
+
+  it('falha transiente no processamento inline mantém processed: false e o sweep reprocessa', async () => {
+    process.env.META_APP_SECRET = 'test-secret';
+    const { receiveMetaWebhook, processPendingMetaWebhookEvents } = await import('./meta-webhook-routes');
+    const { prisma } = await import('../lib/deps');
+    const { handleMetaWebhook } = await import('../logic-functions/meta-webhook');
+    vi.mocked(handleMetaWebhook).mockRejectedValueOnce(new Error('parse blew up'));
+    const response = res();
+
+    await receiveMetaWebhook(
+      req({
+        headers: { 'x-hub-signature-256': 'sha256=valid' },
+        body: { object: 'whatsapp_business_account', entry: [] },
+      }),
+      response,
+    );
+    await flushImmediates();
+
+    // Registra o erro mas NÃO dead-lettera — o sweep só pega processed: false.
+    expect(prisma.webhookEvent.update).toHaveBeenCalledWith({
+      where: { id: 'evt-1' },
+      data: { processed: false, error: 'parse blew up' },
+    });
+
+    // Sweep pega o evento pendente e conclui (handler volta a funcionar).
+    vi.mocked(prisma.webhookEvent.findMany).mockResolvedValueOnce([
+      { id: 'evt-1', payload: {} } as never,
+    ]);
+    vi.mocked(handleMetaWebhook).mockResolvedValueOnce({ processedMessages: [] });
+    const result = await processPendingMetaWebhookEvents({ now: new Date() });
+    expect(result).toEqual({ scanned: 1, processed: 1, failed: 0 });
+    expect(prisma.webhookEvent.update).toHaveBeenCalledWith({
+      where: { id: 'evt-1' },
+      data: { processed: true, error: null },
+    });
+  });
+
+  it('sweep dead-lettera com processed: true quando o reprocessamento também falha', async () => {
+    const { processPendingMetaWebhookEvents } = await import('./meta-webhook-routes');
+    const { prisma } = await import('../lib/deps');
+    const { handleMetaWebhook } = await import('../logic-functions/meta-webhook');
+    vi.mocked(prisma.webhookEvent.findMany).mockResolvedValueOnce([
+      { id: 'evt-dead', payload: {} } as never,
+    ]);
+    vi.mocked(handleMetaWebhook).mockRejectedValueOnce(new Error('still down'));
+
+    const result = await processPendingMetaWebhookEvents({ now: new Date() });
+
+    expect(result).toEqual({ scanned: 1, processed: 0, failed: 1 });
+    expect(prisma.webhookEvent.update).toHaveBeenCalledWith({
+      where: { id: 'evt-dead' },
+      data: { processed: true, error: 'still down' },
+    });
   });
 
   it('sweeps pending webhook events and dispatches Tawany for processed messages', async () => {

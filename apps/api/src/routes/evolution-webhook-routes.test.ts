@@ -100,8 +100,8 @@ describe('Evolution Webhook Routes', () => {
     });
   });
 
-  it('marca o WebhookEvent com o erro quando o processamento async falha', async () => {
-    const { receiveEvolutionWebhook } = await import('./evolution-webhook-routes');
+  it('falha transiente no processamento inline mantém processed: false e o sweep reprocessa', async () => {
+    const { receiveEvolutionWebhook, processPendingEvolutionWebhookEvents } = await import('./evolution-webhook-routes');
     const { prisma } = await import('../lib/deps');
     const { handleEvolutionWebhook } = await import('../logic-functions/evolution-webhook');
     vi.mocked(handleEvolutionWebhook).mockRejectedValueOnce(new Error('parse blew up'));
@@ -113,9 +113,39 @@ describe('Evolution Webhook Routes', () => {
     );
     await flushImmediates();
 
+    // Registra o erro mas NÃO dead-lettera — o sweep só pega processed: false.
     expect(prisma.webhookEvent.update).toHaveBeenCalledWith({
       where: { id: 'evt-evo-1' },
-      data: { processed: true, error: 'parse blew up' },
+      data: { processed: false, error: 'parse blew up' },
+    });
+
+    // Sweep pega o evento pendente e conclui (handler volta a funcionar).
+    vi.mocked(prisma.webhookEvent.findMany).mockResolvedValueOnce([
+      { id: 'evt-evo-1', payload: {} } as never,
+    ]);
+    const result = await processPendingEvolutionWebhookEvents({ now: new Date() });
+    expect(result).toEqual({ scanned: 1, processed: 1, failed: 0 });
+    expect(prisma.webhookEvent.update).toHaveBeenCalledWith({
+      where: { id: 'evt-evo-1' },
+      data: { processed: true, error: null },
+    });
+  });
+
+  it('sweep dead-lettera com processed: true quando o reprocessamento também falha', async () => {
+    const { processPendingEvolutionWebhookEvents } = await import('./evolution-webhook-routes');
+    const { prisma } = await import('../lib/deps');
+    const { handleEvolutionWebhook } = await import('../logic-functions/evolution-webhook');
+    vi.mocked(prisma.webhookEvent.findMany).mockResolvedValueOnce([
+      { id: 'evt-dead', payload: {} } as never,
+    ]);
+    vi.mocked(handleEvolutionWebhook).mockRejectedValueOnce(new Error('still down'));
+
+    const result = await processPendingEvolutionWebhookEvents({ now: new Date() });
+
+    expect(result).toEqual({ scanned: 1, processed: 0, failed: 1 });
+    expect(prisma.webhookEvent.update).toHaveBeenCalledWith({
+      where: { id: 'evt-dead' },
+      data: { processed: true, error: 'still down' },
     });
   });
 
