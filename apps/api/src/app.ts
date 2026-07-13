@@ -24,6 +24,7 @@ import usersRoutes from './routes/users-routes.js';
 import quickReplyRoutes from './routes/quick-reply-routes.js';
 import channelRoutes from './routes/channel-routes.js';
 import eventsRoutes from './routes/events-routes.js';
+import webChatRoutes from './routes/web-chat-routes.js';
 import auditRoutes from './routes/audit-routes.js';
 import templateRoutes from './routes/template-routes.js';
 import { prisma } from './lib/deps.js';
@@ -78,6 +79,13 @@ app.use('/api/users', usersRoutes);
 app.use('/api/quick-replies', quickReplyRoutes);
 app.use('/api/channels', channelRoutes);
 app.use('/api/events', eventsRoutes);
+// Canal WEB: CORS próprio, restrito ao origin do site do widget (o CORS global
+// acima é do CRM). Sem credentials — o widget autentica por token no header.
+app.use(
+  '/api/web-chat',
+  cors({ origin: process.env.WEB_WIDGET_ORIGIN ?? false }),
+  webChatRoutes,
+);
 app.use('/api/audit', auditRoutes);
 app.use('/api/templates', templateRoutes);
 

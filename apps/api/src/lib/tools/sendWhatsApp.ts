@@ -4,6 +4,8 @@ import { CircuitBreaker } from 'src/lib/resilience/circuit-breaker';
 import { isMetaSendConfigured, sendViaMeta } from 'src/lib/whatsapp-client';
 import { isInstagramSendConfigured, sendViaInstagram } from 'src/lib/instagram-client';
 import { isEvolutionConfigured, sendEvolutionText } from 'src/lib/evolution-client';
+import { randomUUID } from 'node:crypto';
+import { sendViaWeb } from 'src/lib/web-chat-send';
 
 export const metaGraphBreaker = new CircuitBreaker('meta-graph', {
   threshold: 5,
@@ -16,6 +18,11 @@ export const igGraphBreaker = new CircuitBreaker('ig-graph', {
 });
 
 export const evolutionBreaker = new CircuitBreaker('evolution', {
+  threshold: 5,
+  cooldownMs: 30_000,
+});
+
+export const webBreaker = new CircuitBreaker('web-chat', {
   threshold: 5,
   cooldownMs: 30_000,
 });
@@ -70,9 +77,14 @@ export const sendWhatsApp = {
     // In test mode, never send to Meta - just record in CRM
     const isTestMode = ctx.testMode === true;
     // Despacha por canal: WhatsApp via Cloud API, Instagram via Graph API,
-    // número QR via gateway Evolution (instância da conversa).
+    // número QR via gateway Evolution (instância da conversa), WEB via SSE.
+    // externalId aqui = id externo da entrega (wamid/psid). No canal WEB não há
+    // gateway externo: geramos um UUID para o ChatMessage e o push SSE é feito
+    // após a persistência (precisa do messageId).
     let externalId: string | null = null;
-    if (!isTestMode && to.length > 0) {
+    if (!isTestMode && channel === 'WEB') {
+      externalId = randomUUID();
+    } else if (!isTestMode && to.length > 0) {
       if (channel === 'WHATSAPP' && isMetaSendConfigured()) {
         externalId = await metaGraphBreaker.execute(() => sendViaMeta(to, args.text));
       } else if (channel === 'INSTAGRAM' && isInstagramSendConfigured()) {
@@ -93,17 +105,33 @@ export const sendWhatsApp = {
       }
     }
 
+    const sentAt = new Date().toISOString();
     const message = await ctx.create('chatMessage', {
       body: args.text,
       direction: 'OUT',
-      sentAt: new Date().toISOString(),
+      sentAt,
       conversationId: args.conversationId,
       messageType: 'TEXT',
       deliveryStatus: externalId ? 'SENT' : (isTestMode ? 'TEST_MODE' : 'PENDING'),
       agentHandled: true,
       ...(externalId ? { externalId } : {}),
     });
-    await ctx.update('conversation', args.conversationId, { lastMessageAt: new Date().toISOString() });
+
+    // Canal WEB: empurra a resposta OUT no SSE da sessão do visitante. Sem
+    // listener conectado o push retorna 0 e NÃO lança — a mensagem já está
+    // persistida e o widget rebusca ao reconectar. O breaker protege o push
+    // por simetria com os outros canais (aqui é in-memory, então raramente abre).
+    if (!isTestMode && channel === 'WEB') {
+      try {
+        await webBreaker.execute(async () =>
+          sendViaWeb(to, args.text, typeof message.id === 'string' ? message.id : '', sentAt),
+        );
+      } catch (err) {
+        console.error('[sendWhatsApp] web push failed (non-fatal):', (err as Error).message);
+      }
+    }
+
+    await ctx.update('conversation', args.conversationId, { lastMessageAt: sentAt });
     return JSON.stringify({ ok: true, sent: Boolean(externalId), messageId: message.id, testMode: isTestMode });
   },
 };

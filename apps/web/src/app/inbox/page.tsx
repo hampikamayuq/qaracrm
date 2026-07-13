@@ -88,6 +88,7 @@ const channelLabel = (
   if (channel === 'WHATSAPP') return 'WhatsApp';
   if (channel === 'WHATSAPP_QR') return instance?.name ? `WhatsApp · ${instance.name}` : 'WhatsApp · número QR';
   if (channel === 'INSTAGRAM') return 'Instagram';
+  if (channel === 'WEB') return 'Chat do site';
   return channel ?? 'Canal não informado';
 };
 

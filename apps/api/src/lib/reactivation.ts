@@ -100,9 +100,11 @@ export const runReactivationJob = async (
     const conversation = conversations[0];
     const conversationId = typeof conversation?.id === 'string' ? conversation.id : '';
     if (!conversationId) continue;
-    // Templates HSM são só WhatsApp: pula Instagram sem enviar nem marcar a
-    // janela (mesmo motivo do D-1, follow-up 48h e NPS).
-    if (conversation?.channel === 'INSTAGRAM') continue;
+    // Templates HSM são só WhatsApp: pula Instagram e WEB sem enviar nem marcar
+    // a janela (mesmo motivo do D-1, follow-up 48h e NPS). No WEB a ponte
+    // WhatsApp é Fase 2 (pelo telefone do lead), nunca template na conversa WEB.
+    // (QR mantém o comportamento atual — ver nota de reativação-fantasma no QR.)
+    if (conversation?.channel === 'INSTAGRAM' || conversation?.channel === 'WEB') continue;
 
     const name = typeof lead.name === 'string' ? lead.name : '';
     await sendWhatsAppTemplate.execute({
