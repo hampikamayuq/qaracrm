@@ -37,6 +37,15 @@ const app = express();
 
 app.use(securityHeaders);
 app.use(requestLogger);
+
+// Canal WEB: CORS próprio, restrito ao origin do site do widget. Precisa vir
+// ANTES do CORS global do CRM — senão o preflight OPTIONS de /api/web-chat é
+// respondido pelo cors global com a origin do CRM e o browser bloqueia o widget.
+// Sem credentials — o widget autentica por token no header. origin=false nega
+// quando WEB_WIDGET_ORIGIN não está setado (fail-closed).
+const webChatCors = cors({ origin: process.env.WEB_WIDGET_ORIGIN ?? false });
+app.use('/api/web-chat', webChatCors);
+
 app.use(
   cors({
     origin: process.env.CORS_DOMAIN ?? process.env.CORS_ORIGIN ?? 'http://localhost:3000',
@@ -79,13 +88,8 @@ app.use('/api/users', usersRoutes);
 app.use('/api/quick-replies', quickReplyRoutes);
 app.use('/api/channels', channelRoutes);
 app.use('/api/events', eventsRoutes);
-// Canal WEB: CORS próprio, restrito ao origin do site do widget (o CORS global
-// acima é do CRM). Sem credentials — o widget autentica por token no header.
-app.use(
-  '/api/web-chat',
-  cors({ origin: process.env.WEB_WIDGET_ORIGIN ?? false }),
-  webChatRoutes,
-);
+// Canal WEB: reusa o mesmo webChatCors do preflight (definido acima).
+app.use('/api/web-chat', webChatCors, webChatRoutes);
 app.use('/api/audit', auditRoutes);
 app.use('/api/templates', templateRoutes);
 
