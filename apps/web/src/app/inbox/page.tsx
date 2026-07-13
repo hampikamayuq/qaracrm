@@ -226,12 +226,17 @@ export default function InboxPage() {
     };
   }, [pollMs]);
 
+  // Guard contra resposta fora de ordem: cliques rápidos em conversas
+  // diferentes não deixam a resposta antiga sobrescrever a seleção nova.
+  const detailSeqRef = useRef(0);
   const reloadDetail = useCallback(async (id: string) => {
+    const seq = ++detailSeqRef.current;
     setDetailLoading(true);
     try {
-      setSelected(await api.getConversation(id));
+      const data = await api.getConversation(id);
+      if (seq === detailSeqRef.current) setSelected(data);
     } finally {
-      setDetailLoading(false);
+      if (seq === detailSeqRef.current) setDetailLoading(false);
     }
   }, []);
 
@@ -263,14 +268,21 @@ export default function InboxPage() {
     };
     reloadListRef.current = () => load(true);
     const timer = window.setTimeout(() => load(false), 250);
-    // Refresh silencioso na mesma cadência das notificações: a lista visível
-    // acompanha o que o som/badge anunciam, sem piscar o "Carregando…".
-    const poll = window.setInterval(() => load(true), pollMs);
     return () => {
       window.clearTimeout(timer);
+    };
+  }, [search, status]);
+
+  // Refresh silencioso na mesma cadência das notificações: a lista visível
+  // acompanha o que o som/badge anunciam, sem piscar o "Carregando…".
+  // Efeito separado para que flap do SSE (pollMs mudando) não refaça a carga
+  // inicial nem pisque o loading — só reagenda o intervalo.
+  useEffect(() => {
+    const poll = window.setInterval(() => reloadListRef.current(), pollMs);
+    return () => {
       window.clearInterval(poll);
     };
-  }, [search, status, pollMs]);
+  }, [pollMs]);
 
   useEffect(() => {
     if (!selectedId) {
