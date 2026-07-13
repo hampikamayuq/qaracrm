@@ -10,11 +10,11 @@ const makeCtx = (existing: boolean): DataApi => ({
 });
 
 describe('seed', () => {
-  it('seeds 1 unit, 5 professionals, 5 services when empty', async () => {
+  it('seeds 1 unit, 5 professionals, 7 services when empty', async () => {
     const ctx = makeCtx(false);
     const result = await seed(ctx);
-    expect(result.created).toBe(11);
-    expect(ctx.create).toHaveBeenCalledTimes(11);
+    expect(result.created).toBe(13);
+    expect(ctx.create).toHaveBeenCalledTimes(13);
   });
 
   it('skips existing records (idempotent)', async () => {
