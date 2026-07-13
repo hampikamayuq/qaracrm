@@ -193,6 +193,42 @@ export const runTawany = async (
       // Inbox para aprovar/editar/descartar. 'test' (shadow/modo teste) marca
       // TEST_SENT para não poluir a fila de aprovação.
       if (sendMode === 'send') {
+        // Gate pré-envio (TOCTOU): entre a entrada do handler e este ponto
+        // houve latência de LLM + debounce; um humano pode ter assumido a
+        // conversa nesse intervalo. Re-lê o estado agora — se não está mais
+        // OPEN ou needsHuman virou true, NÃO envia: rebaixa para suggest_only
+        // (sugestão fica PENDING, visível no Inbox para aprovação humana).
+        const gateConv = await data.get('conversation', params.conversationId, {
+          status: true,
+          needsHuman: true,
+        });
+        const takenOver =
+          !gateConv ||
+          gateConv.needsHuman === true ||
+          (typeof gateConv.status === 'string' && gateConv.status !== 'OPEN');
+        if (takenOver) {
+          console.log(JSON.stringify({
+            event: 'tawany_run',
+            messageId: params.messageId,
+            status: 'suggest_only',
+            reason: 'send gated: human takeover during run',
+            convStatus: gateConv?.status,
+            convNeedsHuman: gateConv?.needsHuman,
+          }));
+          await recordAiRun(data, {
+            layer: 'tawany',
+            model: res.modelUsed,
+            fallbackUsed: res.fallbackUsed,
+            latencyMs: Date.now() - startedAt,
+            success: true,
+            validationPass: true,
+            reason: 'send_gated_human_takeover',
+            conversationId: params.conversationId,
+            messageId: params.messageId,
+            ...usageLog(res),
+          });
+          return { status: 'replied', content: reply, toolCalls: totalToolCalls };
+        }
         const sendResult = JSON.parse(await tawanyTools.execute(
           'sendWhatsApp',
           JSON.stringify({ conversationId: params.conversationId, text: reply }),

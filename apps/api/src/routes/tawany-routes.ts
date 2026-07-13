@@ -99,9 +99,10 @@ export const approveSuggestionRoute = async (req: Request, res: Response): Promi
       return;
     }
 
-    try {
-      await sendWhatsApp.execute({ conversationId: current.conversationId, text: finalBody }, data);
-    } catch (error) {
+    // sendWhatsApp devolve um JSON (não lança em falha de negócio, ex.:
+    // instance_disconnected). Reverte a sugestão para PENDING tanto no throw
+    // (falha dura) quanto no ok===false — nunca marcar SENT sem ter enviado.
+    const revertToPending = async (): Promise<void> => {
       await prisma.aiSuggestion.update({
         where: { id: suggestionId },
         data: {
@@ -112,6 +113,20 @@ export const approveSuggestionRoute = async (req: Request, res: Response): Promi
           ...(humanEdited ? { originalBody: current.body, body: finalBody } : {}),
         },
       });
+    };
+
+    try {
+      const result = JSON.parse(
+        await sendWhatsApp.execute({ conversationId: current.conversationId, text: finalBody }, data),
+      );
+      if (result?.ok === false) {
+        await revertToPending();
+        console.error('[tawany] approved suggestion send failed:', typeof result.error === 'string' ? result.error : 'send_failed');
+        jsonError(res, 502, 'Failed to send approved suggestion');
+        return;
+      }
+    } catch (error) {
+      await revertToPending();
       console.error('[tawany] approved suggestion send failed:', (error as Error).message);
       jsonError(res, 502, 'Failed to send approved suggestion');
       return;
