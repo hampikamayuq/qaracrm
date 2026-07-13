@@ -41,6 +41,19 @@ const streamLimiter = rateLimit({
   legacyHeaders: false,
 });
 
+// Rate limit do histórico por IP: o widget busca o histórico ao (re)conectar,
+// então o teto é folgado, mas ainda protege de flood.
+const historyLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 30,
+  message: { success: false, error: 'Too many history requests' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+// Últimas N mensagens do histórico (widget reidrata ao reconectar).
+const HISTORY_LIMIT = 50;
+
 // Comparação em tempo constante (mesmo desenho do meta-signature): compara
 // tamanho antes para não vazar timing e evitar throw do timingSafeEqual.
 const isValidWidgetToken = (req: Request): boolean => {
@@ -150,7 +163,63 @@ export const streamWebChat = (req: Request, res: Response): void => {
   });
 };
 
+// Histórico da sessão: o widget busca as últimas mensagens ao (re)conectar para
+// reidratar a conversa. Mesma auth por token do POST /message (fail-closed).
+// Sessão nova sem conversa não é erro — devolve lista vazia (200). Cada item usa
+// o mesmo shape do evento SSE OUT ({ direction, text, at, messageId }, messageId
+// = id do ChatMessage) para o widget deduplicar histórico ↔ ao vivo pelo id.
+export const getWebChatHistory = async (req: Request, res: Response): Promise<void> => {
+  try {
+    if (!process.env.WEB_WIDGET_TOKEN) {
+      console.error('[web-chat] WEB_WIDGET_TOKEN não configurado — rejeitando');
+      res.status(401).json({ success: false, error: 'unauthorized' });
+      return;
+    }
+    if (!isValidWidgetToken(req)) {
+      res.status(401).json({ success: false, error: 'unauthorized' });
+      return;
+    }
+
+    const webSessionId = typeof req.params.webSessionId === 'string' ? req.params.webSessionId : '';
+    if (!/^[0-9a-fA-F-]{36}$/.test(webSessionId)) {
+      res.status(400).json({ success: false, error: 'invalid_session' });
+      return;
+    }
+
+    const conversation = await findWebConversation(webSessionId, data);
+    if (!conversation) {
+      // Sessão fresca sem conversa: histórico vazio, não 404.
+      res.status(200).json({ ok: true, messages: [] });
+      return;
+    }
+
+    // Pega as últimas HISTORY_LIMIT (DESC) e devolve em ordem cronológica (ASC).
+    // direction sempre IN/OUT no schema — não há linha de sistema para filtrar.
+    const rows = await data.list('chatMessage', {
+      filter: { conversationId: { eq: conversation.id }, direction: { in: ['IN', 'OUT'] } },
+      orderBy: { sentAt: 'DESC' },
+      limit: HISTORY_LIMIT,
+      select: { id: true, direction: true, body: true, sentAt: true },
+    });
+
+    const messages = rows
+      .reverse()
+      .map((row) => ({
+        direction: row.direction as 'IN' | 'OUT',
+        text: typeof row.body === 'string' ? row.body : '',
+        at: new Date(row.sentAt as string | number | Date).toISOString(),
+        messageId: row.id as string,
+      }));
+
+    res.status(200).json({ ok: true, messages });
+  } catch (e) {
+    console.error('[web-chat] history error:', (e as Error).message);
+    res.status(500).json({ success: false, error: 'internal_error' });
+  }
+};
+
 router.post('/message', messageLimiter, receiveWebChatMessage);
 router.get('/stream/:webSessionId', streamLimiter, streamWebChat);
+router.get('/history/:webSessionId', historyLimiter, getWebChatHistory);
 
 export default router;

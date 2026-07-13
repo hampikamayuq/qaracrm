@@ -7,7 +7,7 @@ import { pushWebChatEvent } from './web-chat-events';
 //
 // Sem listener conectado o push só retorna 0 (o visitante fechou a aba); NÃO é
 // erro — a mensagem já está persistida e o widget busca o histórico ao
-// reconectar (endpoint de histórico fica fora do escopo da Fase 1).
+// reconectar (GET /api/web-chat/history/:webSessionId).
 export const sendViaWeb = (
   webSessionId: string,
   text: string,

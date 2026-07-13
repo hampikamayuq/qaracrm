@@ -2,13 +2,18 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import type { Request, Response } from 'express';
 
 vi.mock('../lib/deps', () => ({ prisma: {} }));
-vi.mock('../lib/prisma-data-api', () => ({ createPrismaDataApi: () => ({}) }));
 vi.mock('../lib/ai-client', () => ({ createAiClient: vi.fn() }));
 
 const mocks = vi.hoisted(() => ({
   handleWebChatMessage: vi.fn(),
   findWebConversation: vi.fn(),
   runTawany: vi.fn().mockResolvedValue(undefined),
+  dataList: vi.fn(),
+}));
+
+// data.list é usado pelo endpoint de histórico; o mock precisa expô-lo.
+vi.mock('../lib/prisma-data-api', () => ({
+  createPrismaDataApi: () => ({ list: mocks.dataList }),
 }));
 
 vi.mock('../logic-functions/web-chat', () => ({
@@ -172,5 +177,96 @@ describe('web-chat routes — GET /stream (SSE)', () => {
     const response = res();
     streamWebChat(req({ params: { webSessionId: 'x' } }), response);
     expect(response.status).toHaveBeenCalledWith(400);
+  });
+});
+
+describe('web-chat routes — GET /history', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    delete process.env.WEB_WIDGET_TOKEN;
+  });
+
+  afterEach(() => {
+    delete process.env.WEB_WIDGET_TOKEN;
+  });
+
+  const authedReq = () =>
+    req({
+      headers: { 'x-widget-token': 'segredo-do-widget' },
+      params: { webSessionId: SESSION },
+    });
+
+  it('token errado → 401', async () => {
+    process.env.WEB_WIDGET_TOKEN = 'segredo-do-widget';
+    const { getWebChatHistory } = await import('./web-chat-routes');
+    const response = res();
+    await getWebChatHistory(
+      req({ headers: { 'x-widget-token': 'errado' }, params: { webSessionId: SESSION } }),
+      response,
+    );
+    expect(response.status).toHaveBeenCalledWith(401);
+    expect(mocks.findWebConversation).not.toHaveBeenCalled();
+  });
+
+  it('sem WEB_WIDGET_TOKEN configurado → 401 (fail-closed)', async () => {
+    const { getWebChatHistory } = await import('./web-chat-routes');
+    const response = res();
+    await getWebChatHistory(authedReq(), response);
+    expect(response.status).toHaveBeenCalledWith(401);
+  });
+
+  it('sessão fresca (sem conversa) → 200 { ok:true, messages:[] }', async () => {
+    process.env.WEB_WIDGET_TOKEN = 'segredo-do-widget';
+    mocks.findWebConversation.mockResolvedValueOnce(null);
+    const { getWebChatHistory } = await import('./web-chat-routes');
+    const response = res();
+    await getWebChatHistory(authedReq(), response);
+    expect(response.status).toHaveBeenCalledWith(200);
+    expect(response.json).toHaveBeenCalledWith({ ok: true, messages: [] });
+    expect(mocks.dataList).not.toHaveBeenCalled();
+  });
+
+  it('sessão com mensagens → devolve em ordem cronológica, shape do contrato', async () => {
+    process.env.WEB_WIDGET_TOKEN = 'segredo-do-widget';
+    mocks.findWebConversation.mockResolvedValueOnce({ id: 'conv-1' });
+    // data.list devolve DESC (mais recente primeiro); o handler inverte para ASC.
+    mocks.dataList.mockResolvedValueOnce([
+      { id: 'm3', direction: 'OUT', body: 'terceira', sentAt: '2026-07-12T10:00:02.000Z' },
+      { id: 'm2', direction: 'IN', body: 'segunda', sentAt: '2026-07-12T10:00:01.000Z' },
+      { id: 'm1', direction: 'IN', body: 'primeira', sentAt: '2026-07-12T10:00:00.000Z' },
+    ]);
+    const { getWebChatHistory } = await import('./web-chat-routes');
+    const response = res();
+    await getWebChatHistory(authedReq(), response);
+
+    expect(response.status).toHaveBeenCalledWith(200);
+    const payload = response.json.mock.calls[0][0];
+    expect(payload.ok).toBe(true);
+    expect(payload.messages).toEqual([
+      { direction: 'IN', text: 'primeira', at: '2026-07-12T10:00:00.000Z', messageId: 'm1' },
+      { direction: 'IN', text: 'segunda', at: '2026-07-12T10:00:01.000Z', messageId: 'm2' },
+      { direction: 'OUT', text: 'terceira', at: '2026-07-12T10:00:02.000Z', messageId: 'm3' },
+    ]);
+
+    // Consultou capado em 50 (últimas), DESC por sentAt.
+    expect(mocks.dataList).toHaveBeenCalledWith(
+      'chatMessage',
+      expect.objectContaining({ orderBy: { sentAt: 'DESC' }, limit: 50 }),
+    );
+  });
+
+  it('messageId do histórico é o id do ChatMessage — casa com o OUT do SSE (dedupe)', async () => {
+    process.env.WEB_WIDGET_TOKEN = 'segredo-do-widget';
+    mocks.findWebConversation.mockResolvedValueOnce({ id: 'conv-1' });
+    // Mesmo id que o sendViaWeb empurra no evento OUT do SSE.
+    mocks.dataList.mockResolvedValueOnce([
+      { id: 'm-out', direction: 'OUT', body: 'resposta ao vivo', sentAt: '2026-07-12T10:00:00.000Z' },
+    ]);
+    const { getWebChatHistory } = await import('./web-chat-routes');
+    const response = res();
+    await getWebChatHistory(authedReq(), response);
+
+    const payload = response.json.mock.calls[0][0];
+    expect(payload.messages[0].messageId).toBe('m-out');
   });
 });

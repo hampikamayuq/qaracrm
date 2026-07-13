@@ -77,6 +77,15 @@ POST /api/web-chat/message
 GET /api/web-chat/stream/:webSessionId   (text/event-stream)
   events: { type:'message', direction:'OUT', text, at, messageId }
           : ping   (heartbeat)
+
+GET /api/web-chat/history/:webSessionId
+  headers: { x-widget-token: <WEB_WIDGET_TOKEN> }   (mesma auth timing-safe do POST)
+  200: { ok: true, messages: [ { direction:'IN'|'OUT', text, at, messageId } ] }
+       - ordem cronológica (mais antiga → mais recente), últimas 50.
+       - sessão fresca sem conversa → { ok:true, messages:[] } (200, não 404).
+       - messageId = id do ChatMessage (mesmo id do evento OUT do SSE), então o
+         widget deduplica histórico ↔ ao vivo pelo messageId.
+  401 token inválido/ausente | 400 webSessionId inválido | 429 rate limit
 ```
 
 ### Testes (vitest, padrões existentes)
