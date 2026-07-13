@@ -6,7 +6,7 @@ import { createPrismaDataApi } from '../lib/prisma-data-api';
 import { handleMetaWebhook } from '../logic-functions/meta-webhook';
 import { verifyMetaSignature } from '../lib/meta-signature';
 import { isDuplicateWebhook } from '../lib/webhook-dedup';
-import { forwardWebhookToTwenty, runTawanyForProcessedMessages } from '../lib/shadow';
+import { runTawanyForProcessedMessages } from '../lib/shadow';
 import type { Debouncer } from '../lib/debounce';
 
 const router: Router = Router();
@@ -134,11 +134,6 @@ export const receiveMetaWebhook = async (req: Request, res: Response): Promise<v
       },
     });
 
-    void forwardWebhookToTwenty({
-      rawBody: rawBytes ?? Buffer.from(rawBody),
-      signature,
-    }).catch((err) => console.error('[shadow] forward to Twenty failed:', (err as Error).message));
-
     // Always return 200 to Meta immediately — they retry non-200
     res.status(200).json({ success: true, data: { eventId: webhookEvent.id } });
 
@@ -168,7 +163,7 @@ export const receiveMetaWebhook = async (req: Request, res: Response): Promise<v
   } catch (e) {
     console.error('[meta-webhook] error:', (e as Error).message);
     // Always return 200 to Meta — they retry non-200
-    res.status(200).json({ success: false, error: (e as Error).message });
+    res.status(200).json({ success: false, error: 'Erro interno' });
   }
 };
 

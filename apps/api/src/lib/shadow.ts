@@ -9,34 +9,6 @@ export { getShadowMode, isAutopilotMode, isHumanApprovalMode, isShadowMode, type
 
 export type ProcessedShadowMessage = { conversationId: string; messageId: string };
 
-type FetchLike = (
-  input: string,
-  init: { method: 'POST'; headers: Record<string, string>; body: Buffer },
-) => Promise<unknown>;
-
-export const forwardWebhookToTwenty = async (
-  params: {
-    rawBody: Buffer;
-    signature?: string;
-    url?: string;
-    fetchImpl?: FetchLike;
-  },
-): Promise<boolean> => {
-  const url = params.url ?? process.env.TWENTY_FORWARD_URL;
-  if (!url) return false;
-
-  const fetchImpl = params.fetchImpl ?? (globalThis.fetch as unknown as FetchLike);
-  await fetchImpl(url, {
-    method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-      'x-hub-signature-256': params.signature ?? '',
-    },
-    body: params.rawBody,
-  });
-  return true;
-};
-
 export const recordShadowRun = async (
   data: DataApi,
   params: {
@@ -108,7 +80,7 @@ export const runTawanyForProcessedMessages = async (
     ai = undefined;
   }
 
-  await Promise.all(messages.map(async (message) => {
+  const processMessage = async (message: ProcessedShadowMessage): Promise<void> => {
     const chatMessage = await deps.data.get('chatMessage', message.messageId, {
       id: true,
       conversationId: true,
@@ -138,5 +110,19 @@ export const runTawanyForProcessedMessages = async (
         match: false,
       });
     }
+  };
+
+  // Conversas diferentes continuam em paralelo, mas uma mesma conversa é
+  // sempre processada na ordem de entrada. Isso evita duas chamadas de IA
+  // responderem ao mesmo histórico simultaneamente e enviarem fora de ordem.
+  const messagesByConversation = new Map<string, ProcessedShadowMessage[]>();
+  for (const message of messages) {
+    const group = messagesByConversation.get(message.conversationId) ?? [];
+    group.push(message);
+    messagesByConversation.set(message.conversationId, group);
+  }
+
+  await Promise.all(Array.from(messagesByConversation.values(), async (group) => {
+    for (const message of group) await processMessage(message);
   }));
 };

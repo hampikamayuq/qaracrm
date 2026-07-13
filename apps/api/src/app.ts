@@ -30,13 +30,14 @@ import templateRoutes from './routes/template-routes.js';
 import { prisma } from './lib/deps.js';
 import { createPrismaDataApi } from './lib/prisma-data-api.js';
 import { startScheduler } from './lib/scheduler.js';
-import { assertProductionConfig, requestLogger, securityHeaders } from './lib/production.js';
+import { assertProductionConfig, requestLogger, sanitizeErrorResponses, securityHeaders } from './lib/production.js';
 
 assertProductionConfig();
 const app = express();
 
 app.use(securityHeaders);
 app.use(requestLogger);
+app.use(sanitizeErrorResponses);
 
 // Canal WEB: CORS próprio, restrito ao origin do site do widget. Precisa vir
 // ANTES do CORS global do CRM — senão o preflight OPTIONS de /api/web-chat é

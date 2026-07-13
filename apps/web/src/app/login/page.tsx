@@ -15,9 +15,9 @@ export default function LoginPage() {
     event.preventDefault();
     setError('');
     const res = await api.login(email, password);
-    if (res.success && res.data?.token) {
-      sessionStorage.setItem('auth_token', res.data.token);
+    if (res.success) {
       router.push('/inbox');
+      router.refresh();
       return;
     }
     setError(res.error ?? 'Login falhou');

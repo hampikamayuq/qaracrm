@@ -29,6 +29,7 @@ const res = () => {
   const response = {
     status: vi.fn(),
     json: vi.fn(),
+    setHeader: vi.fn(),
   };
   response.status.mockReturnValue(response);
   return response as unknown as Response & typeof response;
@@ -66,7 +67,7 @@ describe('Auth routes', () => {
     });
   });
 
-  it('creates a session for valid credentials', async () => {
+  it('creates a session in an HttpOnly cookie without exposing the token in JSON', async () => {
     const { verifyPassword, createToken } = await import('../lib/auth');
     vi.mocked(verifyPassword).mockResolvedValue(true);
     mocks.prisma.user.findUnique.mockResolvedValue({
@@ -87,12 +88,32 @@ describe('Auth routes', () => {
     expect(mocks.prisma.session.create).toHaveBeenCalledWith({
       data: expect.objectContaining({ userId: 'u1', token: 'jwt-token' }),
     });
+    expect(response.setHeader).toHaveBeenCalledWith(
+      'Set-Cookie',
+      expect.stringContaining('qara_session=jwt-token'),
+    );
+    expect(response.setHeader).toHaveBeenCalledWith(
+      'Set-Cookie',
+      expect.stringContaining('HttpOnly'),
+    );
     expect(response.json).toHaveBeenCalledWith({
       success: true,
       data: {
-        token: 'jwt-token',
         user: { id: 'u1', name: 'Admin', email: 'admin@example.com', role: 'admin' },
       },
     });
+  });
+
+  it('invalidates the cookie-backed session and expires the cookie on logout', async () => {
+    const { logoutRoute } = await import('./auth-routes');
+    const response = res();
+
+    await logoutRoute(req({ headers: { cookie: 'qara_session=jwt-token' } }), response);
+
+    expect(mocks.prisma.session.deleteMany).toHaveBeenCalledWith({ where: { token: 'jwt-token' } });
+    expect(response.setHeader).toHaveBeenCalledWith(
+      'Set-Cookie',
+      expect.stringMatching(/qara_session=;.*Max-Age=0/),
+    );
   });
 });

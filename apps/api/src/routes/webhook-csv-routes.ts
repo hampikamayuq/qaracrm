@@ -1,3 +1,4 @@
+import { timingSafeEqual } from 'node:crypto';
 import { Router } from 'express';
 import type { Request, Response } from 'express';
 import { prisma } from '../lib/deps';
@@ -6,7 +7,7 @@ import { authMiddleware } from '../middleware/auth-middleware';
 const router = Router();
 
 const jsonError = (res: Response, status: number, error: string): void => {
-  res.status(status).json({ success: false, error });
+  res.status(status).json({ success: false, error: status >= 500 ? 'Erro interno' : error });
 };
 
 const CLINICAL_PIPELINES = [
@@ -23,7 +24,7 @@ const CLINICAL_PIPELINES = [
 
 const UI_STAGES = ['NOVO', 'QUALIFICADO', 'AGENDADO', 'COMPARECEU', 'PERDIDO', 'CONVERTIDO'] as const;
 
-const CSV_HEADERS = ['id', 'nome', 'telefone', 'email', 'origem', 'intencao', 'etapa', 'score', 'temperatura', 'pipeline', 'tags', 'observacoes'];
+const CSV_HEADERS = ['id', 'nome', 'telefone', 'email', 'origem', 'intencao', 'etapa', 'score', 'temperatura', 'pipeline', 'tags'];
 
 const tagsOf = (raw: unknown): string[] =>
   Array.isArray(raw) ? raw.filter((t): t is string => typeof t === 'string') : [];
@@ -45,13 +46,57 @@ const stageFromTags = (tags: string[]): string => {
 
 const csvCell = (value: string): string => `"${value.replace(/"/g, '""')}"`;
 
+// Parser RFC 4180 suficiente para os CSVs gerados por este módulo: preserva
+// vírgulas, aspas escapadas e quebras de linha dentro de campos entre aspas.
+const parseCsv = (input: string): string[][] => {
+  const rows: string[][] = [];
+  let row: string[] = [];
+  let field = '';
+  let quoted = false;
+
+  for (let i = 0; i < input.length; i++) {
+    const char = input[i];
+    if (char === '"') {
+      if (quoted && input[i + 1] === '"') {
+        field += '"';
+        i++;
+      } else {
+        quoted = !quoted;
+      }
+      continue;
+    }
+    if (char === ',' && !quoted) {
+      row.push(field.trim());
+      field = '';
+      continue;
+    }
+    if ((char === '\n' || char === '\r') && !quoted) {
+      if (char === '\r' && input[i + 1] === '\n') i++;
+      row.push(field.trim());
+      if (row.some((value) => value.length > 0)) rows.push(row);
+      row = [];
+      field = '';
+      continue;
+    }
+    field += char;
+  }
+
+  row.push(field.trim());
+  if (row.some((value) => value.length > 0)) rows.push(row);
+  return rows;
+};
+
 // Endpoint público (fontes externas: site, Google Ads, planilhas) — autenticado
 // por segredo compartilhado, não por sessão de usuário. Ver docs/lgpd.md.
 const isValidWebhookSecret = (req: Request): boolean => {
   const secret = process.env.LEAD_WEBHOOK_SECRET;
   if (!secret) return false;
   const provided = req.get('x-webhook-secret');
-  return provided === secret;
+  if (!provided) return false;
+  const providedBuffer = Buffer.from(provided, 'utf8');
+  const secretBuffer = Buffer.from(secret, 'utf8');
+  return providedBuffer.length === secretBuffer.length
+    && timingSafeEqual(providedBuffer, secretBuffer);
 };
 
 export const receiveLeadWebhookRoute = async (req: Request, res: Response): Promise<void> => {
@@ -155,14 +200,13 @@ export const importLeadsCsvRoute = async (req: Request, res: Response): Promise<
       return;
     }
 
-    const lines = csvText.trim().split('\n');
-    if (lines.length < 2) {
+    const rows = parseCsv(csvText.trim());
+    if (rows.length < 2) {
       jsonError(res, 400, 'CSV deve ter cabeçalho e pelo menos uma linha de dados');
       return;
     }
 
-    const stripQuotes = (v: string) => v.replace(/^"|"$/g, '').trim();
-    const headers = lines[0].split(',').map(stripQuotes);
+    const headers = rows[0].map((value, index) => index === 0 ? value.replace(/^\uFEFF/, '') : value);
     const requiredHeaders = ['nome', 'telefone', 'email'];
     const missingHeaders = requiredHeaders.filter((h) => !headers.includes(h));
     if (missingHeaders.length > 0) {
@@ -172,11 +216,8 @@ export const importLeadsCsvRoute = async (req: Request, res: Response): Promise<
 
     const results = { created: 0, errors: [] as string[] };
 
-    for (let i = 1; i < lines.length; i++) {
-      const line = lines[i].trim();
-      if (!line) continue;
-
-      const values = line.split(',').map(stripQuotes);
+    for (let i = 1; i < rows.length; i++) {
+      const values = rows[i];
       const row: Record<string, string> = {};
       headers.forEach((h: string, idx: number) => { row[h] = values[idx] ?? ''; });
 
@@ -207,13 +248,16 @@ export const importLeadsCsvRoute = async (req: Request, res: Response): Promise<
             email: email || null,
             source: row.origem || 'SITE',
             intent: row.intencao || 'outro',
-            score: parseInt(row.score ?? '50', 10) || 50,
+            score: Number.isNaN(Number.parseInt(row.score ?? '', 10))
+              ? 50
+              : Number.parseInt(row.score ?? '', 10),
             tags,
           },
         });
         results.created++;
       } catch (err) {
-        results.errors.push(`Linha ${i + 1}: ${(err as Error).message}`);
+        console.error(`[csv-import] linha ${i + 1}:`, (err as Error).message);
+        results.errors.push(`Linha ${i + 1}: erro interno ao importar`);
       }
     }
 
@@ -223,7 +267,7 @@ export const importLeadsCsvRoute = async (req: Request, res: Response): Promise<
   }
 };
 
-router.post('/webhook/lead', receiveLeadWebhookRoute);
+router.post('/lead', receiveLeadWebhookRoute);
 router.get('/leads/export', authMiddleware, exportLeadsCsvRoute);
 router.post('/leads/import', authMiddleware, importLeadsCsvRoute);
 

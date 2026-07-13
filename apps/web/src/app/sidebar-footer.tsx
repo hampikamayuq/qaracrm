@@ -40,10 +40,10 @@ export function SidebarFooter() {
     // pathname: revalida ao navegar (ex.: depois de salvar o modo em /settings/ai)
   }, [pathname]);
 
-  const logout = () => {
-    sessionStorage.removeItem('auth_token');
-    localStorage.removeItem('auth_token');
+  const logout = async () => {
+    await api.logout();
     router.push('/login');
+    router.refresh();
   };
 
   return (

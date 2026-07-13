@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000/api';
+const API_BASE = '/api';
 const RECONNECT_MS = 5_000;
 
 export type InboundMessageEvent = {
@@ -11,8 +11,8 @@ export type InboundMessageEvent = {
   preview: string;
 };
 
-// SSE de notificações em tempo real (GET /events/stream). EventSource não
-// envia headers, então o token (mesmo storage do api.ts) vai na query string.
+// SSE de notificações em tempo real (GET /events/stream), autenticado pelo
+// cookie HttpOnly da sessão com `withCredentials`.
 // Reconexão: o EventSource reconecta sozinho em quedas transitórias; quando
 // fecha de vez (readyState CLOSED, ex.: 401), recriamos com backoff fixo de 5s.
 // Retorna `true` enquanto o stream está conectado — quem consome pode alargar
@@ -28,16 +28,13 @@ export const useLiveEvents = (
 
   useEffect(() => {
     if (!enabled) return;
-    const token = sessionStorage.getItem('auth_token') ?? localStorage.getItem('auth_token');
-    if (!token) return;
-
     let source: EventSource | null = null;
     let retry: number | undefined;
     let cancelled = false;
 
     const connect = () => {
       if (cancelled) return;
-      source = new EventSource(`${API_BASE}/events/stream?token=${encodeURIComponent(token)}`);
+      source = new EventSource(`${API_BASE}/events/stream`, { withCredentials: true });
       source.onopen = () => setConnected(true);
       source.addEventListener('inbound-message', (event) => {
         try {

@@ -22,7 +22,6 @@ vi.mock('../lib/meta-signature', () => ({
 }));
 
 vi.mock('../lib/shadow', () => ({
-  forwardWebhookToTwenty: vi.fn().mockResolvedValue(false),
   runTawanyForProcessedMessages: vi.fn().mockResolvedValue(undefined),
 }));
 
@@ -150,28 +149,6 @@ describe('Meta Webhook Routes', () => {
       [{ conversationId: 'conv-1', messageId: 'msg-1' }],
       expect.objectContaining({ data: expect.anything() }),
     );
-  });
-
-  it('forwards raw webhook bytes to Twenty after persistence', async () => {
-    process.env.META_APP_SECRET = 'test-secret';
-    const { receiveMetaWebhook } = await import('./meta-webhook-routes');
-    const { forwardWebhookToTwenty } = await import('../lib/shadow');
-    const response = res();
-    const rawBody = Buffer.from('{"entry":[]}');
-
-    await receiveMetaWebhook(
-      req({
-        headers: { 'x-hub-signature-256': 'sha256=abc' },
-        body: { object: 'whatsapp_business_account', entry: [] },
-        rawBody,
-      } as Partial<Request> & { rawBody: Buffer }),
-      response,
-    );
-
-    expect(forwardWebhookToTwenty).toHaveBeenCalledWith({
-      rawBody,
-      signature: 'sha256=abc',
-    });
   });
 
   it('deduplicates matching signatures before persisting WebhookEvent', async () => {

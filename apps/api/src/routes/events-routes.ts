@@ -2,16 +2,15 @@ import { Router } from 'express';
 import type { Request, Response } from 'express';
 import { authenticateSessionToken } from '../middleware/auth-middleware';
 import { subscribe } from '../lib/events';
+import { sessionCookieTokenFromRequest } from '../lib/session-cookie';
 
 const router: Router = Router();
 
 const HEARTBEAT_MS = 25_000;
 
-// GET /api/events/stream?token=<jwt> — SSE de notificações em tempo real.
-// EventSource não envia headers, então o token vem na query e passa pela mesma
-// validação do auth-middleware (verifyToken + Session no banco).
+// GET /api/events/stream — SSE autenticado pelo cookie HttpOnly da sessão.
 export const streamEventsRoute = async (req: Request, res: Response): Promise<void> => {
-  const token = typeof req.query.token === 'string' ? req.query.token : '';
+  const token = sessionCookieTokenFromRequest(req);
   const payload = token ? await authenticateSessionToken(token) : null;
   if (!payload) {
     res.status(401).json({ success: false, error: 'Invalid or expired token' });
