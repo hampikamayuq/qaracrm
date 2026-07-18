@@ -237,7 +237,7 @@ nada de risco sai sem humano.
 |---|---|---|
 | 4.1 | ✅ (10/07) Import circular `shadow ↔ tawany-handler` → extraído `lib/shadow-mode.ts` (re-export em `shadow.ts` preserva consumidores) | P |
 | 4.2 | Teto de 500 nos `findMany` dos agregadores → `groupBy` no banco quando leads > ~2k | P |
-| 4.3 | Limpeza do legado: arquivos twenty-sdk restantes + `__tests__` antigos (~795 erros de tipo fora do build) + `TWENTY_FORWARD_URL` | P/M |
+| 4.3 | Limpeza do legado: arquivos twenty-sdk restantes + `__tests__` antigos (~795 erros de tipo fora do build) | P/M |
 | 4.4 | Monitoramento: health check do Render + uptime externo + Sentry na API + **alerta conversa aguardando-humano >15 min** (via scheduler) | P/M |
 | 4.5 | UX contínuo: drag-and-drop real no kanban (HTML5, sem lib), busca global por lead/telefone, modo escuro (tokens já centralizados), atalho conversa→card do pipeline | P cada |
 

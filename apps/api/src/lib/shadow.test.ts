@@ -30,7 +30,6 @@ describe('shadow mode helpers', () => {
 
   afterEach(() => {
     delete process.env.SHADOW_MODE;
-    delete process.env.TWENTY_FORWARD_URL;
   });
 
   it('reads shadow mode flags from env', async () => {
@@ -46,29 +45,6 @@ describe('shadow mode helpers', () => {
     const { isShadowMode } = await import('./shadow');
 
     expect(() => isShadowMode()).toThrow('Invalid SHADOW_MODE: invalid');
-  });
-
-  it('forwards raw webhook bytes to Twenty with the original signature', async () => {
-    process.env.TWENTY_FORWARD_URL = 'https://twenty.example/webhook';
-    const fetchImpl = vi.fn().mockResolvedValue({ ok: true });
-    const rawBody = Buffer.from('{"object":"whatsapp_business_account"}');
-    const { forwardWebhookToTwenty } = await import('./shadow');
-
-    const forwarded = await forwardWebhookToTwenty({
-      rawBody,
-      signature: 'sha256=abc',
-      fetchImpl,
-    });
-
-    expect(forwarded).toBe(true);
-    expect(fetchImpl).toHaveBeenCalledWith('https://twenty.example/webhook', {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        'x-hub-signature-256': 'sha256=abc',
-      },
-      body: rawBody,
-    });
   });
 
   it('records shadow run as an Activity without full message bodies', async () => {
@@ -242,5 +218,35 @@ describe('runTawanyForProcessedMessages', () => {
       inboundMessage,
       expect.objectContaining({ ai: undefined, sendMode: 'suggest_only' }),
     );
+  });
+
+  it('serializa mensagens da mesma conversa para evitar respostas concorrentes e fora de ordem', async () => {
+    process.env.SHADOW_MODE = 'human_approval';
+    const messages = {
+      'msg-1': inboundMessage,
+      'msg-2': { ...inboundMessage, id: 'msg-2', body: 'segunda mensagem' },
+    };
+    const data = api({
+      get: vi.fn((_object, id) => Promise.resolve(messages[id as keyof typeof messages] ?? null)),
+    });
+    let releaseFirst: (() => void) | undefined;
+    vi.mocked(runTawanyHandler)
+      .mockImplementationOnce(() => new Promise((resolve) => {
+        releaseFirst = () => resolve({ status: 'replied', content: 'primeira' });
+      }))
+      .mockResolvedValueOnce({ status: 'replied', content: 'segunda' });
+    const { runTawanyForProcessedMessages } = await import('./shadow');
+
+    const processing = runTawanyForProcessedMessages([
+      { conversationId: 'conv-1', messageId: 'msg-1' },
+      { conversationId: 'conv-1', messageId: 'msg-2' },
+    ], deps(data));
+    await vi.waitFor(() => expect(runTawanyHandler).toHaveBeenCalledTimes(1));
+
+    releaseFirst?.();
+    await processing;
+
+    expect(runTawanyHandler).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(runTawanyHandler).mock.calls.map(([message]) => message.id)).toEqual(['msg-1', 'msg-2']);
   });
 });

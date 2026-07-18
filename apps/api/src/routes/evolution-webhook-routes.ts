@@ -148,7 +148,7 @@ export const receiveEvolutionWebhook = async (req: Request, res: Response): Prom
     });
   } catch (e) {
     console.error('[evolution-webhook] error:', (e as Error).message);
-    res.status(200).json({ success: false, error: (e as Error).message });
+    res.status(200).json({ success: false, error: 'Erro interno' });
   }
 };
 

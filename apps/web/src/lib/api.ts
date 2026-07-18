@@ -1,4 +1,4 @@
-const BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000/api';
+const BASE_URL = '/api';
 
 export type ApiResponse<T> = { success: boolean; data?: T; error?: string };
 
@@ -637,11 +637,6 @@ export type ReportFinanceiro = {
   };
 };
 
-const getToken = (): string | null => {
-  if (typeof window === 'undefined') return null;
-  return sessionStorage.getItem('auth_token') ?? localStorage.getItem('auth_token');
-};
-
 const qs = (params: Record<string, string | number | boolean | undefined>): string => {
   const query = new URLSearchParams();
   Object.entries(params).forEach(([key, value]) => {
@@ -655,14 +650,9 @@ export const api = {
   async fetch<T>(path: string, options: RequestInit = {}): Promise<ApiResponse<T>> {
     const headers = new Headers(options.headers);
     headers.set('Content-Type', 'application/json');
-    const token = getToken();
-    if (token) headers.set('Authorization', `Bearer ${token}`);
-
     try {
-      const res = await fetch(`${BASE_URL}${path}`, { ...options, headers });
+      const res = await fetch(`${BASE_URL}${path}`, { ...options, headers, credentials: 'include' });
       if (res.status === 401 && typeof window !== 'undefined') {
-        sessionStorage.removeItem('auth_token');
-        localStorage.removeItem('auth_token');
         if (window.location.pathname !== '/login') window.location.href = '/login';
       }
       return (await res.json()) as ApiResponse<T>;
@@ -680,8 +670,12 @@ export const api = {
     return this.fetch<T>(path, { method: 'POST', body: JSON.stringify(body) });
   },
 
-  async login(email: string, password: string): Promise<ApiResponse<{ token: string }>> {
+  async login(email: string, password: string): Promise<ApiResponse<{ user: { id: string; name: string; email: string; role: string } }>> {
     return this.post('/auth/login', { email, password });
+  },
+
+  async logout(): Promise<ApiResponse<null>> {
+    return this.post('/auth/logout', {});
   },
 
   async getMe(): Promise<{ id: string; name: string; email: string; role: string } | null> {
@@ -1070,12 +1064,13 @@ export const api = {
     return res.data ?? [];
   },
 
-  // .ics precisa do header Authorization → baixa via fetch e devolve o Blob.
+  // .ics usa o mesmo cookie HttpOnly das demais chamadas.
   async downloadAgendaIcs(from: string, to: string): Promise<Blob | null> {
     const headers = new Headers();
-    const token = getToken();
-    if (token) headers.set('Authorization', `Bearer ${token}`);
-    const res = await fetch(`${BASE_URL}/appointments/export.ics${qs({ from, to })}`, { headers });
+    const res = await fetch(`${BASE_URL}/appointments/export.ics${qs({ from, to })}`, {
+      headers,
+      credentials: 'include',
+    });
     if (!res.ok) return null;
     return res.blob();
   },
@@ -1184,13 +1179,13 @@ export const api = {
     return res.data;
   },
 
-  // CSV precisa do header Authorization → baixa via fetch e devolve o Blob
-  // (mesmo padrão do .ics da agenda).
+  // CSV usa o mesmo cookie HttpOnly das demais chamadas.
   async downloadReportCsv(tipo: ReportTipo, params: ReportParams): Promise<Blob | null> {
     const headers = new Headers();
-    const token = getToken();
-    if (token) headers.set('Authorization', `Bearer ${token}`);
-    const res = await fetch(`${BASE_URL}/reports/${tipo}/export.csv${qs(params)}`, { headers });
+    const res = await fetch(`${BASE_URL}/reports/${tipo}/export.csv${qs(params)}`, {
+      headers,
+      credentials: 'include',
+    });
     if (!res.ok) return null;
     return res.blob();
   },

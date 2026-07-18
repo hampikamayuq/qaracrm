@@ -52,7 +52,7 @@ const INVENTED_PRICE_REPLY = 'O procedimento custa R$ 999,00.';
 
 let conversationId = '';
 let leadId = '';
-let token = '';
+let sessionCookie = '';
 
 // Payload real da Meta Cloud API (shape esperado por parseMetaEvent).
 const metaPayload = (text: string, wamid: string) => ({
@@ -210,12 +210,14 @@ describe('Fluxo de produção ponta a ponta (banco real, IA mockada)', () => {
         .send({ email: USER_EMAIL, password: USER_PASSWORD });
       expect(login.status).toBe(200);
       expect(login.body.success).toBe(true);
-      token = login.body.data.token;
-      expect(token).toBeTruthy();
+      const setCookie = login.headers['set-cookie'];
+      sessionCookie = (Array.isArray(setCookie) ? setCookie[0] : setCookie).split(';')[0];
+      expect(sessionCookie).toContain('qara_session=');
+      expect(login.body.data.token).toBeUndefined();
 
       const list = await request(app)
         .get('/api/inbox/list')
-        .set('authorization', `Bearer ${token}`);
+        .set('cookie', sessionCookie);
       expect(list.status).toBe(200);
       const item = list.body.data.items.find(
         (candidate: { id: string }) => candidate.id === conversationId,
@@ -225,7 +227,7 @@ describe('Fluxo de produção ponta a ponta (banco real, IA mockada)', () => {
 
       const detail = await request(app)
         .get(`/api/inbox/${conversationId}`)
-        .set('authorization', `Bearer ${token}`);
+        .set('cookie', sessionCookie);
       expect(detail.status).toBe(200);
       const bodies = detail.body.data.messages.map((message: { body: string }) => message.body);
       expect(bodies).toContain('Olá, gostaria de saber mais sobre a consulta');
@@ -238,7 +240,8 @@ describe('Fluxo de produção ponta a ponta (banco real, IA mockada)', () => {
 
       const approve = await request(app)
         .post('/api/tawany/approve')
-        .set('authorization', `Bearer ${token}`)
+        .set('cookie', sessionCookie)
+        .set('origin', 'http://localhost:3000')
         .send({ suggestionId: suggestion.id });
       expect(approve.status).toBe(200);
       expect(approve.body.success).toBe(true);
@@ -259,7 +262,7 @@ describe('Fluxo de produção ponta a ponta (banco real, IA mockada)', () => {
     it('dashboard /summary responde autenticado com leadsAtivos >= 1', async () => {
       const summary = await request(app)
         .get('/api/dashboard/summary')
-        .set('authorization', `Bearer ${token}`);
+        .set('cookie', sessionCookie);
       expect(summary.status).toBe(200);
       expect(summary.body.success).toBe(true);
       expect(summary.body.data.leadsAtivos).toBeGreaterThanOrEqual(1);
@@ -298,7 +301,7 @@ describe('Fluxo de produção ponta a ponta (banco real, IA mockada)', () => {
     it('inbox mostra agentState aguardando_humano', async () => {
       const list = await request(app)
         .get('/api/inbox/list')
-        .set('authorization', `Bearer ${token}`);
+        .set('cookie', sessionCookie);
       expect(list.status).toBe(200);
       const item = list.body.data.items.find(
         (candidate: { id: string }) => candidate.id === conversationId,
@@ -311,7 +314,8 @@ describe('Fluxo de produção ponta a ponta (banco real, IA mockada)', () => {
     it('devolver-tawany reabre a conversa (OPEN, needsHuman=false, handoffReason null)', async () => {
       const response = await request(app)
         .post(`/api/inbox/${conversationId}/devolver-tawany`)
-        .set('authorization', `Bearer ${token}`);
+        .set('cookie', sessionCookie)
+        .set('origin', 'http://localhost:3000');
       expect(response.status).toBe(200);
       expect(response.body.data.agentState).toBe('tawany_ativa');
 
@@ -326,7 +330,7 @@ describe('Fluxo de produção ponta a ponta (banco real, IA mockada)', () => {
     it('agrega as mensagens da conversa e a sugestão enviada', async () => {
       const timeline = await request(app)
         .get(`/api/pipeline/leads/${leadId}/timeline`)
-        .set('authorization', `Bearer ${token}`);
+        .set('cookie', sessionCookie);
       expect(timeline.status).toBe(200);
       expect(timeline.body.success).toBe(true);
 
