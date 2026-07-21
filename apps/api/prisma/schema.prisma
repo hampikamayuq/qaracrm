@@ -61,6 +61,8 @@ model Lead {
   lostReason    String?
   estimatedValue Decimal?
   classification Json?
+  // Vínculo com o lead do Kommo (integração Kommo → QARA); null fora do canal.
+  kommoLeadId   String?        @unique
   createdAt     DateTime       @default(now())
   updatedAt     DateTime       @updatedAt
 

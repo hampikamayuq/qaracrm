@@ -59,15 +59,19 @@ const usageLog = (res: { usage?: { promptTokens: number; completionTokens: numbe
 // autopilot, nem em hibrido. Força human_approval (suggest_only) para revisão
 // humana antes de qualquer envio. Os demais modos já são seguros.
 // - INSTAGRAM: canal novo em validação.
+// - KOMMO: suggestion-first até a entrega via salesbot ser validada em
+//   produção; KOMMO_AUTOPILOT=true libera o auto-envio.
 // WHATSAPP_QR foi liberado para auto-envio por decisão de produto
 // (2026-07-11) — ciente do risco de ban em número não-oficial; falha dura de
 // envio (instância desconectada) vira handoff, nunca SENT fantasma.
-const HUMAN_APPROVAL_ONLY_CHANNELS = new Set(['INSTAGRAM']);
+const isHumanApprovalOnlyChannel = (channel: string): boolean =>
+  channel === 'INSTAGRAM' ||
+  (channel === 'KOMMO' && process.env.KOMMO_AUTOPILOT !== 'true');
 export const gateSendModeForChannel = (
   sendMode: TawanySendMode,
   channel: string | null | undefined,
 ): TawanySendMode =>
-  (channel && HUMAN_APPROVAL_ONLY_CHANNELS.has(channel) && sendMode === 'send' ? 'suggest_only' : sendMode);
+  (channel && isHumanApprovalOnlyChannel(channel) && sendMode === 'send' ? 'suggest_only' : sendMode);
 
 const decideRuntimeSendMode = (
   deps: { testMode?: boolean; sendMode?: TawanySendMode },

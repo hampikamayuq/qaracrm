@@ -4,6 +4,13 @@ import { CircuitBreaker } from 'src/lib/resilience/circuit-breaker';
 import { isMetaSendConfigured, sendViaMeta } from 'src/lib/whatsapp-client';
 import { isInstagramSendConfigured, sendViaInstagram } from 'src/lib/instagram-client';
 import { isEvolutionConfigured, sendEvolutionText } from 'src/lib/evolution-client';
+import {
+  addKommoNote,
+  isKommoReplyConfigured,
+  kommoBreaker,
+  runKommoSalesbot,
+  updateKommoLeadTextField,
+} from 'src/lib/kommo-client';
 import { randomUUID } from 'node:crypto';
 import { sendViaWeb } from 'src/lib/web-chat-send';
 
@@ -65,6 +72,7 @@ export const sendWhatsApp = {
       channel: true,
       externalId: true,
       instanceId: true,
+      leadId: true,
     });
     if (!conv) return JSON.stringify({ ok: false, error: 'conversation_not_found' });
 
@@ -102,6 +110,32 @@ export const sendWhatsApp = {
         externalId = await evolutionBreaker.execute(() =>
           sendEvolutionText(instance.instanceName as string, to, args.text),
         );
+      } else if (channel === 'KOMMO') {
+        // Canal Kommo: a entrega é indireta — grava a resposta num custom
+        // field do lead no Kommo e dispara o salesbot de resposta, que faz o
+        // `show` do campo no chat do cliente (único caminho suportado para
+        // integração externa responder em canal nativo do Kommo). Sem config
+        // ou sem vínculo, erro claro e nada de mensagem fantasma.
+        if (!isKommoReplyConfigured()) {
+          return JSON.stringify({ ok: false, error: 'kommo_send_not_configured' });
+        }
+        const leadId = typeof conv.leadId === 'string' ? conv.leadId : '';
+        const lead = leadId ? await ctx.get('lead', leadId, { id: true, kommoLeadId: true }) : null;
+        const kommoLeadId = typeof lead?.kommoLeadId === 'string' ? lead.kommoLeadId : '';
+        if (!kommoLeadId) {
+          return JSON.stringify({ ok: false, error: 'kommo_lead_not_linked' });
+        }
+        await kommoBreaker.execute(async () => {
+          await updateKommoLeadTextField(kommoLeadId, process.env.KOMMO_REPLY_FIELD_ID as string, args.text);
+          await runKommoSalesbot(process.env.KOMMO_REPLY_BOT_ID as string, kommoLeadId);
+        });
+        // Não há id externo de mensagem no run do salesbot: id sintético, como
+        // no canal WEB. O echo outgoing do webhook do Kommo dedupa pelo id real.
+        externalId = `kommo-out:${randomUUID()}`;
+        if (process.env.KOMMO_AUDIT_NOTES === 'true') {
+          void addKommoNote(kommoLeadId, `QARA/Tawany respondeu: ${args.text}`)
+            .catch((err) => console.error('[sendWhatsApp] kommo note failed (non-fatal):', (err as Error).message));
+        }
       }
     }
 

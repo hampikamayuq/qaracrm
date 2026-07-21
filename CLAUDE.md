@@ -52,6 +52,10 @@ no padrão das existentes + `prisma generate`; use `db:migrate:deploy`
   Tawany, bots, templates HSM e jobs do scheduler nunca tocam conversas
   `WHATSAPP_QR` (números extras via gateway Evolution, atendimento humano
   apenas) nem `INSTAGRAM` (templates). Ver `docs/whatsapp-qr-numeros.md`.
+  Exceção: no canal `KOMMO` (leads/mensagens que entram pelo Kommo) a Tawany
+  atende em modo suggestion-first (`gateSendModeForChannel`; auto-envio só
+  com `KOMMO_AUTOPILOT=true`), mas HSM/D-1/NPS/follow-up continuam só no
+  oficial. Resposta sai via salesbot do Kommo — ver `docs/kommo-integration.md`.
 - **Web sem Tailwind**: design system próprio em
   `apps/web/src/app/globals.css` (tokens em `:root`, cor semântica:
   Tawany = violeta `--ai`, urgência = vermelho, follow-up/teste = âmbar).

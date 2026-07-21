@@ -7,7 +7,7 @@ describe('api app assembly', () => {
     const stack = app.router.stack as Array<{ name?: string; route?: { path?: string } }>;
 
     expect(stack.some((layer) => layer.route?.path === '/api/health')).toBe(true);
-    expect(stack.filter((layer) => layer.name === 'router')).toHaveLength(27);
+    expect(stack.filter((layer) => layer.name === 'router')).toHaveLength(28);
   });
 
   it('mounts the public lead webhook at /api/webhook/lead', async () => {

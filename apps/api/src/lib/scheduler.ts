@@ -5,11 +5,13 @@ import { sendWhatsAppTemplate } from './tools/sendWhatsAppTemplate';
 import { HSM_D1_REMINDER_TEMPLATE, HSM_FOLLOW_UP_TEMPLATE, HSM_NPS_TEMPLATE } from './templates/hsm-messages';
 import { isMetaSendConfigured, sendViaMeta } from './whatsapp-client';
 import { runReactivationJob } from './reactivation';
+import { runKommoReconcileJob } from './kommo-sync';
 
 export type SchedulerHandle = { stop(): void };
 export type SchedulerJobs = {
   processPendingMetaWebhookEvents?: (options?: { now?: Date }) => Promise<unknown>;
   processPendingEvolutionWebhookEvents?: (options?: { now?: Date }) => Promise<unknown>;
+  processPendingKommoWebhookEvents?: (options?: { now?: Date }) => Promise<unknown>;
 };
 
 const SAO_PAULO_UTC_OFFSET_HOURS = 3;
@@ -316,6 +318,7 @@ export const runSchedulerTick = async (
 ): Promise<void> => {
   await jobs.processPendingMetaWebhookEvents?.({ now });
   await jobs.processPendingEvolutionWebhookEvents?.({ now });
+  await jobs.processPendingKommoWebhookEvents?.({ now });
   if (followUpHsmEnabled()) await runFollowUpJob(data, now);
   if (d1RemindersEnabled()) await runD1ReminderJob(data, now);
   await runNpsJob(data, now);
@@ -324,6 +327,8 @@ export const runSchedulerTick = async (
     nextInstanceReconcileAt = now.getTime() + INSTANCE_RECONCILE_INTERVAL_MS;
     await runInstanceReconcileJob(data);
   }
+  // Auto-gated (ENABLE_KOMMO_SYNC + config) e auto-throttled (~5min).
+  await runKommoReconcileJob(data, now);
 };
 
 export const startScheduler = (
