@@ -6,6 +6,8 @@
 // no corpo do passo (ver docs/kommo-integration.md). Mesmo estilo
 // puro/síncrono do meta-parse.ts / evolution-parse.ts.
 
+import { createHash } from 'node:crypto';
+
 export type KommoLeadUpsert = {
   kind: 'lead';
   kommoLeadId: string;
@@ -145,8 +147,10 @@ export const parseKommoWebhook = (body: unknown): KommoEvent[] => {
 // { "message_id": "{{message.id}}", "message_text": "{{message_text}}",
 //   "lead_id": "{{lead.id}}", "talk_id": "{{talk.id}}",
 //   "contact_name": "{{contact.name}}", "contact_phone": "{{contact.phone}}" }
-// Sem message_id estável, sintetizamos um id com bucket de 60s: retry do
-// mesmo POST dentro do minuto dedupa; mensagens repetidas depois passam.
+// Sem message_id estável, sintetizamos um id com bucket de 60s + hash do
+// texto: retry do mesmo POST dentro do minuto dedupa, mas mensagens
+// DIFERENTES no mesmo minuto não colidem. Texto idêntico repetido dentro do
+// mesmo minuto ainda dedupa (limitação documentada).
 export const parseKommoSalesbotHook = (body: unknown, nowMs = Date.now()): KommoMessage | null => {
   const rec = asRec(body);
   const data = asRec(rec.data);
@@ -158,10 +162,11 @@ export const parseKommoSalesbotHook = (body: unknown, nowMs = Date.now()): Kommo
   if (!text || !chatId) return null;
   const messageId = asStr(field('message_id'));
   const minuteBucket = Math.floor(nowMs / 60_000);
+  const textHash = createHash('sha1').update(text).digest('hex').slice(0, 10);
   return {
     kind: 'message',
     direction: 'IN',
-    externalId: messageId ? `kommo:${messageId}` : `kommo:sb:${chatId}:${minuteBucket}`,
+    externalId: messageId ? `kommo:${messageId}` : `kommo:sb:${chatId}:${minuteBucket}:${textHash}`,
     chatId,
     talkId: idOrNull(field('talk_id')),
     contactId: idOrNull(field('contact_id')),

@@ -108,15 +108,18 @@ describe('parseKommoSalesbotHook', () => {
     });
   });
 
-  it('aceita campos dentro de data e sintetiza id com bucket de 60s', () => {
+  it('aceita campos dentro de data e sintetiza id com bucket de 60s + hash do texto', () => {
     const at = 1752000000000;
     const msg = parseKommoSalesbotHook({ data: { message_text: 'oi', lead_id: '9' } }, at);
-    expect(msg?.externalId).toBe(`kommo:sb:9:${Math.floor(at / 60_000)}`);
+    expect(msg?.externalId).toMatch(new RegExp(`^kommo:sb:9:${Math.floor(at / 60_000)}:[0-9a-f]{10}$`));
     // Retry no mesmo minuto gera o MESMO id (dedup); minuto seguinte, outro.
     const retry = parseKommoSalesbotHook({ data: { message_text: 'oi', lead_id: '9' } }, at + 30_000);
     const later = parseKommoSalesbotHook({ data: { message_text: 'oi', lead_id: '9' } }, at + 61_000);
     expect(retry?.externalId).toBe(msg?.externalId);
     expect(later?.externalId).not.toBe(msg?.externalId);
+    // Mensagens DIFERENTES no mesmo minuto não colidem (hash do texto no id).
+    const other = parseKommoSalesbotHook({ data: { message_text: 'quero agendar', lead_id: '9' } }, at + 10_000);
+    expect(other?.externalId).not.toBe(msg?.externalId);
   });
 
   it('retorna null sem texto ou sem chave de conversa', () => {
