@@ -257,6 +257,12 @@ Parte 2 (cliques) ──► smoke ──► Lote 1.1/1.2 (ligar D-1, backup)
   canal `WHATSAPP_QR`, atendimento humano apenas): ver
   `docs/whatsapp-qr-numeros.md`. Evoluções possíveis (mídia outbound,
   histórico, Tawany no canal QR) são lotes novos, não estão prometidas.
+- **21/07/2026 — integração Kommo** (canal `KOMMO`: leads/estágios/mensagens
+  entram por webhook, Tawany responde via salesbot, reconciliação periódica):
+  ver `docs/kommo-integration.md`. Evolução possível (não prometida):
+  write-back de estágio QARA → Kommo (`PATCH /api/v4/leads/{id}` com
+  `status_id` quando o lead mover no kanban do QARA) — só se a operação
+  continuar usando o funil dos dois lados.
 
 ## O que NÃO fazer agora (YAGNI)
 

@@ -100,6 +100,16 @@ describe('gateSendModeForChannel', () => {
     expect(gateSendModeForChannel('suggest_only', 'WHATSAPP_QR')).toBe('suggest_only');
     expect(gateSendModeForChannel('test', 'WHATSAPP_QR')).toBe('test');
   });
+
+  it('KOMMO é suggestion-first: força suggest_only até KOMMO_AUTOPILOT=true liberar', () => {
+    delete process.env.KOMMO_AUTOPILOT;
+    expect(gateSendModeForChannel('send', 'KOMMO')).toBe('suggest_only');
+    expect(gateSendModeForChannel('test', 'KOMMO')).toBe('test');
+
+    process.env.KOMMO_AUTOPILOT = 'true';
+    expect(gateSendModeForChannel('send', 'KOMMO')).toBe('send');
+    delete process.env.KOMMO_AUTOPILOT;
+  });
 });
 
 describe('runTawany — Instagram send gate', () => {

@@ -75,7 +75,7 @@ export function CommandPalette() {
           kind: 'conversation' as const,
           href: `/inbox?conversationId=${c.id}`,
           label: c.lead?.name ?? 'Sem nome',
-          detail: c.channel === 'INSTAGRAM' ? 'Instagram' : c.channel === 'WEB' ? 'Chat do site' : 'WhatsApp',
+          detail: c.channel === 'INSTAGRAM' ? 'Instagram' : c.channel === 'WEB' ? 'Chat do site' : c.channel === 'KOMMO' ? 'Kommo' : 'WhatsApp',
         })));
       }).catch(() => setConversations([]));
     }, SEARCH_DEBOUNCE_MS);
